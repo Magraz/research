@@ -1,0 +1,10 @@
+torch
+numpy
+matplotlib
+deap
+pynput
+opencv-python
+PyYAML
+nbconvert
+PyAV
+torchvision
