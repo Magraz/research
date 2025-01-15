@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from learning.environments.dataclasses import EnvironmentConfig
+from learning.environments.types import EnvironmentConfig
 
 
 @dataclass(frozen=True)

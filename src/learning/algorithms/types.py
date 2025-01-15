@@ -1,11 +1,9 @@
 from dataclasses import dataclass
+from learning.algorithms.ccea.types import CCEA_Config
 
 
-class Team:
-    def __init__(
-        self,
-        individuals: list = None,
-        combination: list = None,
-    ):
-        self.individuals = individuals if individuals is not None else []
-        self.combination = combination if combination is not None else []
+@dataclass
+class ExperimentConfig:
+    environment: str = ""
+    n_gens_between_save: int = 0
+    ccea_config: CCEA_Config = None

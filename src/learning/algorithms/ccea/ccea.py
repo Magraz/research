@@ -26,14 +26,8 @@ from learning.algorithms.ccea.types import (
     InitializationEnum,
     FitnessCalculationEnum,
 )
-from learning.algorithms.dataclasses import (
-    CCEAConfig,
-    PolicyConfig,
-)
+from learning.algorithms.ccea.types import CCEA_Config, CCEA_PolicyConfig, Team
 from learning.environments.types import EnvironmentEnum
-
-from learning.algorithms.types import Team
-
 
 from copy import deepcopy
 import numpy as np
@@ -64,18 +58,20 @@ class CooperativeCoevolutionaryAlgorithm:
         trial_name: str,
         video_name: str,
         device: str,
-        ccea_config: CCEAConfig,
-        policy_config: PolicyConfig,
+        ccea_config: CCEA_Config,
         **kwargs,
     ):
-        policy_config = PolicyConfig(**policy_config)
-        ccea_config = CCEAConfig(**ccea_config)
+        ccea_config = CCEA_Config(**ccea_config)
+        policy_config = CCEA_PolicyConfig(**ccea_config.policy_config)
 
         self.batch_dir = batch_dir
         self.trials_dir = trials_dir
         self.trial_name = trial_name
         self.trial_id = trial_id
         self.video_name = video_name
+
+        # Flags
+        self.use_teaming = kwargs.pop("use_teaming", False)
 
         # Environment data
         self.device = device
@@ -85,13 +81,12 @@ class CooperativeCoevolutionaryAlgorithm:
         self.action_size = kwargs.pop("action_size", 0)
         self.n_agents = kwargs.pop("n_agents", 0)
         self.n_pois = kwargs.pop("n_pois", 0)
+        self.team_size = (
+            kwargs.pop("team_size", 0) if self.use_teaming else self.n_agents
+        )
 
         # Experiment Data
         self.n_gens_between_save = kwargs.pop("n_gens_between_save", 0)
-
-        # Flags
-        self.use_teaming = kwargs.pop("use_teaming", False)
-        self.use_fc = kwargs.pop("use_fc", False)
 
         # Policy
         self.output_multiplier = policy_config.output_multiplier
@@ -110,10 +105,6 @@ class CooperativeCoevolutionaryAlgorithm:
         self.max_std_dev = ccea_config.mutation["max_std_deviation"]
         self.min_std_dev = ccea_config.mutation["min_std_deviation"]
         self.mutation_mean = ccea_config.mutation["mean"]
-
-        self.team_size = (
-            kwargs.pop("team_size", 0) if self.use_teaming else self.n_agents
-        )
 
         self.team_combinations = [
             list(combo) for combo in combinations(range(self.n_agents), self.team_size)
@@ -230,6 +221,7 @@ class CooperativeCoevolutionaryAlgorithm:
 
         G_list = []
         frame_list = []
+        D_list = []
 
         # Start evaluation
         for step in range(self.n_steps):
@@ -257,6 +249,13 @@ class CooperativeCoevolutionaryAlgorithm:
 
             G_list.append(torch.stack([g[: len(teams)] for g in rewards], dim=0)[0])
 
+            if self.fitness_shaping_method == FitnessShapingEnum.D:
+                D_list.append(
+                    torch.stack(
+                        [d[len(teams) : len(teams) * 2] for d in rewards], dim=0
+                    )
+                )
+
             # Visualization
             if render:
                 frame = env.render(
@@ -277,15 +276,27 @@ class CooperativeCoevolutionaryAlgorithm:
             case FitnessCalculationEnum.AGG:
                 g_per_env = torch.sum(torch.stack(G_list), dim=0).tolist()
 
+                if self.fitness_shaping_method == FitnessShapingEnum.D:
+                    d_per_env = torch.transpose(
+                        torch.sum(torch.stack(D_list), dim=0), dim0=0, dim1=1
+                    ).tolist()
+
             case FitnessCalculationEnum.LAST:
                 g_per_env = G_list[-1].tolist()
+
+                if self.fitness_shaping_method == FitnessShapingEnum.D:
+                    d_per_env = torch.transpose(D_list[-1], dim0=0, dim1=1).tolist()
 
         # Generate evaluation infos
         eval_infos = [
             EvalInfo(
                 team=team,
                 team_fitness=g_per_env[i],
-                agent_fitnesses=g_per_env[i],
+                agent_fitnesses=(
+                    d_per_env[i]
+                    if self.fitness_shaping_method == FitnessShapingEnum.D
+                    else g_per_env[i]
+                ),
             )
             for i, team in enumerate(teams)
         ]

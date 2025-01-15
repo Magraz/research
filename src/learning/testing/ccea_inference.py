@@ -8,7 +8,7 @@ import yaml
 sys.path.insert(0, "./src")
 
 from learning.algorithms.ccea.ccea import CooperativeCoevolutionaryAlgorithm
-from learning.algorithms.dataclasses import ExperimentConfig, EnvironmentConfig
+from learning.algorithms.types import ExperimentConfig, EnvironmentConfig
 from learning.environments.create_env import create_env
 from dataclasses import asdict
 import random
@@ -67,9 +67,9 @@ for n_agents in range(agents_trained, one_shot_up_to + 1):
 
     ccea.team_size = n_agents
 
-    for i in range(n_agents-agents_trained):
-        extended_team.combination.append(n_agents-1)
-        extended_team.individuals.append(random.choice(best_team.individuals)) 
+    for i in range(n_agents - agents_trained):
+        extended_team.combination.append(n_agents - 1)
+        extended_team.individuals.append(random.choice(best_team.individuals))
 
     ccea.video_name = f"{ccea.video_name}_{n_agents}"
     eval_infos = ccea.evaluateTeams(

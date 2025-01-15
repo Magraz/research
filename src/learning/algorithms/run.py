@@ -4,9 +4,10 @@ import torch
 from pathlib import Path
 from learning.algorithms.ccea.ccea import CooperativeCoevolutionaryAlgorithm
 from learning.algorithms.ppo.ppo import PPO
-from learning.algorithms.dataclasses import ExperimentConfig
+from learning.algorithms.types import ExperimentConfig
 from learning.environments.types import EnvironmentEnum
-from learning.environments.rover.dataclasses import RoverEnvironmentConfig
+from learning.environments.rover.types import RoverEnvironmentConfig
+from learning.environments.salp.types import SalpEnvironmentConfig
 
 from dataclasses import asdict
 
@@ -37,7 +38,7 @@ def run_algorithm(
             env_config = RoverEnvironmentConfig(**env_dict)
 
         case EnvironmentEnum.VMAS_SALP:
-            env_config = RoverEnvironmentConfig(**env_dict)
+            env_config = SalpEnvironmentConfig(**env_dict)
 
     match (algorithm):
         case "CCEA":

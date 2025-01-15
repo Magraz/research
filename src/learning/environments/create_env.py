@@ -100,11 +100,12 @@ def create_env(
                     poi["color"] if poi.get("color") else "GREEN"
                     for poi in env_config["targets"]
                 ],
-                "agents_per_target": [poi["coupling"] for poi in env_config["targets"]],
+                "agents_per_target": [poi["coupling"] for poi in env_config["targets"]][
+                    0
+                ],
                 "covering_range": [
                     poi["observation_radius"] for poi in env_config["targets"]
-                ],
-                "shuffle_agents_positions": env_config["shuffle_agents_positions"],
+                ][0],
                 "viewer_zoom": kwargs.pop("viewer_zoom", 1),
             }
 

@@ -25,10 +25,6 @@ from tqdm import tqdm
 
 from itertools import combinations
 
-from learning.algorithms.types import (
-    Team,
-)
-
 # Create and configure logger
 logging.basicConfig(format="%(asctime)s %(message)s")
 
@@ -101,29 +97,6 @@ class PPO:
         self.batch_size = 0
         self.minibatch_size = 0
         self.num_iterations = 0
-
-    def formTeams(self, population, joint_policies: int) -> list[Team]:
-        # Start a list of teams
-        teams = []
-
-        # For each row in the population of subpops (grabs an individual from each row in the subpops)
-        for i in range(joint_policies):
-
-            # Get agents in this row of subpopulations
-            agents = [subpop[i] for subpop in population]
-
-            # Put the i'th individual on the team if it is inside our team combinations
-            combination = random.sample(self.team_combinations, 1)[0]
-
-            teams.append(
-                Team(
-                    idx=i,
-                    individuals=[agents[idx] for idx in combination],
-                    combination=combination,
-                )
-            )
-
-        return teams
 
     def seed_PPO(self):
         # TRY NOT TO MODIFY: seeding

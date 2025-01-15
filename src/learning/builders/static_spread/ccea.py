@@ -1,8 +1,8 @@
-from learning.algorithms.dataclasses import (
+from learning.algorithms.types import (
     ExperimentConfig,
-    PolicyConfig,
-    CCEAConfig,
 )
+from learning.algorithms.ccea.types import CCEA_Config, CCEA_PolicyConfig
+
 from learning.algorithms.ccea.types import (
     FitnessShapingEnum,
     FitnessCalculationEnum,
@@ -16,17 +16,17 @@ from learning.environments.types import EnvironmentEnum
 from copy import deepcopy
 from dataclasses import asdict
 
-#EXPERIMENT SETTINGS
-ENVIRONMENT = EnvironmentEnum.ROVER
+# EXPERIMENT SETTINGS
+ENVIRONMENT = EnvironmentEnum.VMAS_SALP
 BATCH = f"{ENVIRONMENT}_static_spread"
 
-#POLICY SETTINGS
+# POLICY SETTINGS
 GRU_POLICY_LAYERS = [83]
 MLP_POLICY_LAYERS = [64, 64]
 OUTPUT_MULTIPLIER = 1.0
 WEIGHT_INITIALIZATION = InitializationEnum.KAIMING
 
-#CCEA SETTINGS
+# CCEA SETTINGS
 N_STEPS = 100
 N_GENS = 5000
 SUBPOP_SIZE = 100
@@ -36,21 +36,21 @@ MEAN = 0.0
 MIN_STD_DEV = 0.05
 MAX_STD_DEV = 0.25
 
-GRU_POLICY_CONFIG = PolicyConfig(
+GRU_POLICY_CONFIG = CCEA_PolicyConfig(
     type=PolicyEnum.GRU,
     weight_initialization=WEIGHT_INITIALIZATION,
     hidden_layers=GRU_POLICY_LAYERS,
     output_multiplier=OUTPUT_MULTIPLIER,
 )
 
-MLP_POLICY_CONFIG = PolicyConfig(
+MLP_POLICY_CONFIG = CCEA_PolicyConfig(
     type=PolicyEnum.MLP,
     weight_initialization=WEIGHT_INITIALIZATION,
     hidden_layers=MLP_POLICY_LAYERS,
     output_multiplier=OUTPUT_MULTIPLIER,
 )
 
-G_CCEA = CCEAConfig(
+G_CCEA_MLP = CCEA_Config(
     n_steps=N_STEPS,
     n_gens=N_GENS,
     fitness_shaping=FitnessShapingEnum.G,
@@ -62,23 +62,39 @@ G_CCEA = CCEAConfig(
         "min_std_deviation": MIN_STD_DEV,
         "max_std_deviation": MAX_STD_DEV,
     },
+    policy_config=MLP_POLICY_CONFIG,
 )
 
-D_CCEA = deepcopy(G_CCEA)
-D_CCEA.fitness_shaping = FitnessShapingEnum.D
+D_CCEA_MLP = deepcopy(G_CCEA_MLP)
+D_CCEA_MLP.fitness_shaping = FitnessShapingEnum.D
+
+G_CCEA_GRU = deepcopy(G_CCEA_MLP)
+G_CCEA_GRU.policy_config = GRU_POLICY_CONFIG
+
+D_CCEA_GRU = deepcopy(D_CCEA_MLP)
+D_CCEA_GRU.policy_config = GRU_POLICY_CONFIG
+
 
 # EXPERIMENTS
 G_MLP = ExperimentConfig(
     environment=ENVIRONMENT,
     n_gens_between_save=N_GENS_BETWEEN_SAVE,
-    policy_config=MLP_POLICY_CONFIG,
-    ccea_config=G_CCEA,
+    ccea_config=G_CCEA_MLP,
+)
+
+D_MLP = ExperimentConfig(
+    environment=ENVIRONMENT,
+    n_gens_between_save=N_GENS_BETWEEN_SAVE,
+    ccea_config=D_CCEA_MLP,
 )
 
 G_GRU = deepcopy(G_MLP)
-G_GRU.policy_config = GRU_POLICY_CONFIG
+G_GRU.ccea_config = G_CCEA_GRU
+
+D_GRU = deepcopy(D_MLP)
+D_GRU.ccea_config = D_CCEA_GRU
 
 EXP_DICTS = [
-    {"name": "g_gru", "config": asdict(G_GRU)},
+    {"name": "d_mlp", "config": asdict(D_MLP)},
     {"name": "g_mlp", "config": asdict(G_MLP)},
 ]

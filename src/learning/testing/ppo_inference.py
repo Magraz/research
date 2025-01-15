@@ -8,7 +8,7 @@ import yaml
 sys.path.insert(0, "./src")
 
 from learning.algorithms.ppo.ppo import PPO
-from learning.algorithms.dataclasses import ExperimentConfig, EnvironmentConfig
+from learning.algorithms.types import ExperimentConfig, EnvironmentConfig
 from learning.environments.create_env import create_env
 from dataclasses import asdict
 

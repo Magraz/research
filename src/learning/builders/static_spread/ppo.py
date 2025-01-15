@@ -1,4 +1,4 @@
-from learning.algorithms.dataclasses import (
+from learning.algorithms.types import (
     ExperimentConfig,
 )
 
