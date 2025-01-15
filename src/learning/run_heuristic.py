@@ -11,7 +11,7 @@ from vmas import make_env
 from vmas.simulator.utils import save_video
 from vmas.simulator.environment import Environment
 
-from learning.domain.salp.create_env import create_env
+from learning.environments.salp.create_env import create_env
 from pynput.keyboard import Listener
 from learning.testing.manual_control import manual_control
 from pathlib import Path

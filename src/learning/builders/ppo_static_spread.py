@@ -1,4 +1,4 @@
-from vmas_salp.learning.dataclasses import (
+from learning.algorithms.dataclasses import (
     ExperimentConfig,
 )
 

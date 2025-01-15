@@ -1,32 +1,36 @@
-from pathlib import Path
-
-from vmas_salp.learning.dataclasses import (
+from learning.algorithms.dataclasses import (
     ExperimentConfig,
     PolicyConfig,
     CCEAConfig,
 )
-from vmas_salp.learning.ccea.types import (
+from learning.algorithms.ccea.types import (
     FitnessShapingEnum,
     FitnessCalculationEnum,
     SelectionEnum,
     PolicyEnum,
     InitializationEnum,
 )
+
+from learning.environments.types import EnvironmentEnum
+
 from copy import deepcopy
 from dataclasses import asdict
 
-BATCH = "static_spread"
+#EXPERIMENT SETTINGS
+ENVIRONMENT = EnvironmentEnum.ROVER
+BATCH = f"{ENVIRONMENT}_static_spread"
 
-# DEFAULTS
+#POLICY SETTINGS
+GRU_POLICY_LAYERS = [83]
+MLP_POLICY_LAYERS = [64, 64]
+OUTPUT_MULTIPLIER = 1.0
+WEIGHT_INITIALIZATION = InitializationEnum.KAIMING
+
+#CCEA SETTINGS
 N_STEPS = 100
 N_GENS = 5000
 SUBPOP_SIZE = 100
 N_GENS_BETWEEN_SAVE = 10
-GRU_POLICY_LAYERS = [83]
-MLP_POLICY_LAYERS = [64, 64]
-
-OUTPUT_MULTIPLIER = 1.0
-WEIGHT_INITIALIZATION = InitializationEnum.KAIMING
 FITNESS_CALC = FitnessCalculationEnum.LAST
 MEAN = 0.0
 MIN_STD_DEV = 0.05
@@ -46,13 +50,6 @@ MLP_POLICY_CONFIG = PolicyConfig(
     output_multiplier=OUTPUT_MULTIPLIER,
 )
 
-CNN_POLICY_CONFIG = PolicyConfig(
-    type=PolicyEnum.CNN,
-    weight_initialization=WEIGHT_INITIALIZATION,
-    output_multiplier=OUTPUT_MULTIPLIER,
-    hidden_layers=0,
-)
-
 G_CCEA = CCEAConfig(
     n_steps=N_STEPS,
     n_gens=N_GENS,
@@ -70,26 +67,18 @@ G_CCEA = CCEAConfig(
 D_CCEA = deepcopy(G_CCEA)
 D_CCEA.fitness_shaping = FitnessShapingEnum.D
 
-FC_CCEA = deepcopy(G_CCEA)
-FC_CCEA.fitness_shaping = FitnessShapingEnum.FC
-
-
 # EXPERIMENTS
 G_MLP = ExperimentConfig(
-    use_teaming=True,
+    environment=ENVIRONMENT,
     n_gens_between_save=N_GENS_BETWEEN_SAVE,
     policy_config=MLP_POLICY_CONFIG,
     ccea_config=G_CCEA,
-    team_size=6,
 )
+
 G_GRU = deepcopy(G_MLP)
 G_GRU.policy_config = GRU_POLICY_CONFIG
-
-G_CNN = deepcopy(G_MLP)
-G_CNN.policy_config = CNN_POLICY_CONFIG
 
 EXP_DICTS = [
     {"name": "g_gru", "config": asdict(G_GRU)},
     {"name": "g_mlp", "config": asdict(G_MLP)},
-    {"name": "g_cnn", "config": asdict(G_CNN)},
 ]

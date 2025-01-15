@@ -1,5 +1,4 @@
-from learning.ccea.run import runCCEA
-from learning.ppo.run import runPPO
+from learning.algorithms.run import run_algorithm
 
 import argparse
 from pathlib import Path
@@ -28,11 +27,12 @@ if __name__ == "__main__":
         type=str,
     )
     parser.add_argument(
-        "--domain",
+        "--environment",
         default="",
-        help="Domain name",
+        help="Learning environment name",
         type=str,
     )
+
     parser.add_argument("--trial_id", default=0, help="Sets trial ID", type=int)
 
     args = vars(parser.parse_args())
@@ -43,21 +43,12 @@ if __name__ == "__main__":
     # Set configuration folder
     batch_dir = dir_path / "experiments" / "yamls" / args["batch"]
 
-    match(args["algorithm"]):
-        case "CCEA":
-            # Run learning algorithm
-            runCCEA(
-                batch_dir=batch_dir,
-                batch_name=args["batch"],
-                experiment_name=args["name"],
-                trial_id=args["trial_id"],
-            )
-        case "PPO":
-            runPPO(
-                batch_dir=batch_dir,
-                batch_name=args["batch"],
-                experiment_name=args["name"],
-                trial_id=args["trial_id"],
-            )
-
-    
+    # Run learning algorithm
+    run_algorithm(
+        batch_dir=batch_dir,
+        batch_name=args["batch"],
+        experiment_name=args["name"],
+        trial_id=args["trial_id"],
+        algorithm=args["algorithm"],
+        environment=args["environment"],
+    )

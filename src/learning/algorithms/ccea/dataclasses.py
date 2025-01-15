@@ -10,11 +10,3 @@ class CCEAConfig:
     fitness_shaping: str
     fitness_calculation: str
     mutation: dict
-
-
-@dataclass
-class FitnessCriticConfig:
-    epochs: int
-    type: str
-    loss_type: str
-    hidden_layers: tuple[int]

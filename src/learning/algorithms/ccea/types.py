@@ -1,5 +1,5 @@
 from enum import StrEnum
-from vmas_salp.learning.types import Team
+from learning.algorithms.types import Team
 
 
 class EvalInfo:
@@ -8,12 +8,10 @@ class EvalInfo:
         team: Team,
         team_fitness: float,
         agent_fitnesses: list[float],
-        joint_traj: list,
     ):
         self.team = team
         self.agent_fitnesses = agent_fitnesses
         self.team_fitness = team_fitness
-        self.joint_traj = joint_traj
 
 
 class InitializationEnum(StrEnum):

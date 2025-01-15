@@ -9,17 +9,16 @@ import random
 from vmas.simulator.environment import Environment
 from vmas.simulator.utils import save_video
 
-from vmas_salp.learning.ccea.policies.mlp import MLP_Policy
-from vmas_salp.learning.ccea.policies.gru import GRU_Policy
-from vmas_salp.learning.ccea.policies.cnn import CNN_Policy
+from learning.algorithms.ccea.policies.mlp import MLP_Policy
+from learning.algorithms.ccea.policies.gru import GRU_Policy
 
-from vmas_salp.domain.create_env import create_env
-from vmas_salp.learning.ccea.selection import (
+from learning.environments.create_env import create_env
+from learning.algorithms.ccea.selection import (
     binarySelection,
     epsilonGreedySelection,
     softmaxSelection,
 )
-from vmas_salp.learning.ccea.types import (
+from learning.algorithms.ccea.types import (
     EvalInfo,
     PolicyEnum,
     SelectionEnum,
@@ -27,17 +26,14 @@ from vmas_salp.learning.ccea.types import (
     InitializationEnum,
     FitnessCalculationEnum,
 )
-from vmas_salp.learning.dataclasses import (
+from learning.algorithms.dataclasses import (
     CCEAConfig,
     PolicyConfig,
 )
+from learning.environments.types import EnvironmentEnum
 
-from vmas_salp.learning.types import (
-    Team,
-    JointTrajectory,
-)
+from learning.algorithms.types import Team
 
-from vmas_salp.learning.ccea.utils import stack_and_pad_1d_tensors, pad_width
 
 from copy import deepcopy
 import numpy as np
@@ -83,6 +79,7 @@ class CooperativeCoevolutionaryAlgorithm:
 
         # Environment data
         self.device = device
+        self.environment = kwargs.pop("environment", None)
         self.map_size = kwargs.pop("map_size", [])
         self.observation_size = kwargs.pop("observation_size", 0)
         self.action_size = kwargs.pop("action_size", 0)
@@ -117,6 +114,7 @@ class CooperativeCoevolutionaryAlgorithm:
         self.team_size = (
             kwargs.pop("team_size", 0) if self.use_teaming else self.n_agents
         )
+
         self.team_combinations = [
             list(combo) for combo in combinations(range(self.n_agents), self.team_size)
         ]
@@ -161,18 +159,15 @@ class CooperativeCoevolutionaryAlgorithm:
 
             case PolicyEnum.GRU:
                 agent_nn = GRU_Policy(
-                    input_size=5,
+                    input_size=self.observation_size,
                     hidden_size=self.policy_hidden_layers[0],
                     hidden_layers=len(self.policy_hidden_layers),
                     output_size=self.action_size,
                 ).to(self.device)
 
-            case PolicyEnum.CNN:
-                agent_nn = CNN_Policy().to(self.device)
-
             case PolicyEnum.MLP:
                 agent_nn = MLP_Policy(
-                    input_size=16,
+                    input_size=self.observation_size,
                     hidden_layers=len(self.policy_hidden_layers),
                     hidden_size=self.policy_hidden_layers[0],
                     output_size=self.action_size,
@@ -206,7 +201,6 @@ class CooperativeCoevolutionaryAlgorithm:
 
             teams.append(
                 Team(
-                    idx=i,
                     individuals=[agents[idx] for idx in combination],
                     combination=combination,
                 )
@@ -234,27 +228,6 @@ class CooperativeCoevolutionaryAlgorithm:
         # Get initial observations per agent
         observations = env.reset()
 
-        # Store joint states per environment for the first state
-        agent_positions = torch.stack([agent.state.pos for agent in env.agents], dim=0)
-        joint_states_per_env = [torch.empty((0, 2)).to(self.device) for _ in teams]
-
-        tranposed_stacked_obs = (
-            torch.stack(observations, -1).transpose(0, 1).transpose(0, -1)
-        )
-        joint_observations_per_env = [
-            torch.empty((0, self.observation_size)).to(self.device) for _ in teams
-        ]
-
-        for i, (j_states, j_obs) in enumerate(
-            zip(joint_states_per_env, joint_observations_per_env)
-        ):
-            joint_states_per_env[i] = torch.cat(
-                (j_states, agent_positions[:, i, :]), dim=0
-            )
-            joint_observations_per_env[i] = torch.cat(
-                (j_obs, tranposed_stacked_obs[:, i, :]), dim=0
-            )
-
         G_list = []
         frame_list = []
 
@@ -271,28 +244,7 @@ class CooperativeCoevolutionaryAlgorithm:
             for observation, joint_policy in zip(stacked_obs, joint_policies):
 
                 for i, policy in enumerate(joint_policy):
-                    match (self.policy_type):
-                        case PolicyEnum.MLP:
-                            policy_output = policy.forward(observation[:, i])
-                        case PolicyEnum.CNN:
-                            left_right_lens = observation[:2, i]
-                            target_data = observation[2:4, i]
-                            left_neighbors_data = observation[
-                                4 : int(left_right_lens[0]) + 4, i
-                            ]
-                            right_neighbors_data = observation[
-                                int(left_right_lens[0])
-                                + 4 : int(left_right_lens[1])
-                                + int(left_right_lens[0])
-                                + 4,
-                                i,
-                            ]
-                            data = stack_and_pad_1d_tensors(
-                                [target_data, left_neighbors_data, right_neighbors_data]
-                            )
-                            data = pad_width(data, 6)
-                            policy_output = policy.forward(data)
-
+                    policy_output = policy.forward(observation[:, i])
                     actions[i] = torch.cat(
                         (
                             actions[i],
@@ -302,22 +254,6 @@ class CooperativeCoevolutionaryAlgorithm:
                     )
 
             observations, rewards, _, _ = env.step(actions)
-
-            # Store joint states per environment
-            agent_positions = torch.stack(
-                [agent.state.pos for agent in env.agents], dim=0
-            )
-
-            for i, (j_states, j_obs) in enumerate(
-                zip(joint_states_per_env, joint_observations_per_env)
-            ):
-                joint_states_per_env[i] = torch.cat(
-                    (j_states, agent_positions[:, i, :]), dim=0
-                )
-                joint_observations_per_env[i] = torch.cat(
-                    (j_obs, stacked_obs.transpose(0, 1).transpose(0, -1)[:, i, :]),
-                    dim=0,
-                )
 
             G_list.append(torch.stack([g[: len(teams)] for g in rewards], dim=0)[0])
 
@@ -350,14 +286,6 @@ class CooperativeCoevolutionaryAlgorithm:
                 team=team,
                 team_fitness=g_per_env[i],
                 agent_fitnesses=g_per_env[i],
-                joint_traj=JointTrajectory(
-                    joint_state_traj=joint_states_per_env[i].reshape(
-                        self.team_size, self.n_steps + 1, 2
-                    ),
-                    joint_obs_traj=joint_observations_per_env[i].reshape(
-                        self.team_size, self.n_steps + 1, self.observation_size
-                    ),
-                ),
             )
             for i, team in enumerate(teams)
         ]
@@ -493,11 +421,11 @@ class CooperativeCoevolutionaryAlgorithm:
         if not os.path.isdir(trial_dir):
             os.makedirs(trial_dir)
 
+        # Load checkpoint
+        checkpoint_gen = 0
         checkpoint_exists = Path(checkpoint_name).is_file()
         pop = None
 
-        # Load checkpoint
-        checkpoint_gen = 0
         if checkpoint_exists:
 
             pop, checkpoint_gen = self.load_checkpoint(
@@ -511,15 +439,15 @@ class CooperativeCoevolutionaryAlgorithm:
             # Create csv file for saving evaluation fitnesses
             self.createFitnessCSV(fitness_dir)
 
-        for n_gen in range(self.n_gens + 1):
+        # Create environment
+        env = create_env(
+            self.batch_dir,
+            n_envs=self.subpop_size,
+            env_name=self.environment,
+            device=self.device,
+        )
 
-            # Create environment
-            env = create_env(
-                self.batch_dir,
-                n_envs=self.subpop_size,
-                n_agents=self.team_size,
-                device=self.device,
-            )
+        for n_gen in range(self.n_gens + 1):
 
             # Set gen counter global var
             self.gen = n_gen

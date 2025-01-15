@@ -3,14 +3,15 @@ from deap import creator
 from deap import tools
 import torch
 from torch.nn import functional as F
+
 # torch.autograd.set_detect_anomaly(True)
 
 import random
 
 from vmas.simulator.utils import save_video
 
-from vmas_salp.domain.create_env import create_env
-from vmas_salp.learning.ppo.policy import Agent
+from learning.environments.create_env import create_env
+from learning.algorithms.ppo.policy import Agent
 
 import numpy as np
 
@@ -24,7 +25,7 @@ from tqdm import tqdm
 
 from itertools import combinations
 
-from vmas_salp.learning.types import (
+from learning.algorithms.types import (
     Team,
 )
 
@@ -80,7 +81,9 @@ class PPO:
         self.total_timesteps = 10
         self.learning_rate = 3e-4
         self.num_envs = 1
-        self.num_steps = 128  # 2048 # Noah: I am taking this as the number of steps in rollout
+        self.num_steps = (
+            128  # 2048 # Noah: I am taking this as the number of steps in rollout
+        )
         self.episodes = 1000
         self.anneal_lr = True
         self.gamma = 0.99
@@ -353,7 +356,7 @@ class PPO:
                 temp_final_val[k] = agent.get_value(obs[k])
 
         self.calculate_returns_and_advantage(last_values=temp_final_val, dones=dones)
-        
+
         # TODO: This is dumb. The training algorithm should not have to reset the environment.
         # Create a brand new env
         self.env = create_env(
@@ -392,7 +395,9 @@ class PPO:
             for stop_index in range(batch_size, self.num_steps, batch_size):
                 for cur_agent_index, cur_agent_policy in enumerate(self.joint_policies):
                     # Grab batch_size actions for all agents from the current agent buffer
-                    actions = self.actions[cur_agent_index, :, indices[start_index:stop_index]]
+                    actions = self.actions[
+                        cur_agent_index, :, indices[start_index:stop_index]
+                    ]
 
                     # Grab observations for all agents (num_agents x num_envs x batch_size x obs_size)
                     obs = self.obs[cur_agent_index, :, indices[start_index:stop_index]]
@@ -402,8 +407,10 @@ class PPO:
                     # temp_entropy = []
                     # temp_values = []
                     # for ii, agent in enumerate(self.joint_policies):
-                    _, cur_log_probs, cur_entropy, cur_values = cur_agent_policy.get_action_and_value(obs, actions)
-                    
+                    _, cur_log_probs, cur_entropy, cur_values = (
+                        cur_agent_policy.get_action_and_value(obs, actions)
+                    )
+
                     # temp_log_probs.append(cur_log_probs)
                     # temp_entropy.append(cur_entropy)
                     # temp_values.append(cur_values.squeeze(-1))
@@ -418,14 +425,18 @@ class PPO:
                     # values = torch.stack(temp_values)
 
                     # Grab advantages (size: num_agents x num_envs x batch)
-                    advantages = self.advantages[cur_agent_index, :, indices[start_index:stop_index]]
+                    advantages = self.advantages[
+                        cur_agent_index, :, indices[start_index:stop_index]
+                    ]
 
                     if self.norm_adv and advantages.shape[1] > 1:
                         advantages = (advantages - torch.mean(advantages)) / (
                             torch.std(advantages) + 1e-8
                         )
 
-                    old_log_probs = self.logprobs[cur_agent_index, :, indices[start_index:stop_index]]
+                    old_log_probs = self.logprobs[
+                        cur_agent_index, :, indices[start_index:stop_index]
+                    ]
 
                     # ratio of the old policy and the new (will be 1 for the first iteration (duh))
                     # TODO: Make sure the first iteration is all ones. It currently has some non-one entries
@@ -445,7 +456,9 @@ class PPO:
                     # clip_fractions.append(clip_fraction)
 
                     # Calculate Value loss (num_agents x num_envs x batch_size)
-                    old_values = self.values[cur_agent_index, :, indices[start_index:stop_index]]
+                    old_values = self.values[
+                        cur_agent_index, :, indices[start_index:stop_index]
+                    ]
                     if self.clip_vloss is None:
                         values_pred = values
                     else:
@@ -454,7 +467,9 @@ class PPO:
                         )
 
                     # Grab the returns for the current agent
-                    returns = self.returns[cur_agent_index, :, indices[start_index:stop_index]]
+                    returns = self.returns[
+                        cur_agent_index, :, indices[start_index:stop_index]
+                    ]
                     # Should be size num_agents x 1
                     value_loss = F.mse_loss(returns, values_pred, reduction="none")
                     value_loss = torch.mean(value_loss, dim=-1)
@@ -480,7 +495,9 @@ class PPO:
                     with torch.no_grad():
                         log_ratio = log_probs - old_log_probs
                         approx_kl_divergence = (
-                            torch.mean((torch.exp(log_ratio) - 1) - log_ratio).cpu().numpy()
+                            torch.mean((torch.exp(log_ratio) - 1) - log_ratio)
+                            .cpu()
+                            .numpy()
                         )
                         # Keep track of the kl_divergence for logging purposes
                         approx_kl_divergences.append(approx_kl_divergence)
@@ -503,7 +520,9 @@ class PPO:
                     # cur_agent_loss.backward()
                     loss.backward()
                     # Clip the gradient norm
-                    torch.nn.utils.clip_grad_norm_(cur_agent_policy.parameters(), self.max_grad_norm)
+                    torch.nn.utils.clip_grad_norm_(
+                        cur_agent_policy.parameters(), self.max_grad_norm
+                    )
                     cur_agent_policy.optimizer.step()
 
                 # Update the starting index
@@ -513,7 +532,7 @@ class PPO:
                 break
         # t = self.rewards[0, 0]
         return pg_losses, value_losses, entropy_losses, torch.mean(self.rewards[0, 0])
-    
+
     '''
     OG train
     def train(self):

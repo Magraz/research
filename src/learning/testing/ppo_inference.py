@@ -7,16 +7,16 @@ import yaml
 
 sys.path.insert(0, "./src")
 
-from vmas_salp.learning.ppo.ppo import PPO
-from vmas_salp.learning.dataclasses import ExperimentConfig, EnvironmentConfig
-from vmas_salp.domain.create_env import create_env
+from learning.algorithms.ppo.ppo import PPO
+from learning.algorithms.dataclasses import ExperimentConfig, EnvironmentConfig
+from learning.environments.create_env import create_env
 from dataclasses import asdict
 
 batch_name = "static_spread"
 experiment_name = "ppo_g"
 trial_id = 0
-checkpoint_path = f"./src/vmas_salp/testing/ppo_checkpoint.pickle"
-batch_dir = f"./src/vmas_salp/experiments/yamls/{batch_name}"
+checkpoint_path = f"./src/learning/testing/ppo_checkpoint.pickle"
+batch_dir = f"./src/learning/experiments/yamls/{batch_name}"
 
 exp_file = os.path.join(batch_dir, f"{experiment_name}.yaml")
 
