@@ -48,7 +48,7 @@ class InitializationEnum(StrEnum):
     KAIMING = "kaiming"
 
 
-class PolicyEnum(StrEnum):
+class CCEA_PolicyEnum(StrEnum):
     GRU = "GRU"
     MLP = "MLP"
     CNN = "CNN"

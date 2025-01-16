@@ -20,14 +20,13 @@ from learning.algorithms.ccea.selection import (
 )
 from learning.algorithms.ccea.types import (
     EvalInfo,
-    PolicyEnum,
+    CCEA_PolicyEnum,
     SelectionEnum,
     FitnessShapingEnum,
     InitializationEnum,
     FitnessCalculationEnum,
 )
 from learning.algorithms.ccea.types import CCEA_Config, CCEA_PolicyConfig, Team
-from learning.environments.types import EnvironmentEnum
 
 from copy import deepcopy
 import numpy as np
@@ -76,7 +75,6 @@ class CooperativeCoevolutionaryAlgorithm:
         # Environment data
         self.device = device
         self.environment = kwargs.pop("environment", None)
-        self.map_size = kwargs.pop("map_size", [])
         self.observation_size = kwargs.pop("observation_size", 0)
         self.action_size = kwargs.pop("action_size", 0)
         self.n_agents = kwargs.pop("n_agents", 0)
