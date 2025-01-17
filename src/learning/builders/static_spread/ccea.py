@@ -1,5 +1,5 @@
-from learning.algorithms.types import (
-    ExperimentConfig,
+from learning.algorithms.ccea.types import (
+    CCEA_ExperimentConfig,
 )
 from learning.algorithms.ccea.types import CCEA_Config, CCEA_PolicyConfig
 
@@ -76,13 +76,13 @@ D_CCEA_GRU.policy_config = GRU_POLICY_CONFIG
 
 
 # EXPERIMENTS
-G_MLP = ExperimentConfig(
+G_MLP = CCEA_ExperimentConfig(
     environment=ENVIRONMENT,
     n_gens_between_save=N_GENS_BETWEEN_SAVE,
     ccea_config=G_CCEA_MLP,
 )
 
-D_MLP = ExperimentConfig(
+D_MLP = CCEA_ExperimentConfig(
     environment=ENVIRONMENT,
     n_gens_between_save=N_GENS_BETWEEN_SAVE,
     ccea_config=D_CCEA_MLP,

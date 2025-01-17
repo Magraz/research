@@ -1,9 +1,10 @@
 from enum import StrEnum
 from dataclasses import dataclass
+from learning.algorithms.types import ExperimentConfig
 
 
 @dataclass(frozen=True)
-class CCEA_PolicyConfig:
+class PolicyConfig:
     weight_initialization: str
     type: str
     hidden_layers: tuple[int]
@@ -19,17 +20,28 @@ class CCEA_Config:
     fitness_shaping: str
     fitness_calculation: str
     mutation: dict
-    policy_config: CCEA_PolicyConfig
+    policy_config: PolicyConfig
+
+
+@dataclass
+class CCEA_ExperimentConfig(ExperimentConfig):
+    n_gens_between_save: int = 0
+    ccea_config: CCEA_Config = None
+
+
+@dataclass
+class Checkpoint:
+    exists: bool = False
+    population: list = None
+    generation: int = 0
 
 
 class Team:
     def __init__(
         self,
         individuals: list = None,
-        combination: list = None,
     ):
         self.individuals = individuals if individuals is not None else []
-        self.combination = combination if combination is not None else []
 
 
 class EvalInfo:
@@ -48,7 +60,7 @@ class InitializationEnum(StrEnum):
     KAIMING = "kaiming"
 
 
-class CCEA_PolicyEnum(StrEnum):
+class PolicyEnum(StrEnum):
     GRU = "GRU"
     MLP = "MLP"
     CNN = "CNN"

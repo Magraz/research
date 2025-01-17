@@ -1,7 +1,7 @@
 
 map_size: [3.0, 3.0]
-obs_space_dim: 10
-action_space_dim: 1
+observation_size: 10
+action_size: 1
 
 agents:
   - observation_radius: 4.0

@@ -106,16 +106,6 @@ class RoverTrain:
         self.min_std_dev = ccea_config.mutation["min_std_deviation"]
         self.mutation_mean = ccea_config.mutation["mean"]
 
-        self.team_combinations = [
-            list(combo) for combo in combinations(range(self.n_agents), self.team_size)
-        ]
-
-        self.std_dev_list = np.arange(
-            start=self.max_std_dev,
-            stop=self.min_std_dev,
-            step=-((self.max_std_dev - self.min_std_dev) / (self.n_gens + 1)),
-        )
-
         # Create the type of fitness we're optimizing
         creator.create("Individual", np.ndarray, fitness=0.0)
 

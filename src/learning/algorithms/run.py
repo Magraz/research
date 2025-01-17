@@ -2,9 +2,14 @@ import os
 import yaml
 import torch
 from pathlib import Path
-from learning.algorithms.ccea.ccea import CooperativeCoevolutionaryAlgorithm
+
+from learning.algorithms.ccea.train import CCEA_Trainer
+from learning.algorithms.ccea.types import CCEA_ExperimentConfig
+
 from learning.algorithms.ppo.ppo import PPO
-from learning.algorithms.types import ExperimentConfig
+
+from learning.algorithms.types import ExperimentConfig, AlgorithmEnum
+
 from learning.environments.types import EnvironmentEnum
 from learning.environments.rover.types import RoverEnvironmentConfig
 from learning.environments.salp.types import SalpEnvironmentConfig
@@ -31,7 +36,11 @@ def run_algorithm(
     with open(str(env_file), "r") as file:
         env_dict = yaml.safe_load(file)
 
-    exp_config = ExperimentConfig(**exp_dict)
+    match (algorithm):
+        case AlgorithmEnum.CCEA:
+            exp_config = CCEA_ExperimentConfig(**exp_dict)
+        case AlgorithmEnum.IPPO:
+            exp_config = CCEA_ExperimentConfig(**exp_dict)
 
     match (environment):
         case EnvironmentEnum.VMAS_ROVER:
@@ -42,7 +51,8 @@ def run_algorithm(
 
     match (algorithm):
         case "CCEA":
-            algorithm = CooperativeCoevolutionaryAlgorithm(
+            trainer = CCEA_Trainer(
+                device="cuda" if torch.cuda.is_available() else "cpu",
                 batch_dir=batch_dir,
                 trials_dir=Path(batch_dir).parents[1]
                 / "results"
@@ -51,35 +61,10 @@ def run_algorithm(
                 trial_id=trial_id,
                 trial_name=Path(exp_file).stem,
                 video_name=f"{experiment_name}_{trial_id}",
-                device="cuda" if torch.cuda.is_available() else "cpu",
-                # Environment Data
-                map_size=env_config.map_size,
-                observation_size=env_config.obs_space_dim,
-                action_size=env_config.action_space_dim,
-                n_agents=len(env_config.agents),
-                n_pois=len(env_config.targets),
-                # Experiment Data
-                **asdict(exp_config),
-            )
-        case "PPO":
-            algorithm = PPO(
-                batch_dir=batch_dir,
-                trials_dir=Path(batch_dir).parents[1]
-                / "results"
-                / batch_name
-                / experiment_name,
-                trial_id=trial_id,
-                trial_name=Path(exp_file).stem,
-                video_name=f"{experiment_name}_{trial_id}",
-                device="cuda" if torch.cuda.is_available() else "cpu",
-                # Environment Data
-                map_size=env_config.map_size,
-                observation_size=env_config.obs_space_dim,
-                action_size=env_config.action_space_dim,
-                n_agents=len(env_config.agents),
-                n_pois=len(env_config.targets),
-                # Experiment Data
-                **asdict(exp_config),
             )
 
-    return algorithm.run()
+    return trainer.train(  # Environment Data
+        env_config=env_config,
+        # Experiment Data
+        exp_config=exp_config,
+    )

@@ -12,31 +12,30 @@ from vmas.simulator.utils import save_video
 from learning.algorithms.ccea.policies.mlp import MLP_Policy
 from learning.algorithms.ccea.policies.gru import GRU_Policy
 
-from learning.environments.create_env import create_env
 from learning.algorithms.ccea.selection import (
     binarySelection,
     epsilonGreedySelection,
     softmaxSelection,
 )
+
+from learning.environments.types import EnvironmentConfig
+
 from learning.algorithms.ccea.types import (
+    CCEA_ExperimentConfig,
+    CCEA_Config,
+    PolicyConfig,
+    Team,
     EvalInfo,
-    CCEA_PolicyEnum,
+    PolicyEnum,
     SelectionEnum,
     FitnessShapingEnum,
     InitializationEnum,
     FitnessCalculationEnum,
 )
-from learning.algorithms.ccea.types import CCEA_Config, CCEA_PolicyConfig, Team
 
 from copy import deepcopy
 import numpy as np
-import os
-from pathlib import Path
 import logging
-import pickle
-import csv
-
-from itertools import combinations
 
 # Create and configure logger
 logging.basicConfig(format="%(asctime)s %(message)s")
@@ -51,40 +50,22 @@ logger.setLevel(logging.INFO)
 class CooperativeCoevolutionaryAlgorithm:
     def __init__(
         self,
-        batch_dir: str,
-        trials_dir: str,
-        trial_id: int,
-        trial_name: str,
-        video_name: str,
         device: str,
-        ccea_config: CCEA_Config,
+        env_config: EnvironmentConfig,
+        exp_config: CCEA_ExperimentConfig,
         **kwargs,
     ):
-        ccea_config = CCEA_Config(**ccea_config)
-        policy_config = CCEA_PolicyConfig(**ccea_config.policy_config)
-
-        self.batch_dir = batch_dir
-        self.trials_dir = trials_dir
-        self.trial_name = trial_name
-        self.trial_id = trial_id
-        self.video_name = video_name
-
-        # Flags
-        self.use_teaming = kwargs.pop("use_teaming", False)
+        ccea_config = CCEA_Config(**exp_config.ccea_config)
+        policy_config = PolicyConfig(**ccea_config.policy_config)
 
         # Environment data
         self.device = device
-        self.environment = kwargs.pop("environment", None)
-        self.observation_size = kwargs.pop("observation_size", 0)
-        self.action_size = kwargs.pop("action_size", 0)
-        self.n_agents = kwargs.pop("n_agents", 0)
-        self.n_pois = kwargs.pop("n_pois", 0)
-        self.team_size = (
-            kwargs.pop("team_size", 0) if self.use_teaming else self.n_agents
-        )
+        self.observation_size = env_config.observation_size
+        self.action_size = env_config.action_size
+        self.n_agents = len(env_config.agents)
 
         # Experiment Data
-        self.n_gens_between_save = kwargs.pop("n_gens_between_save", 0)
+        self.n_gens_between_save = exp_config.n_gens_between_save
 
         # Policy
         self.output_multiplier = policy_config.output_multiplier
@@ -103,10 +84,6 @@ class CooperativeCoevolutionaryAlgorithm:
         self.max_std_dev = ccea_config.mutation["max_std_deviation"]
         self.min_std_dev = ccea_config.mutation["min_std_deviation"]
         self.mutation_mean = ccea_config.mutation["mean"]
-
-        self.team_combinations = [
-            list(combo) for combo in combinations(range(self.n_agents), self.team_size)
-        ]
 
         self.std_dev_list = np.arange(
             start=self.max_std_dev,
@@ -183,15 +160,9 @@ class CooperativeCoevolutionaryAlgorithm:
         for i in range(joint_policies):
 
             # Get agents in this row of subpopulations
-            agents = [subpop[i] for subpop in population]
-
-            # Put the i'th individual on the team if it is inside our team combinations
-            combination = random.sample(self.team_combinations, 1)[0]
-
             teams.append(
                 Team(
-                    individuals=[agents[idx] for idx in combination],
-                    combination=combination,
+                    individuals=[subpop[i] for subpop in population],
                 )
             )
 
@@ -206,7 +177,7 @@ class CooperativeCoevolutionaryAlgorithm:
     ):
         # Set up models
         joint_policies = [
-            [self.generateTemplateNN() for _ in range(self.team_size)] for _ in teams
+            [self.generateTemplateNN() for _ in range(self.n_agents)] for _ in teams
         ]
 
         # Load in the weights
@@ -228,7 +199,7 @@ class CooperativeCoevolutionaryAlgorithm:
 
             actions = [
                 torch.empty((0, self.action_size)).to(self.device)
-                for _ in range(self.team_size)
+                for _ in range(self.n_agents)
             ]
 
             for observation, joint_policy in zip(stacked_obs, joint_policies):
@@ -363,153 +334,51 @@ class CooperativeCoevolutionaryAlgorithm:
 
             case FitnessShapingEnum.D:
                 for eval_info in eval_infos:
-                    for individual, combo_idx in zip(
+                    for idx, individual in enumerate(
                         eval_info.team.individuals,
-                        eval_info.team.combination,
                     ):
-                        individual.fitness = eval_info.agent_fitnesses[combo_idx]
+                        individual.fitness = eval_info.agent_fitnesses[idx]
 
     def setPopulation(self, population, offspring):
         for subpop, subpop_offspring in zip(population, offspring):
             subpop[:] = subpop_offspring
 
-    def createFitnessCSV(self, fitness_dir):
-        header = ["gen", "avg_team_fitness", "best_team_fitness"]
+    def run(self, n_gen, pop, env):
 
-        with open(fitness_dir, "w", newline="") as csvfile:
-            writer = csv.writer(csvfile)
-            writer.writerows([header])
+        # Set gen counter global var
+        self.gen = n_gen
 
-    def writeFitnessCSV(self, fitness_dir, avg_fitness, best_fitness):
+        # Perform selection
+        offspring = self.select(pop)
 
-        # Now save it all to the csv
-        with open(fitness_dir, "a", newline="") as csvfile:
-            writer = csv.writer(csvfile)
-            writer.writerow([self.gen, avg_fitness, best_fitness])
+        # Perform mutation
+        self.mutate(offspring)
 
-    def load_checkpoint(
-        self,
-        checkpoint_name: str,
-        fitness_dir: str,
-        trial_dir: str,
-    ):
-        # Load checkpoint file
-        with open(checkpoint_name, "rb") as handle:
-            checkpoint = pickle.load(handle)
-            pop = checkpoint["population"]
-            checkpoint_gen = checkpoint["gen"]
+        # Shuffle subpopulations in offspring
+        # to make teams random
+        self.shuffle(offspring)
 
-        # Set fitness csv file to checkpoint
-        new_fit_path = os.path.join(trial_dir, "fitness_edit.csv")
-        with open(fitness_dir, "r") as inp, open(new_fit_path, "w") as out:
-            writer = csv.writer(out)
-            for row in csv.reader(inp):
-                if row[0].isdigit():
-                    gen = int(row[0])
-                    if gen <= checkpoint_gen:
-                        writer.writerow(row)
-                else:
-                    writer.writerow(row)
+        # Form teams for evaluation
+        teams = self.formTeams(offspring, joint_policies=self.subpop_size)
 
-        # Remove old fitness file
-        os.remove(fitness_dir)
-        # Rename new fitness file
-        os.rename(new_fit_path, fitness_dir)
+        # Evaluate each team
+        eval_infos = self.evaluateTeams(env, teams)
 
-        return pop, checkpoint_gen
+        # Now assign fitnesses to each individual
+        self.assignFitnesses(eval_infos)
 
-    def run(self):
-
-        # Set trial directory name
-        trial_folder_name = "_".join(("trial", str(self.trial_id)))
-        trial_dir = os.path.join(self.trials_dir, trial_folder_name)
-        fitness_dir = f"{trial_dir}/fitness.csv"
-        checkpoint_name = os.path.join(trial_dir, "checkpoint.pickle")
-
-        # Create directory for saving data
-        if not os.path.isdir(trial_dir):
-            os.makedirs(trial_dir)
-
-        # Load checkpoint
-        checkpoint_gen = 0
-        checkpoint_exists = Path(checkpoint_name).is_file()
-        pop = None
-
-        if checkpoint_exists:
-
-            pop, checkpoint_gen = self.load_checkpoint(
-                checkpoint_name, fitness_dir, trial_dir
-            )
-
-        else:
-            # Initialize the population
-            pop = self.toolbox.population()
-
-            # Create csv file for saving evaluation fitnesses
-            self.createFitnessCSV(fitness_dir)
-
-        # Create environment
-        env = create_env(
-            self.batch_dir,
-            n_envs=self.subpop_size,
-            env_name=self.environment,
-            device=self.device,
+        # Evaluate best team of generation
+        avg_team_fitness = (
+            sum([eval_info.team_fitness for eval_info in eval_infos]) / self.subpop_size
         )
+        best_team_eval_info = max(eval_infos, key=lambda item: item.team_fitness)
 
-        for n_gen in range(self.n_gens + 1):
+        # Now populate the population with individuals from the offspring
+        self.setPopulation(pop, offspring)
 
-            # Set gen counter global var
-            self.gen = n_gen
-
-            # Get loading bar up to checkpoint
-            if checkpoint_exists and n_gen <= checkpoint_gen:
-                continue
-
-            # Perform selection
-            offspring = self.select(pop)
-
-            # Perform mutation
-            self.mutate(offspring)
-
-            # Shuffle subpopulations in offspring
-            # to make teams random
-            self.shuffle(offspring)
-
-            # Form teams for evaluation
-            teams = self.formTeams(offspring, joint_policies=self.subpop_size)
-
-            # Evaluate each team
-            eval_infos = self.evaluateTeams(env, teams)
-
-            # Now assign fitnesses to each individual
-            self.assignFitnesses(eval_infos)
-
-            # Evaluate best team of generation
-            avg_team_fitness = (
-                sum([eval_info.team_fitness for eval_info in eval_infos])
-                / self.subpop_size
-            )
-            best_team_eval_info = max(eval_infos, key=lambda item: item.team_fitness)
-
-            # Now populate the population with individuals from the offspring
-            self.setPopulation(pop, offspring)
-
-            # Save fitnesses
-            self.writeFitnessCSV(
-                fitness_dir, avg_team_fitness, best_team_eval_info.team_fitness
-            )
-
-            # Save trajectories and checkpoint
-            if (n_gen > 0) and (n_gen % self.n_gens_between_save == 0):
-
-                # Save checkpoint
-                with open(os.path.join(trial_dir, "checkpoint.pickle"), "wb") as handle:
-                    pickle.dump(
-                        {
-                            "best_team": best_team_eval_info.team,
-                            "population": pop,
-                            "gen": n_gen,
-                        },
-                        handle,
-                        protocol=pickle.HIGHEST_PROTOCOL,
-                    )
+        return (
+            pop,
+            best_team_eval_info.team,
+            best_team_eval_info.team_fitness,
+            avg_team_fitness,
+        )
