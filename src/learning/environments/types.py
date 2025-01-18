@@ -13,3 +13,4 @@ class EnvironmentConfig:
 class EnvironmentEnum(StrEnum):
     VMAS_ROVER = "rover"
     VMAS_SALP = "salp"
+    VMAS_BALANCE = "balance"

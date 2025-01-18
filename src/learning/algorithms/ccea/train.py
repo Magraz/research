@@ -5,7 +5,7 @@ from learning.algorithms.ccea.ccea import CooperativeCoevolutionaryAlgorithm
 from learning.algorithms.ccea.types import Checkpoint, CCEA_ExperimentConfig
 from learning.environments.types import EnvironmentConfig
 from learning.environments.create_env import create_env
-
+from dataclasses import asdict
 from pathlib import Path
 
 
@@ -58,15 +58,9 @@ class CCEA_Trainer:
         )
 
         # Load checkpoint
-        checkpoint_gen = 0
         pop = None
 
-        if self.checkpoint.exists:
-
-            pop = self.checkpoint.population
-            checkpoint_gen = self.checkpoint.generation
-
-        else:
+        if not self.checkpoint.exists:
             # Initialize the population
             pop = ccea.toolbox.population()
 
@@ -82,12 +76,20 @@ class CCEA_Trainer:
         for n_gen in range(ccea.n_gens + 1):
 
             # Get loading bar up to checkpoint
-            if self.checkpoint.exists and n_gen <= checkpoint_gen:
+            if self.checkpoint.exists and n_gen <= self.checkpoint.generation:
                 continue
 
-            pop, team, team_fitness, avg_team_fitness = ccea.run(n_gen, pop, env)
+            pop, best_team, team_fitness, avg_team_fitness = ccea.run(n_gen, pop, env)
 
             self.write_log_file(fitness_dir, n_gen, avg_team_fitness, team_fitness)
+
+            if (n_gen > 0) and (n_gen % exp_config.n_gens_between_save == 0):
+                self.checkpoint.exists = True
+                self.checkpoint.best_team = best_team
+                self.checkpoint.generation = n_gen
+                self.checkpoint.population = pop
+
+                self.save_checkpoint(self.checkpoint)
 
     def create_log_file(self, fitness_dir):
         header = ["gen", "avg_team_fitness", "best_team_fitness"]
@@ -103,11 +105,11 @@ class CCEA_Trainer:
             writer = csv.writer(csvfile)
             writer.writerow([gen, avg_fitness, best_fitness])
 
-    def save_checkpoint(self, checkpoint_dict):
+    def save_checkpoint(self, checkpoint: Checkpoint):
         # Save checkpoint
         with open(os.path.join(self.trial_dir, "checkpoint.pickle"), "wb") as handle:
             pickle.dump(
-                checkpoint_dict,
+                asdict(checkpoint),
                 handle,
                 protocol=pickle.HIGHEST_PROTOCOL,
             )
@@ -118,11 +120,15 @@ class CCEA_Trainer:
         fitness_dir: str,
         trial_dir: str,
     ):
+        checkpoint = Checkpoint()
+
         # Load checkpoint file
         with open(checkpoint_name, "rb") as handle:
             checkpoint = pickle.load(handle)
-            pop = checkpoint["population"]
-            checkpoint_gen = checkpoint["gen"]
+            checkpoint = Checkpoint(**checkpoint)
+            pop = checkpoint.population
+            checkpoint_gen = checkpoint.generation
+            checkpoint.exists = True
 
         # Set fitness csv file to checkpoint
         new_fit_path = os.path.join(trial_dir, "fitness_edit.csv")
@@ -140,7 +146,5 @@ class CCEA_Trainer:
         os.remove(fitness_dir)
         # Rename new fitness file
         os.rename(new_fit_path, fitness_dir)
-
-        checkpoint = Checkpoint(exists=True, population=pop, generation=checkpoint_gen)
 
         return checkpoint

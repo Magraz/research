@@ -74,11 +74,12 @@ def run_heuristic(
 
 if __name__ == "__main__":
     from vmas.scenarios.transport import HeuristicPolicy as TransportHeuristic
+    from vmas.scenarios.balance import HeuristicPolicy as BalanceHeuristic
 
     run_heuristic(
-        scenario_name="transport",
-        heuristic=TransportHeuristic,
-        n_envs=300,
+        scenario_name="balance",
+        heuristic=BalanceHeuristic,
+        n_envs=10,
         n_steps=200,
         render=True,
         save_render=False,

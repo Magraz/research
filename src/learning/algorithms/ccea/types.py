@@ -3,39 +3,6 @@ from dataclasses import dataclass
 from learning.algorithms.types import ExperimentConfig
 
 
-@dataclass(frozen=True)
-class PolicyConfig:
-    weight_initialization: str
-    type: str
-    hidden_layers: tuple[int]
-    output_multiplier: float
-
-
-@dataclass
-class CCEA_Config:
-    n_gens: int
-    n_steps: int
-    subpopulation_size: int
-    selection: str
-    fitness_shaping: str
-    fitness_calculation: str
-    mutation: dict
-    policy_config: PolicyConfig
-
-
-@dataclass
-class CCEA_ExperimentConfig(ExperimentConfig):
-    n_gens_between_save: int = 0
-    ccea_config: CCEA_Config = None
-
-
-@dataclass
-class Checkpoint:
-    exists: bool = False
-    population: list = None
-    generation: int = 0
-
-
 class Team:
     def __init__(
         self,
@@ -95,3 +62,37 @@ class SelectionEnum(StrEnum):
 class FitnessCalculationEnum(StrEnum):
     AGG = "aggregate"
     LAST = "last_step"
+
+
+@dataclass(frozen=True)
+class PolicyConfig:
+    weight_initialization: str
+    type: str
+    hidden_layers: tuple[int]
+    output_multiplier: float
+
+
+@dataclass
+class CCEA_Config:
+    n_gens: int
+    n_steps: int
+    subpopulation_size: int
+    selection: str
+    fitness_shaping: str
+    fitness_calculation: str
+    mutation: dict
+    policy_config: PolicyConfig
+
+
+@dataclass
+class CCEA_ExperimentConfig(ExperimentConfig):
+    n_gens_between_save: int = 0
+    ccea_config: CCEA_Config = None
+
+
+@dataclass
+class Checkpoint:
+    exists: bool = False
+    population: list = None
+    generation: int = 0
+    best_team: Team = None

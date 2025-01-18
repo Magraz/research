@@ -8,5 +8,5 @@ class ExperimentConfig:
 
 
 class AlgorithmEnum(StrEnum):
-    CCEA = "CCEA"
+    CCEA = "ccea"
     IPPO = "ippo"

@@ -21,6 +21,13 @@ def create_env(
         env_config = yaml.safe_load(file)
 
     match (env_name):
+        case EnvironmentEnum.VMAS_BALANCE:
+            # Environment arguments
+            env_args = {
+                # Environment data
+                "scenario": "balance",
+            }
+
         case EnvironmentEnum.VMAS_ROVER:
 
             # Environment arguments
@@ -63,15 +70,6 @@ def create_env(
                 "viewer_zoom": kwargs.pop("viewer_zoom", 1),
             }
 
-            # Set up the environment
-            env = make_env(
-                num_envs=n_envs,
-                device=device,
-                seed=None,
-                # Environment specific variables
-                **env_args,
-            )
-
         case EnvironmentEnum.VMAS_SALP:
             env_args = {
                 # Environment data
@@ -109,13 +107,13 @@ def create_env(
                 "viewer_zoom": kwargs.pop("viewer_zoom", 1),
             }
 
-            # Set up the environment
-            env = make_env(
-                num_envs=n_envs,
-                device=device,
-                seed=None,
-                # Environment specific variables
-                **env_args,
-            )
+    # Set up the environment
+    env = make_env(
+        num_envs=n_envs,
+        device=device,
+        seed=None,
+        # Environment specific variables
+        **env_args,
+    )
 
     return env
