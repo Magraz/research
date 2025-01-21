@@ -8,8 +8,8 @@ ENVIRONMENT = EnvironmentEnum.VMAS_BUZZ_WIRE
 BATCH = f"{ENVIRONMENT}_standard"
 
 # # EXPERIMENTS
-# IPPO = Experiment()
+IPPO = Experiment()
 
-# EXP_DICTS = [
-#     {"name": "ippo", "config": asdict(IPPO)},
-# ]
+EXP_DICTS = [
+    {"name": "ippo", "config": asdict(IPPO)},
+]

@@ -37,7 +37,7 @@ class IPPO_Trainer:
             self.batch_dir, 1, device=self.device, env_name=env_config.environment
         )
 
-        params = Params(fname="save", n_agents=env.n_agents)  # env.n_agents)
+        params = Params(fname=self.trial_dir, n_agents=env.n_agents)  # env.n_agents)
         params.device = self.device
         params.action_dim = env_config.action_size
         params.state_dim = env_config.observation_size

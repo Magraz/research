@@ -349,7 +349,7 @@ class Params:
         self.device = "cpu"
         self.log_indiv = True
         if fname is not None:
-            self.writer = SummaryWriter("./logs/" + fname)
+            self.writer = SummaryWriter(fname)
         else:
             self.log_indiv = False
         self.var_learned = True
