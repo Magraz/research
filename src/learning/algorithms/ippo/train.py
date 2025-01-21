@@ -1,8 +1,8 @@
 import os
 import torch
-from learning.algorithms.types import ExperimentConfig
 
-from learning.environments.types import EnvironmentConfig
+
+from learning.environments.types import EnvironmentParams
 from learning.environments.create_env import create_env
 from dataclasses import asdict
 from pathlib import Path
@@ -32,20 +32,18 @@ class IPPO_Trainer:
         self.trial_folder_name = "_".join(("trial", str(self.trial_id)))
         self.trial_dir = os.path.join(self.trials_dir, self.trial_folder_name)
 
-    def train(self, exp_config: ExperimentConfig, env_config: EnvironmentConfig):
+    def train(self, exp_config, env_config: EnvironmentParams):
         env = create_env(
-            self.batch_dir, 1, device=self.device, env_name=exp_config.environment
+            self.batch_dir, 1, device=self.device, env_name=env_config.environment
         )
 
         params = Params(fname="save", n_agents=env.n_agents)  # env.n_agents)
         params.device = self.device
         params.action_dim = env_config.action_size
         params.state_dim = env_config.observation_size
-        params.action_std = -1.0
-        params.beta_ent = 0.0
-        params.N_batch = 2
+        # params.beta_ent = 0.0
         params.K_epochs = 10
-        params.N_steps = 3e6
+        # params.N_steps = 3e6
         params.write()
         learner = IPPO(params)
         step = 0
@@ -81,16 +79,16 @@ class IPPO_Trainer:
                 with open("logs/data.dat", "wb") as f:
                     pkl.dump(data, f)
 
-    def view(self, exp_config: ExperimentConfig, env_config: EnvironmentConfig):
+    def view(self, exp_config, env_config: EnvironmentParams):
         env = create_env(
-            self.batch_dir, 1, device=self.device, env_name=exp_config.environment
+            self.batch_dir, 1, device=self.device, env_name=env_config.environment
         )
-        params = Params(n_agents=3)  # env.n_agents)
+        params = Params(n_agents=env.n_agents)  # env.n_agents)
         params.device = self.device
         params.action_dim = env_config.action_size
         params.state_dim = env_config.observation_size
         learner = IPPO(params)
-        learner.load("logs/a1")
+        learner.load("logs/a0")
         while True:
             done = False
             state = env.reset()

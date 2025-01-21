@@ -91,7 +91,7 @@ class ActorCritic(nn.Module):
             return action_mean.detach()
         else:
             return (
-                torch.tanh(action).detach(),
+                torch.clamp(action, min=-1.0, max=1.0).detach(),
                 action_logprob.detach(),
                 state_val.detach(),
             )
@@ -323,7 +323,7 @@ class PPO:
 class Params:
     def __init__(self, fname=None, n_agents=0):
         self.K_epochs = 20  # update policy for K epochs in one PPO update
-        self.N_batch = 8
+        self.N_batch = 12
         self.N_steps = 3e6
         self.eps_clip = 0.2  # clip parameter for PPO
         self.gamma = 0.99  # discount factor

@@ -21,6 +21,13 @@ def create_env(
         env_config = yaml.safe_load(file)
 
     match (env_name):
+        case EnvironmentEnum.VMAS_BUZZ_WIRE:
+            # Environment arguments
+            env_args = {
+                # Environment data
+                "scenario": "buzz_wire",
+            }
+
         case EnvironmentEnum.VMAS_BALANCE:
             # Environment arguments
             env_args = {

@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from learning.environments.types import EnvironmentConfig
+from learning.environments.types import EnvironmentParams
 
 
 @dataclass(frozen=True)
@@ -24,7 +24,7 @@ class POIConfig:
     position: PositionConfig
 
 
-@dataclass(frozen=True)
-class SalpEnvironmentConfig(EnvironmentConfig):
-    agents: list[SalpsConfig]
-    targets: list[POIConfig]
+@dataclass
+class SalpEnvironmentConfig(EnvironmentParams):
+    agents: list[SalpsConfig] = None
+    targets: list[POIConfig] = None

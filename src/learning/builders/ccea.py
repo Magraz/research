@@ -1,7 +1,4 @@
-from learning.algorithms.ccea.types import (
-    CCEA_ExperimentConfig,
-)
-from learning.algorithms.ccea.types import CCEA_Config, CCEA_PolicyConfig
+from learning.algorithms.ccea.types import Params, Policy, Experiment
 
 from learning.algorithms.ccea.types import (
     FitnessShapingEnum,
@@ -16,15 +13,26 @@ from learning.environments.types import EnvironmentEnum
 from copy import deepcopy
 from dataclasses import asdict
 
-# EXPERIMENT SETTINGS
-ENVIRONMENT = EnvironmentEnum.VMAS_SALP
-BATCH = f"{ENVIRONMENT}_static_spread"
 
 # POLICY SETTINGS
 GRU_POLICY_LAYERS = [83]
 MLP_POLICY_LAYERS = [64, 64]
 OUTPUT_MULTIPLIER = 1.0
 WEIGHT_INITIALIZATION = InitializationEnum.KAIMING
+
+GRU_POLICY_CONFIG = Policy(
+    type=PolicyEnum.GRU,
+    weight_initialization=WEIGHT_INITIALIZATION,
+    hidden_layers=GRU_POLICY_LAYERS,
+    output_multiplier=OUTPUT_MULTIPLIER,
+)
+
+MLP_POLICY_CONFIG = Policy(
+    type=PolicyEnum.MLP,
+    weight_initialization=WEIGHT_INITIALIZATION,
+    hidden_layers=MLP_POLICY_LAYERS,
+    output_multiplier=OUTPUT_MULTIPLIER,
+)
 
 # CCEA SETTINGS
 N_STEPS = 100
@@ -36,21 +44,7 @@ MEAN = 0.0
 MIN_STD_DEV = 0.05
 MAX_STD_DEV = 0.25
 
-GRU_POLICY_CONFIG = CCEA_PolicyConfig(
-    type=PolicyEnum.GRU,
-    weight_initialization=WEIGHT_INITIALIZATION,
-    hidden_layers=GRU_POLICY_LAYERS,
-    output_multiplier=OUTPUT_MULTIPLIER,
-)
-
-MLP_POLICY_CONFIG = CCEA_PolicyConfig(
-    type=PolicyEnum.MLP,
-    weight_initialization=WEIGHT_INITIALIZATION,
-    hidden_layers=MLP_POLICY_LAYERS,
-    output_multiplier=OUTPUT_MULTIPLIER,
-)
-
-G_CCEA_MLP = CCEA_Config(
+G_CCEA_MLP = Params(
     n_steps=N_STEPS,
     n_gens=N_GENS,
     fitness_shaping=FitnessShapingEnum.G,
@@ -75,15 +69,17 @@ D_CCEA_GRU = deepcopy(D_CCEA_MLP)
 D_CCEA_GRU.policy_config = GRU_POLICY_CONFIG
 
 
-# EXPERIMENTS
-G_MLP = CCEA_ExperimentConfig(
-    environment=ENVIRONMENT,
+# EXPERIMENT SETTINGS
+ENVIRONMENT = EnvironmentEnum.VMAS_ROVER
+EXPERIMENT_NAME = "static_spread"
+BATCH = f"{ENVIRONMENT}_{EXPERIMENT_NAME}"
+
+G_MLP = Experiment(
     n_gens_between_save=N_GENS_BETWEEN_SAVE,
     ccea_config=G_CCEA_MLP,
 )
 
-D_MLP = CCEA_ExperimentConfig(
-    environment=ENVIRONMENT,
+D_MLP = Experiment(
     n_gens_between_save=N_GENS_BETWEEN_SAVE,
     ccea_config=D_CCEA_MLP,
 )

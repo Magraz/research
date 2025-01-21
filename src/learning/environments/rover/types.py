@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from learning.environments.types import EnvironmentConfig
+from learning.environments.types import EnvironmentParams
 
 
 @dataclass(frozen=True)
@@ -26,8 +26,8 @@ class POIConfig:
     position: PositionConfig
 
 
-@dataclass(frozen=True)
-class RoverEnvironmentConfig(EnvironmentConfig):
-    agents: list[RoversConfig]
-    targets: list[POIConfig]
-    use_order: bool
+@dataclass
+class RoverEnvironmentParams(EnvironmentParams):
+    agents: list[RoversConfig] = None
+    targets: list[POIConfig] = None
+    use_order: bool = False

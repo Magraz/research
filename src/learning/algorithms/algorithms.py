@@ -4,14 +4,14 @@ import torch
 from pathlib import Path
 
 from learning.algorithms.ccea.train import CCEA_Trainer
-from learning.algorithms.ccea.types import CCEA_ExperimentConfig
+from learning.algorithms.ccea.types import Experiment as CCEA_Experiment
 
 from learning.algorithms.ippo.train import IPPO_Trainer
 
-from learning.algorithms.types import ExperimentConfig, AlgorithmEnum
+from learning.algorithms.types import AlgorithmEnum
 
-from learning.environments.types import EnvironmentEnum, EnvironmentConfig
-from learning.environments.rover.types import RoverEnvironmentConfig
+from learning.environments.types import EnvironmentEnum, EnvironmentParams
+from learning.environments.rover.types import RoverEnvironmentParams
 from learning.environments.salp.types import SalpEnvironmentConfig
 
 from dataclasses import asdict
@@ -24,6 +24,7 @@ def run_algorithm(
     algorithm: str,
     environment: str,
     trial_id: int,
+    train: bool,
 ):
 
     env_file = os.path.join(batch_dir, "_env.yaml")
@@ -34,13 +35,15 @@ def run_algorithm(
     # Load environment config
     match (environment):
         case EnvironmentEnum.VMAS_ROVER:
-            env_config = RoverEnvironmentConfig(**env_dict)
+            env_config = RoverEnvironmentParams(**env_dict)
 
         case EnvironmentEnum.VMAS_SALP:
             env_config = SalpEnvironmentConfig(**env_dict)
 
-        case EnvironmentEnum.VMAS_BALANCE:
-            env_config = EnvironmentConfig(**env_dict)
+        case EnvironmentEnum.VMAS_BALANCE | EnvironmentEnum.VMAS_BUZZ_WIRE:
+            env_config = EnvironmentParams(**env_dict)
+
+    env_config.environment = environment
 
     # Load experiment config
     exp_file = os.path.join(batch_dir, f"{experiment_name}.yaml")
@@ -51,7 +54,7 @@ def run_algorithm(
     match (algorithm):
 
         case AlgorithmEnum.CCEA:
-            exp_config = CCEA_ExperimentConfig(**exp_dict)
+            exp_config = CCEA_Experiment(**exp_dict)
             trainer = CCEA_Trainer(
                 device="cuda" if torch.cuda.is_available() else "cpu",
                 batch_dir=batch_dir,
@@ -65,7 +68,7 @@ def run_algorithm(
             )
 
         case AlgorithmEnum.IPPO:
-            exp_config = ExperimentConfig(**exp_dict)
+            exp_config = None
             trainer = IPPO_Trainer(
                 device="cuda" if torch.cuda.is_available() else "cpu",
                 batch_dir=batch_dir,
@@ -78,8 +81,15 @@ def run_algorithm(
                 video_name=f"{experiment_name}_{trial_id}",
             )
 
-    return trainer.train(  # Environment Data
-        env_config=env_config,
-        # Experiment Data
-        exp_config=exp_config,
-    )
+    if train:
+        trainer.train(  # Environment Data
+            env_config=env_config,
+            # Experiment Data
+            exp_config=exp_config,
+        )
+    else:
+        trainer.view(  # Environment Data
+            env_config=env_config,
+            # Experiment Data
+            exp_config=exp_config,
+        )

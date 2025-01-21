@@ -2,8 +2,8 @@ import csv
 import os
 import pickle
 from learning.algorithms.ccea.ccea import CooperativeCoevolutionaryAlgorithm
-from learning.algorithms.ccea.types import Checkpoint, CCEA_ExperimentConfig
-from learning.environments.types import EnvironmentConfig
+from learning.algorithms.ccea.types import Checkpoint, Experiment
+from learning.environments.types import EnvironmentParams
 from learning.environments.create_env import create_env
 from dataclasses import asdict
 from pathlib import Path
@@ -31,8 +31,8 @@ class CCEA_Trainer:
 
     def train(
         self,
-        env_config: EnvironmentConfig,
-        exp_config: CCEA_ExperimentConfig,
+        env_config: EnvironmentParams,
+        exp_config: Experiment,
     ):
         # Set trial directory name
         fitness_dir = f"{self.trial_dir}/fitness.csv"
@@ -64,11 +64,14 @@ class CCEA_Trainer:
             # Initialize the population
             pop = ccea.toolbox.population()
 
+        else:
+            pop = self.checkpoint.population
+
         # Create environment
         env = create_env(
             self.batch_dir,
             n_envs=ccea.subpop_size,
-            env_name=exp_config.environment,
+            env_name=env_config.environment,
             device=self.device,
         )
 
@@ -79,7 +82,7 @@ class CCEA_Trainer:
             if self.checkpoint.exists and n_gen <= self.checkpoint.generation:
                 continue
 
-            pop, best_team, team_fitness, avg_team_fitness = ccea.run(n_gen, pop, env)
+            pop, best_team, team_fitness, avg_team_fitness = ccea.step(n_gen, pop, env)
 
             self.write_log_file(fitness_dir, n_gen, avg_team_fitness, team_fitness)
 

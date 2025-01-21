@@ -2,15 +2,17 @@ from enum import StrEnum
 from dataclasses import dataclass
 
 
-@dataclass(frozen=True)
-class EnvironmentConfig:
-    agents: list
-    map_size: tuple[int]
-    observation_size: int
-    action_size: int
+@dataclass
+class EnvironmentParams:
+    environment: str = None
+    agents: list = None
+    map_size: tuple[int] = None
+    observation_size: int = 0
+    action_size: int = 0
 
 
 class EnvironmentEnum(StrEnum):
     VMAS_ROVER = "rover"
     VMAS_SALP = "salp"
     VMAS_BALANCE = "balance"
+    VMAS_BUZZ_WIRE = "buzz_wire"

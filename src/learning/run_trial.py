@@ -1,4 +1,4 @@
-from learning.algorithms.run import run_algorithm
+from learning.algorithms.algorithms import run_algorithm
 
 import argparse
 from pathlib import Path
@@ -33,6 +33,12 @@ if __name__ == "__main__":
         type=str,
     )
 
+    parser.add_argument(
+        "--view",
+        action="store_true",
+        help="Runs view method instead of train",
+    )
+
     parser.add_argument("--trial_id", default=0, help="Sets trial ID", type=int)
 
     args = vars(parser.parse_args())
@@ -51,4 +57,5 @@ if __name__ == "__main__":
         trial_id=args["trial_id"],
         algorithm=args["algorithm"],
         environment=args["environment"],
+        train=not args["view"],
     )

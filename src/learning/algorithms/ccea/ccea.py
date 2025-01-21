@@ -18,12 +18,12 @@ from learning.algorithms.ccea.selection import (
     softmaxSelection,
 )
 
-from learning.environments.types import EnvironmentConfig
+from learning.environments.types import EnvironmentParams
 
 from learning.algorithms.ccea.types import (
-    CCEA_ExperimentConfig,
-    CCEA_Config,
-    PolicyConfig,
+    Experiment,
+    Params,
+    Policy,
     Team,
     EvalInfo,
     PolicyEnum,
@@ -51,12 +51,12 @@ class CooperativeCoevolutionaryAlgorithm:
     def __init__(
         self,
         device: str,
-        env_config: EnvironmentConfig,
-        exp_config: CCEA_ExperimentConfig,
+        env_config: EnvironmentParams,
+        exp_config: Experiment,
         **kwargs,
     ):
-        ccea_config = CCEA_Config(**exp_config.ccea_config)
-        policy_config = PolicyConfig(**ccea_config.policy_config)
+        ccea_config = Params(**exp_config.ccea_config)
+        policy_config = Policy(**ccea_config.policy_config)
 
         # Environment data
         self.device = device
@@ -343,7 +343,7 @@ class CooperativeCoevolutionaryAlgorithm:
         for subpop, subpop_offspring in zip(population, offspring):
             subpop[:] = subpop_offspring
 
-    def run(self, n_gen, pop, env):
+    def step(self, n_gen, pop, env):
 
         # Set gen counter global var
         self.gen = n_gen

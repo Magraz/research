@@ -1,6 +1,5 @@
 from enum import StrEnum
 from dataclasses import dataclass
-from learning.algorithms.types import ExperimentConfig
 
 
 class Team:
@@ -65,7 +64,7 @@ class FitnessCalculationEnum(StrEnum):
 
 
 @dataclass(frozen=True)
-class PolicyConfig:
+class Policy:
     weight_initialization: str
     type: str
     hidden_layers: tuple[int]
@@ -73,7 +72,7 @@ class PolicyConfig:
 
 
 @dataclass
-class CCEA_Config:
+class Params:
     n_gens: int
     n_steps: int
     subpopulation_size: int
@@ -81,13 +80,13 @@ class CCEA_Config:
     fitness_shaping: str
     fitness_calculation: str
     mutation: dict
-    policy_config: PolicyConfig
+    policy_config: Policy
 
 
 @dataclass
-class CCEA_ExperimentConfig(ExperimentConfig):
+class Experiment:
     n_gens_between_save: int = 0
-    ccea_config: CCEA_Config = None
+    ccea_config: Params = None
 
 
 @dataclass
