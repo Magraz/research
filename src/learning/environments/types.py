@@ -9,6 +9,7 @@ class EnvironmentParams:
     map_size: tuple[int] = None
     observation_size: int = 0
     action_size: int = 0
+    max_steps: int = 0
 
 
 class EnvironmentEnum(StrEnum):

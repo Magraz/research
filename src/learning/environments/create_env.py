@@ -26,6 +26,7 @@ def create_env(
             env_args = {
                 # Environment data
                 "scenario": "buzz_wire",
+                "max_steps": env_config["max_steps"],
             }
 
         case EnvironmentEnum.VMAS_BALANCE:

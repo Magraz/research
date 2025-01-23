@@ -1,6 +1,7 @@
 map_size: [2.0, 2.0]
 observation_size: 6
 action_size: 2
+max_steps: 1000
 
 agents:
   - observation_radius: 1

@@ -70,7 +70,7 @@ def run_algorithm(
         case AlgorithmEnum.IPPO:
             exp_config = None
             trainer = IPPO_Trainer(
-                device="cuda" if torch.cuda.is_available() else "cpu",
+                device="cpu",
                 batch_dir=batch_dir,
                 trials_dir=Path(batch_dir).parents[1]
                 / "results"

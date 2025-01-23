@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-from torch.distributions import MultivariateNormal
 from torch.distributions.normal import Normal
 from torch.utils.tensorboard import SummaryWriter
 import numpy as np
@@ -78,10 +77,12 @@ class ActorCritic(nn.Module):
     def act(self, state, deterministic=False):
 
         action_mean = self.actor(state)
+
         if self.var_learned:
             action_var = torch.exp(self.log_action_var)
         else:
             action_var = self.action_var
+
         dist = Normal(action_mean, action_var)
         action = dist.sample()
         action_logprob = dist.log_prob(action)
@@ -103,6 +104,7 @@ class ActorCritic(nn.Module):
             action_var = torch.exp(self.log_action_var)
         else:
             action_var = self.action_var
+
         dist = Normal(action_mean, action_var)
         action_logprobs = dist.log_prob(action)
         dist_entropy = dist.entropy()
@@ -323,7 +325,7 @@ class PPO:
 class Params:
     def __init__(self, fname=None, n_agents=0):
         self.K_epochs = 20  # update policy for K epochs in one PPO update
-        self.N_batch = 12
+        self.N_batch = 8
         self.N_steps = 3e6
         self.eps_clip = 0.2  # clip parameter for PPO
         self.gamma = 0.99  # discount factor
