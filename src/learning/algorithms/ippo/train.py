@@ -47,7 +47,6 @@ class IPPO_Trainer:
         params.action_dim = env_config.action_size
         params.state_dim = env_config.observation_size
         params.N_batch = 10
-        params.K_epochs = 10
         params.N_steps = 3e6
         params.beta_ent = 0.0
         params.gamma = 0.9

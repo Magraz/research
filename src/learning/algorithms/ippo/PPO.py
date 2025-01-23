@@ -348,13 +348,14 @@ class Params:
 
         self.lmbda = 0.95
 
-        self.max_steps = 1000
         self.device = "cpu"
         self.log_indiv = True
+
         if fname is not None:
             self.writer = SummaryWriter(fname)
         else:
             self.log_indiv = False
+
         self.var_learned = True
         self.beta_ent = 0.001
         self.n_agents = n_agents
