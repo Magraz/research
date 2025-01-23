@@ -18,7 +18,7 @@ from dataclasses import asdict
 
 
 def run_algorithm(
-    batch_dir: str,
+    batch_dir: Path,
     batch_name: str,
     experiment_name: str,
     algorithm: str,
@@ -27,9 +27,9 @@ def run_algorithm(
     train: bool,
 ):
 
-    env_file = os.path.join(batch_dir, "_env.yaml")
+    env_file = batch_dir / "_env.yaml"
 
-    with open(str(env_file), "r") as file:
+    with open(env_file, "r") as file:
         env_dict = yaml.safe_load(file)
 
     # Load environment config
@@ -46,9 +46,9 @@ def run_algorithm(
     env_config.environment = environment
 
     # Load experiment config
-    exp_file = os.path.join(batch_dir, f"{experiment_name}.yaml")
+    exp_file = batch_dir / f"{experiment_name}.yaml"
 
-    with open(str(exp_file), "r") as file:
+    with open(exp_file, "r") as file:
         exp_dict = yaml.unsafe_load(file)
 
     match (algorithm):

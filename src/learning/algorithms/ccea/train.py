@@ -13,8 +13,8 @@ class CCEA_Trainer:
     def __init__(
         self,
         device: str,
-        batch_dir: str,
-        trials_dir: str,
+        batch_dir: Path,
+        trials_dir: Path,
         trial_id: int,
         trial_name: str,
         video_name: str,
@@ -26,7 +26,11 @@ class CCEA_Trainer:
         self.trial_id = trial_id
         self.video_name = video_name
         self.trial_folder_name = "_".join(("trial", str(self.trial_id)))
-        self.trial_dir = os.path.join(self.trials_dir, self.trial_folder_name)
+        self.trial_dir = self.trials_dir / self.trial_folder_name
+
+        self.fitness_file = self.trial_dir / "fitness.csv"
+        self.checkpoint_file = self.trial_dir / "checkpoint.pickle"
+
         self.checkpoint = Checkpoint()
 
     def train(
@@ -34,22 +38,18 @@ class CCEA_Trainer:
         env_config: EnvironmentParams,
         exp_config: Experiment,
     ):
-        # Set trial directory name
-        fitness_dir = f"{self.trial_dir}/fitness.csv"
-        checkpoint_name = os.path.join(self.trial_dir, "checkpoint.pickle")
 
         # Create directory for saving data
-        if not os.path.isdir(self.trial_dir):
-            os.makedirs(self.trial_dir)
+        self.trial_dir.mkdir(parents=True, exist_ok=True)
 
-        if Path(checkpoint_name).is_file():
+        if self.checkpoint_file.is_file():
             self.checkpoint = self.load_checkpoint(
-                checkpoint_name, fitness_dir, self.trial_dir
+                self.checkpoint_file, self.fitness_file, self.trial_dir
             )
 
         else:
             # Create csv file for saving evaluation fitnesses
-            self.create_log_file(fitness_dir)
+            self.create_log_file(self.fitness_file)
 
         ccea = CooperativeCoevolutionaryAlgorithm(
             self.device,
@@ -84,7 +84,9 @@ class CCEA_Trainer:
 
             pop, best_team, team_fitness, avg_team_fitness = ccea.step(n_gen, pop, env)
 
-            self.write_log_file(fitness_dir, n_gen, avg_team_fitness, team_fitness)
+            self.write_log_file(
+                self.fitness_file, n_gen, avg_team_fitness, team_fitness
+            )
 
             if (n_gen > 0) and (n_gen % exp_config.n_gens_between_save == 0):
                 self.checkpoint.exists = True
@@ -94,23 +96,23 @@ class CCEA_Trainer:
 
                 self.save_checkpoint(self.checkpoint)
 
-    def create_log_file(self, fitness_dir):
+    def create_log_file(self):
         header = ["gen", "avg_team_fitness", "best_team_fitness"]
 
-        with open(fitness_dir, "w", newline="") as csvfile:
+        with open(self.fitness_file, "w", newline="") as csvfile:
             writer = csv.writer(csvfile)
             writer.writerows([header])
 
-    def write_log_file(self, fitness_dir, gen, avg_fitness, best_fitness):
+    def write_log_file(self, gen, avg_fitness, best_fitness):
 
         # Now save it all to the csv
-        with open(fitness_dir, "a", newline="") as csvfile:
+        with open(self.fitness_file, "a", newline="") as csvfile:
             writer = csv.writer(csvfile)
             writer.writerow([gen, avg_fitness, best_fitness])
 
     def save_checkpoint(self, checkpoint: Checkpoint):
         # Save checkpoint
-        with open(os.path.join(self.trial_dir, "checkpoint.pickle"), "wb") as handle:
+        with open(self.checkpoint_file, "wb") as handle:
             pickle.dump(
                 asdict(checkpoint),
                 handle,
@@ -119,17 +121,15 @@ class CCEA_Trainer:
 
     def load_checkpoint(
         self,
-        checkpoint_name: str,
         fitness_dir: str,
         trial_dir: str,
     ):
         checkpoint = Checkpoint()
 
         # Load checkpoint file
-        with open(checkpoint_name, "rb") as handle:
+        with open(self.checkpoint_file, "rb") as handle:
             checkpoint = pickle.load(handle)
             checkpoint = Checkpoint(**checkpoint)
-            pop = checkpoint.population
             checkpoint_gen = checkpoint.generation
             checkpoint.exists = True
 

@@ -8,14 +8,15 @@ from learning.algorithms.ippo.PPO import Params
 from learning.algorithms.ippo.IPPO import IPPO
 import numpy as np
 import pickle as pkl
+from pathlib import Path
 
 
 class IPPO_Trainer:
     def __init__(
         self,
         device: str,
-        batch_dir: str,
-        trials_dir: str,
+        batch_dir: Path,
+        trials_dir: Path,
         trial_id: int,
         trial_name: str,
         video_name: str,
@@ -33,8 +34,7 @@ class IPPO_Trainer:
         self.models_dir = self.trial_dir / "models"
 
         # Create directories
-        if not os.path.exists(self.models_dir):
-            os.mkdir(self.models_dir)
+        self.models_dir.mkdir(parents=True, exist_ok=True)
 
     def train(self, exp_config, env_config: EnvironmentParams):
 
