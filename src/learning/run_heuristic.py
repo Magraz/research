@@ -154,6 +154,13 @@ if __name__ == "__main__":
         help="Experiment name",
         type=str,
     )
+    parser.add_argument(
+        "--environment",
+        default="",
+        help="Learning environment name",
+        type=str,
+    )
+
     parser.add_argument("--trial_id", default=0, help="Sets trial ID", type=int)
 
     args = vars(parser.parse_args())
@@ -164,7 +171,7 @@ if __name__ == "__main__":
     # Set configuration folder
     batch_dir = dir_path / "experiments" / "yamls" / args["batch"]
 
-    env_file = os.path.join(batch_dir, "_env.yaml")
+    env_file = batch_dir / "_env.yaml"
 
     with open(str(env_file), "r") as file:
         env_config = yaml.safe_load(file)

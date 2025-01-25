@@ -1,68 +1,15 @@
 
-map_size: [3.0, 3.0]
+map_size: [2.0, 2.0]
 observation_size: 10
-action_size: 1
+action_size: 2
+state_representation: local
+shuffle_agents_positions: False
+max_steps: 1000
 
 agents:
   - observation_radius: 4.0
-    color: "GREEN"
-    position:
-      spawn_rule: fixed
-      coordinates: [-0.15, -0.5]
-  
-  - observation_radius: 4.0
-    color: "BLACK"
-    position:
-      spawn_rule: fixed
-      coordinates: [-0.1, -0.5]
-  
-  - observation_radius: 4.0
-    color: "BLUE"
-    position:
-      spawn_rule: fixed
-      coordinates: [-0.05, -0.5]
-  
-  - observation_radius: 4.0
-    color: "WHITE"
-    position:
-      spawn_rule: fixed
-      coordinates: [0.0, -0.5]
-  
-  - observation_radius: 4.0
-    color: "GRAY"
-    position:
-      spawn_rule: fixed
-      coordinates: [0.05, -0.5]
-  
-  - observation_radius: 4.0
-    color: "LIGHT_GREEN"
-    position:
-      spawn_rule: fixed
-      coordinates: [0.1, -0.5]
-  
-  # - observation_radius: 4.0
-  #   color: "MAGENTA"
-  #   position:
-  #     spawn_rule: fixed
-  #     coordinates: [0.15, 0.0]
-  
-  # - observation_radius: 4.0
-  #   color: "ORANGE"
-  #   position:
-  #     spawn_rule: fixed
-  #     coordinates: [0.3, 0.0]
-  
-  # - observation_radius: 4.0
-  #   color: "RED"
-  #   position:
-  #     spawn_rule: fixed
-  #     coordinates: [0.3, 0.0]
-  
-  # - observation_radius: 4.0
-  #   color: "PURPLE"
-  #   position:
-  #     spawn_rule: fixed
-  #     coordinates: [0.3, 0.0]
+    starting_position: [-0.15, -0.5]
+    n_agents: 8
 
 targets:
   - value: 1.0
@@ -73,7 +20,7 @@ targets:
     order: 0
     position:
       spawn_rule: fixed
-      coordinates: [1.5, 1.0]
+      coordinates: [-0.15, 0.5]
   
   # - value: 1.0
   #   coupling: 4

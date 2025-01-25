@@ -14,6 +14,20 @@ COLOR_MAP = {
     "MAGENTA": (0.9, 0.25, 0.5),
 }
 
+COLOR_LIST = [
+    Color.GREEN,
+    Color.RED,
+    Color.BLUE,
+    Color.BLACK,
+    Color.LIGHT_GREEN,
+    Color.GRAY,
+    Color.WHITE,
+    (0.75, 0.25, 0.75),
+    (0.75, 0.75, 0.25),
+    (0.9, 0.25, 0.5),
+]
+
+
 def sample_filtered_normal(mean, std_dev, threshold):
     while True:
         # Sample a single value from the normal distribution

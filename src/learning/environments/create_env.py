@@ -84,18 +84,12 @@ def create_env(
                 "scenario": SalpDomain(),
                 "x_semidim": env_config["map_size"][0],
                 "y_semidim": env_config["map_size"][1],
+                "max_steps": env_config["max_steps"],
+                "viewer_zoom": kwargs.pop("viewer_zoom", 1),
                 # Agent data
-                "n_agents": len(env_config["agents"]),
-                "agents_colors": [
-                    agent["color"] if agent.get("color") else "BLUE"
-                    for agent in env_config["agents"]
-                ],
-                "agents_positions": [
-                    poi["position"]["coordinates"] for poi in env_config["agents"]
-                ],
-                "lidar_range": [
-                    rover["observation_radius"] for rover in env_config["agents"]
-                ],
+                "n_agents": env_config["agents"][0]["n_agents"],
+                "lidar_range": env_config["agents"][0]["observation_radius"],
+                "state_representation": env_config["state_representation"],
                 # POIs data
                 "n_targets": len(env_config["targets"]),
                 "targets_positions": [
@@ -112,7 +106,6 @@ def create_env(
                 "covering_range": [
                     poi["observation_radius"] for poi in env_config["targets"]
                 ][0],
-                "viewer_zoom": kwargs.pop("viewer_zoom", 1),
             }
 
     # Set up the environment

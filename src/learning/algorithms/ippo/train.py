@@ -54,6 +54,7 @@ class IPPO_Trainer:
         params.lr_actor = 3e-4
         params.lr_critic = 1e-3
         params.grad_clip = 0.5  # clip_grad_val
+        self.action_std = -0.2
         params.write()
 
         learner = IPPO(params)

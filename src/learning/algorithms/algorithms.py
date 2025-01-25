@@ -8,6 +8,8 @@ from learning.algorithms.ccea.types import Experiment as CCEA_Experiment
 
 from learning.algorithms.ippo.train import IPPO_Trainer
 
+from learning.algorithms.manual.control import ManualControl
+
 from learning.algorithms.types import AlgorithmEnum
 
 from learning.environments.types import EnvironmentEnum, EnvironmentParams
@@ -70,6 +72,22 @@ def run_algorithm(
         case AlgorithmEnum.IPPO:
             exp_config = None
             trainer = IPPO_Trainer(
+                device="cpu",
+                batch_dir=batch_dir,
+                trials_dir=Path(batch_dir).parents[1]
+                / "results"
+                / batch_name
+                / experiment_name,
+                trial_id=trial_id,
+                trial_name=Path(exp_file).stem,
+                video_name=f"{experiment_name}_{trial_id}",
+            )
+
+        case AlgorithmEnum.NONE:
+            exp_config = None
+            train = False
+
+            trainer = ManualControl(
                 device="cpu",
                 batch_dir=batch_dir,
                 trials_dir=Path(batch_dir).parents[1]

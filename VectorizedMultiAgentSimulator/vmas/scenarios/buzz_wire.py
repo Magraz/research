@@ -221,6 +221,7 @@ class Scenario(BaseScenario):
                 self.ball.state.pos - self.goal.state.pos,
                 dim=1,
             )
+
             pos_shaping = dist_to_goal * self.pos_shaping_factor
             self.pos_rew += self.pos_shaping - pos_shaping
             self.pos_shaping = pos_shaping

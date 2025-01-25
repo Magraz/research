@@ -1,5 +1,6 @@
 from pynput.keyboard import Key, Listener
 import numpy as np
+import math
 
 
 class manual_control:
@@ -8,6 +9,7 @@ class manual_control:
         self.n_agents = n_agents
         self.cmd_vel = [0, 0]
         self.join = [0]
+        self.angle = 1.0
         self.speed = 1.0
 
     def on_press(self, key):
@@ -15,13 +17,13 @@ class manual_control:
         try:
             match (key.char):
                 case "w":
-                    self.cmd_vel = [0.0, self.speed]
-                case "a":
-                    self.cmd_vel = [-self.speed, 0.0]
-                case "d":
                     self.cmd_vel = [self.speed, 0.0]
+                case "a":
+                    self.cmd_vel = [self.speed, -self.angle]
+                case "d":
+                    self.cmd_vel = [self.speed, self.angle]
                 case "s":
-                    self.cmd_vel = [0.0, -self.speed]
+                    self.cmd_vel = [-self.speed, 0.0]
                 case "j":
                     self.join = [0] if self.join[0] else [1]
 

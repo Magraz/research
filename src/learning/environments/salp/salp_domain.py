@@ -18,7 +18,11 @@ from learning.environments.salp.world import SalpWorld
 from learning.environments.salp.dynamics import SalpDynamics
 from learning.environments.salp.controller import SalpController
 from learning.environments.salp.sensors import SectorDensity
-from learning.environments.salp.utils import COLOR_MAP, sample_filtered_normal
+from learning.environments.salp.utils import (
+    COLOR_LIST,
+    COLOR_MAP,
+    sample_filtered_normal,
+)
 import random
 import math
 
@@ -28,38 +32,54 @@ if typing.TYPE_CHECKING:
 
 class SalpDomain(BaseScenario):
     def make_world(self, batch_dim: int, device: torch.device, **kwargs):
+        # CONSTANTS
+        self.target_radius = 0.11
+        self.agent_radius = 0.02
+        self.agent_joint_length = 0.042
+        self.agent_max_angle = 45
+        self.agent_min_angle = -45
+        self.u_multiplier = 1.0
+
+        # Environment
         self.x_semidim = kwargs.pop("x_semidim", 1)
         self.y_semidim = kwargs.pop("y_semidim", 1)
-
         self.viewer_zoom = kwargs.pop("viewer_zoom", 1.5)
 
+        # Agents
         self.n_agents = kwargs.pop("n_agents", 2)
-        self.agents_colors = kwargs.pop("agents_colors", ["BLUE"])
+        self.starting_position = kwargs.pop("starting_position", [0.0, 0.0])
+        self.state_representation = kwargs.pop("state_representation", "local")
+        self.agents_colors = []
+        self.agents_positions = []
+        self.agents_idx = []
+
+        for idx in range(self.n_agents):
+            self.agents_idx.append(idx)
+            self.agents_colors.append(COLOR_LIST[idx])
+            self.agents_positions.append(
+                [
+                    self.starting_position[0] + self.agent_joint_length * idx,
+                    self.starting_position[1],
+                ]
+            )
+
+        # Targets
         self.n_targets = kwargs.pop("n_targets", 1)
-
         self.targets_positions = kwargs.pop("targets_positions", [[0.0, 3.0]])
-
         self.targets_colors = kwargs.pop("targets_colors", ["RED"])
         self.targets_values = torch.tensor(
             kwargs.pop("targets_values", [1.0]), device=device
         )
-        self.agents_positions = kwargs.pop("agents_positions", [])
-        self.agents_idx = [
-            i for i, _ in enumerate(self.agents_positions[: self.n_agents])
-        ]
+
         if kwargs.pop("shuffle_agents_positions", False):
             random.shuffle(self.agents_idx)
 
-        self._min_dist_between_entities = kwargs.pop("min_dist_between_entities", 0.1)
         self._lidar_range = kwargs.pop("lidar_range", 10.0)
         self._covering_range = kwargs.pop("covering_range", 0.25)
 
         self._agents_per_target = kwargs.pop("agents_per_target", 1)
         self.targets_respawn = kwargs.pop("targets_respawn", False)
         self.random_spawn = kwargs.pop("random_spawn", False)
-        self.use_joints = kwargs.pop("use_joints", True)
-
-        self.state_representation = "local_neighbors"
 
         ScenarioUtils.check_kwargs_consumed(kwargs)
 
@@ -67,12 +87,6 @@ class SalpDomain(BaseScenario):
 
         self.global_rew = torch.zeros(batch_dim, device=device)
         self.covered_targets = torch.zeros((batch_dim, self.n_targets), device=device)
-
-        # CONSTANTS
-        self.agent_radius = 0.025
-        self.target_radius = 0.11
-        self.agent_dist = 0.05
-        self.u_multiplier = 2.0
 
         # self.gravity_x_val = sample_filtered_normal(
         #     mean=0.0, std_dev=0.3, threshold=0.2
@@ -91,7 +105,7 @@ class SalpDomain(BaseScenario):
             substeps=15,
             collision_force=1500,
             joint_force=900,
-            torque_constraint_force=1.5,
+            torque_constraint_force=0.5,
             # gravity=(
             #     self.gravity_x_val,
             #     self.gravity_y_val,
@@ -120,33 +134,33 @@ class SalpDomain(BaseScenario):
             agent = Agent(
                 name=f"agent_{i}",
                 render_action=True,
-                shape=Box(length=0.025, width=0.04),
+                shape=Sphere(radius=self.agent_radius),
                 dynamics=SalpDynamics(),
                 sensors=([SectorDensity(world, max_range=self._lidar_range)]),
-                color=COLOR_MAP[self.agents_colors[i]],
+                color=self.agents_colors[i],
                 u_multiplier=self.u_multiplier,
             )
+
             agent.state.join = torch.zeros(batch_dim)
             agent.state.idx = self.agents_idx[i]
             world.add_agent(agent)
 
         # Add joints
         self.joint_list = []
-        if self.use_joints:
-            for i in range(self.n_agents - 1):
-                joint = Joint(
-                    world.agents[self.agents_idx[i]],
-                    world.agents[self.agents_idx[i + 1]],
-                    anchor_a=(0, 0),
-                    anchor_b=(0, 0),
-                    dist=self.agent_dist,
-                    rotate_a=False,
-                    rotate_b=False,
-                    collidable=False,
-                    width=0,
-                )
-                world.add_joint(joint)
-                self.joint_list.append(joint)
+        for i in range(self.n_agents - 1):
+            joint = Joint(
+                world.agents[self.agents_idx[i]],
+                world.agents[self.agents_idx[i + 1]],
+                anchor_a=(0, 0),
+                anchor_b=(0, 0),
+                dist=self.agent_joint_length,
+                rotate_a=False,
+                rotate_b=False,
+                collidable=False,
+                width=0,
+            )
+            world.add_joint(joint)
+            self.joint_list.append(joint)
 
         # Assign neighbors to agents
         for agent in world.agents:
@@ -197,19 +211,32 @@ class SalpDomain(BaseScenario):
                 batch_index=env_index,
             )
 
+    def interpolate(
+        self,
+        value,
+        source_min=-1,
+        source_max=1,
+        target_min=-torch.pi / 8,
+        target_max=torch.pi / 8,
+    ):
+        # Linear interpolation using PyTorch
+        return target_min + (value - source_min) / (source_max - source_min) * (
+            target_max - target_min
+        )
+
     def process_action(self, agent: Agent):
 
-        # Single DOF movement
-        x = (
-            torch.cos(agent.state.rot + 1.5 * torch.pi).squeeze(-1)
-            * -agent.action.u[:, 0]
-        )
-        y = (
-            torch.sin(agent.state.rot + 1.5 * torch.pi).squeeze(-1)
-            * -agent.action.u[:, 0]
-        )
+        # Get heading vector
+        magnitude = agent.action.u[:, 0]
+        x = torch.cos(agent.state.rot + 1.5 * torch.pi).squeeze(-1) * -magnitude
+        y = torch.sin(agent.state.rot + 1.5 * torch.pi).squeeze(-1) * -magnitude
 
-        agent.state.force = torch.stack((x, y), dim=-1)
+        # Rotate vector
+        theta = self.interpolate(agent.action.u[:, 1])
+        _x = x * torch.cos(-theta) - y * torch.sin(-theta)
+        _y = x * torch.sin(-theta) + y * torch.cos(-theta)
+
+        agent.state.force = torch.stack((_x, _y), dim=-1)
 
         # Join action
         # if agent.state.join.any():
@@ -380,7 +407,7 @@ class SalpDomain(BaseScenario):
             heading * normalized_dist_to_target, dim=1
         ).unsqueeze(-1)
 
-        # Get all neighbors statesw
+        # Get all neighbors states
         left_neighbors_total_force = torch.zeros_like(agent.state.force)
         right_neighbors_total_force = torch.zeros_like(agent.state.force)
 
@@ -471,7 +498,7 @@ class SalpDomain(BaseScenario):
     def observation(self, agent: Agent):
 
         match (self.state_representation):
-            case "local_neighbors":
+            case "local":
                 return self.aggregate_local_neighbors(agent)
             case "all_neighbors":
                 return self.all_agents_representation(agent)

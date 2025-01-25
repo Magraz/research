@@ -28,3 +28,5 @@ class POIConfig:
 class SalpEnvironmentConfig(EnvironmentParams):
     agents: list[SalpsConfig] = None
     targets: list[POIConfig] = None
+    state_representation: str = None
+    shuffle_agents_positions: bool = False
