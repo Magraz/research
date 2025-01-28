@@ -9,7 +9,7 @@ max_steps: 500
 agents:
   observation_radius: 4.0
   starting_position: [-0.15, -0.5]
-  n_agents: 6
+  n_agents: 4
 
 targets:
   spawn_rule: fixed
