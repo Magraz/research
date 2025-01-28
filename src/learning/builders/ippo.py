@@ -4,8 +4,8 @@ from learning.environments.types import EnvironmentEnum
 from dataclasses import asdict
 
 # EXPERIMENT SETTINGS
-ENVIRONMENT = EnvironmentEnum.VMAS_BUZZ_WIRE
-BATCH = f"{ENVIRONMENT}_standard"
+ENVIRONMENT = EnvironmentEnum.VMAS_SALP
+BATCH = f"{ENVIRONMENT}"
 
 # # EXPERIMENTS
 IPPO = Experiment()

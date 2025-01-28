@@ -1,0 +1,16 @@
+
+map_size: [2.0, 2.0]
+observation_size: 12
+action_size: 2
+state_representation: single
+shuffle_agents_positions: False
+max_steps: 500
+
+agents:
+  observation_radius: 4.0
+  starting_position: [-0.15, -0.5]
+  n_agents: 6
+
+targets:
+  spawn_rule: fixed
+  start_coordinates: [[-0.15, 0.5]]

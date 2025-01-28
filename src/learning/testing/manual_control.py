@@ -18,12 +18,16 @@ class manual_control:
             match (key.char):
                 case "w":
                     self.cmd_vel = [self.speed, 0.0]
-                case "a":
+                case "q":
                     self.cmd_vel = [self.speed, -self.angle]
-                case "d":
+                case "e":
                     self.cmd_vel = [self.speed, self.angle]
                 case "s":
                     self.cmd_vel = [-self.speed, 0.0]
+                case "z":
+                    self.cmd_vel = [-self.speed, self.angle]
+                case "c":
+                    self.cmd_vel = [-self.speed, -self.angle]
                 case "j":
                     self.join = [0] if self.join[0] else [1]
 

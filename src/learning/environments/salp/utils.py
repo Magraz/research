@@ -1,5 +1,7 @@
 from vmas.simulator.utils import Color
 import random
+import numpy as np
+import torch
 
 COLOR_MAP = {
     "GREEN": Color.GREEN,
@@ -35,3 +37,86 @@ def sample_filtered_normal(mean, std_dev, threshold):
         # Check if the value is outside the threshold range
         if abs(value) > threshold:
             return value
+
+
+def generate_target_points(x, y, n_points, theta_range, d_max):
+    """
+    Generate n_points points starting from (x, y), where each point is positioned
+    at a fixed distance (d_max) from the previous point at a random angle within theta_range.
+
+    Parameters:
+        x (float): Starting x-coordinate.
+        y (float): Starting y-coordinate.
+        n_points (int): Total number of points to generate.
+        theta_range (tuple): Angle range in degrees (min_angle, max_angle).
+        d_max (float): Fixed distance between consecutive points.
+
+    Returns:
+        list: List of tuples containing the generated (x, y) coordinates.
+    """
+    points = [(x, y)]  # Initialize with the starting point
+
+    for _ in range(n_points - 1):
+        # Generate a random angle within the theta_range
+        theta = np.radians(np.random.uniform(theta_range[0], theta_range[1]))
+
+        # Calculate the new point
+        x_new = points[-1][0] + d_max * np.cos(theta)
+        y_new = points[-1][1] + d_max * np.sin(theta)
+
+        # Append the new point to the list
+        points.append((x_new, y_new))
+
+    return points
+
+
+def batch_discrete_frechet_distance(batch_P, batch_Q):
+    """
+    Compute the discrete Fréchet distance between two batched tensors of points.
+
+    Parameters:
+        batch_P (torch.Tensor): Tensor of shape [B, N, 2] representing B sets of N points (x, y).
+        batch_Q (torch.Tensor): Tensor of shape [B, M, 2] representing B sets of M points (x, y).
+
+    Returns:
+        torch.Tensor: Tensor of shape [B] containing the discrete Fréchet distance for each batch.
+    """
+    B, N, _ = batch_P.shape
+    _, M, _ = batch_Q.shape
+
+    # Initialize a large distance matrix for each batch
+    ca = torch.full((B, N, M), -1.0, device=batch_P.device)
+
+    def recursive_frechet(ca, P, Q, i, j, b):
+        if ca[b, i, j] > -1:  # Use cached value
+            return ca[b, i, j]
+
+        # Compute Euclidean distance between P[i] and Q[j] for the current batch
+        dist = torch.norm(P[b, i] - Q[b, j], p=2)
+
+        if i == 0 and j == 0:  # Base case
+            ca[b, i, j] = dist
+        elif i == 0:  # First row
+            ca[b, i, j] = torch.max(recursive_frechet(ca, P, Q, i, j - 1, b), dist)
+        elif j == 0:  # First column
+            ca[b, i, j] = torch.max(recursive_frechet(ca, P, Q, i - 1, j, b), dist)
+        else:  # General case
+            ca[b, i, j] = torch.max(
+                torch.min(
+                    torch.stack(
+                        [
+                            recursive_frechet(ca, P, Q, i - 1, j, b),
+                            recursive_frechet(ca, P, Q, i - 1, j - 1, b),
+                            recursive_frechet(ca, P, Q, i, j - 1, b),
+                        ]
+                    ),
+                ),
+                dist,
+            )
+        return ca[b, i, j]
+
+    # Iterate over each batch and compute the Fréchet distance
+    for b in range(B):
+        recursive_frechet(ca, batch_P, batch_Q, N - 1, M - 1, b)
+
+    return ca[:, -1, -1]  # Return the Fréchet distance for each batch

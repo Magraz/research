@@ -87,25 +87,12 @@ def create_env(
                 "max_steps": env_config["max_steps"],
                 "viewer_zoom": kwargs.pop("viewer_zoom", 1),
                 # Agent data
-                "n_agents": env_config["agents"][0]["n_agents"],
-                "lidar_range": env_config["agents"][0]["observation_radius"],
+                "n_agents": env_config["agents"]["n_agents"],
+                "lidar_range": env_config["agents"]["observation_radius"],
                 "state_representation": env_config["state_representation"],
                 # POIs data
-                "n_targets": len(env_config["targets"]),
-                "targets_positions": [
-                    poi["position"]["coordinates"] for poi in env_config["targets"]
-                ],
-                "targets_values": [poi["value"] for poi in env_config["targets"]],
-                "targets_colors": [
-                    poi["color"] if poi.get("color") else "GREEN"
-                    for poi in env_config["targets"]
-                ],
-                "agents_per_target": [poi["coupling"] for poi in env_config["targets"]][
-                    0
-                ],
-                "covering_range": [
-                    poi["observation_radius"] for poi in env_config["targets"]
-                ][0],
+                "n_targets": len(env_config["targets"]["start_coordinates"]),
+                "targets_start_positions": env_config["targets"]["start_coordinates"],
             }
 
     # Set up the environment

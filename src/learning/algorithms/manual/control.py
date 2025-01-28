@@ -36,7 +36,10 @@ class ManualControl:
     def view(self, exp_config, env_config: EnvironmentParams):
 
         env = create_env(
-            self.batch_dir, 3, device=self.device, env_name=env_config.environment
+            self.batch_dir,
+            self.n_envs,
+            device=self.device,
+            env_name=env_config.environment,
         )
 
         mc = manual_control(env.n_agents)
@@ -71,6 +74,8 @@ class ManualControl:
 
                 obs, rews, dones, info = env.step(actions)
 
+                print(obs)
+
                 obs_list.append(obs[0][0])
 
                 G_list.append(torch.stack([g[: self.n_envs] for g in rews], dim=0)[0])
@@ -78,6 +83,9 @@ class ManualControl:
                 G_total += torch.stack([g[: self.n_envs] for g in rews], dim=0)
 
                 G = torch.stack([g[: self.n_envs] for g in rews], dim=0)
+
+                if dones.any():
+                    return
 
                 # if any(tensor.any() for tensor in rews):
                 #     print("G")
