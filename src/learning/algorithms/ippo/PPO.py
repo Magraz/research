@@ -10,6 +10,23 @@ torch.autograd.profiler.profile(False)
 torch.autograd.profiler.emit_nvtx(False)
 
 
+def orthogonal_init(m, gain=1.0):
+    """
+    Applies orthogonal initialization to the model layers.
+
+    Parameters:
+        m (torch.nn.Module): The layer to initialize.
+        gain (float): Scaling factor for the weights.
+                      - Use 1.0 for standard layers.
+                      - Use sqrt(2) for ReLU activations.
+                      - Use 0.01 for small initial weights.
+    """
+    if isinstance(m, nn.Linear):
+        nn.init.orthogonal_(m.weight, gain=gain)  # Apply orthogonal init
+        if m.bias is not None:
+            nn.init.constant_(m.bias, 0)  # Set biases to zero
+
+
 class RolloutBuffer:
     def __init__(self):
         self.actions = []
@@ -58,6 +75,13 @@ class ActorCritic(nn.Module):
             nn.Tanh(),
         )
 
+        # Apply orthogonal initialization
+        self.actor.apply(
+            lambda m: orthogonal_init(
+                m, gain=torch.nn.init.calculate_gain("leaky_relu")
+            )
+        )
+
         # critic
         self.critic = nn.Sequential(
             nn.Linear(state_dim, critic_hidden),
@@ -93,7 +117,7 @@ class ActorCritic(nn.Module):
             return action_mean.detach()
         else:
             return (
-                torch.clamp(action, min=-1.0, max=1.0).detach(),
+                action.detach(),
                 action_logprob.detach(),
                 state_val.detach(),
             )

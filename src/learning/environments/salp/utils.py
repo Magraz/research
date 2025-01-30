@@ -120,3 +120,84 @@ def batch_discrete_frechet_distance(batch_P, batch_Q):
         recursive_frechet(ca, batch_P, batch_Q, N - 1, M - 1, b)
 
     return ca[:, -1, -1]  # Return the Fréchet distance for each batch
+
+
+def angle_between_vectors(v1, v2):
+    """
+    Calculate the angle (in radians) between two vectors using PyTorch.
+
+    Parameters:
+        v1 (torch.Tensor): Tensor of shape [N, D] representing N vectors.
+        v2 (torch.Tensor): Tensor of shape [N, D] representing N vectors.
+
+    Returns:
+        torch.Tensor: Tensor of shape [N] containing angles in radians.
+    """
+    # Compute dot product
+    dot_product = torch.sum(v1 * v2, dim=1)
+
+    # Compute magnitudes (L2 norms)
+    norm_v1 = torch.norm(v1, p=2, dim=1)
+    norm_v2 = torch.norm(v2, p=2, dim=1)
+
+    # Compute cosine similarity
+    cos_theta = dot_product / (norm_v1 * norm_v2 + 1e-8)  # Avoid division by zero
+
+    # Clamp values to avoid numerical errors in arccos
+    cos_theta = torch.clamp(cos_theta, -1.0, 1.0)
+
+    # Compute angle in radians
+    angle = torch.acos(cos_theta)
+
+    return angle
+
+
+def is_within_any_range(number, ranges):
+    """
+    Check if a number is within any of the given ranges.
+
+    Parameters:
+        number (float or torch.Tensor): The number to check.
+        ranges (list of tuples): List of (min, max) tuples representing the ranges.
+
+    Returns:
+        torch.Tensor (bool): True if the number is within any range, False otherwise.
+    """
+    # Convert ranges to a tensor of shape [N, 2]
+    range_tensor = torch.tensor(ranges)  # Shape: [N, 2]
+
+    # Extract min and max values
+    range_min = range_tensor[:, 0]  # First column (min values)
+    range_max = range_tensor[:, 1]  # Second column (max values)
+
+    # Check if the number is inside any range
+    inside_any_range = (number >= range_min) & (number <= range_max)
+
+    # Return True if the number is in any range
+    return torch.any(inside_any_range)
+
+
+def closest_number(target, numbers):
+    """
+    Given a target number and a set of numbers, return the number closest to the target.
+
+    Parameters:
+        target (float or torch.Tensor): The target number.
+        numbers (list of float or torch.Tensor): List of numbers to compare against.
+
+    Returns:
+        torch.Tensor: The closest number.
+    """
+    # Convert numbers to a PyTorch tensor
+    numbers_tensor = torch.tensor(numbers)  # Shape: [N]
+
+    # Compute absolute differences
+    differences = torch.abs(numbers_tensor - target)  # Shape: [N]
+
+    # Get the index of the minimum difference
+    closest_index = torch.argmin(differences)
+
+    # Retrieve the closest number
+    closest_value = numbers_tensor[closest_index]
+
+    return closest_value

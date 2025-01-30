@@ -9,8 +9,8 @@ class manual_control:
         self.n_agents = n_agents
         self.cmd_vel = [0, 0]
         self.join = [0]
-        self.angle = 1.0
-        self.speed = 1.0
+        self.angle = 0.4
+        self.speed = 0.5
 
     def on_press(self, key):
 
@@ -19,15 +19,19 @@ class manual_control:
                 case "w":
                     self.cmd_vel = [self.speed, 0.0]
                 case "q":
-                    self.cmd_vel = [self.speed, -self.angle]
-                case "e":
                     self.cmd_vel = [self.speed, self.angle]
+                case "e":
+                    self.cmd_vel = [self.speed, -self.angle]
                 case "s":
                     self.cmd_vel = [-self.speed, 0.0]
                 case "z":
-                    self.cmd_vel = [-self.speed, self.angle]
-                case "c":
                     self.cmd_vel = [-self.speed, -self.angle]
+                case "c":
+                    self.cmd_vel = [-self.speed, self.angle]
+                case "d":
+                    self.cmd_vel = [self.speed, -0.5]
+                case "a":
+                    self.cmd_vel = [self.speed, 0.5]
                 case "j":
                     self.join = [0] if self.join[0] else [1]
 

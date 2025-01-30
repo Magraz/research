@@ -24,7 +24,7 @@ class ManualControl:
         trial_name: str,
         video_name: str,
     ):
-        self.n_envs = 3
+        self.n_envs = 1
         # Directories
         self.device = device
         self.batch_dir = batch_dir
@@ -74,13 +74,13 @@ class ManualControl:
 
                 obs, rews, dones, info = env.step(actions)
 
-                print(obs)
-
                 obs_list.append(obs[0][0])
 
                 G_list.append(torch.stack([g[: self.n_envs] for g in rews], dim=0)[0])
 
                 G_total += torch.stack([g[: self.n_envs] for g in rews], dim=0)
+
+                print(G_total)
 
                 G = torch.stack([g[: self.n_envs] for g in rews], dim=0)
 

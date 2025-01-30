@@ -49,12 +49,9 @@ class IPPO_Trainer:
         params.N_batch = 10
         params.N_steps = 3e6
         params.beta_ent = 0.0
-        params.gamma = 0.9
-        params.lmbda = 0.9
         params.lr_actor = 3e-4
         params.lr_critic = 1e-3
-        params.grad_clip = 0.5  # clip_grad_val
-        self.action_std = -0.2
+        params.grad_clip = 0.3  # clip_grad_val
         params.write()
 
         learner = IPPO(params)
@@ -73,10 +70,10 @@ class IPPO_Trainer:
 
                 while not done:
                     step += 1
-                    action = learner.act(state)
-                    action_tensor_list = [
-                        torch.tensor(row).unsqueeze(0) for row in action
-                    ]
+                    action = torch.clamp(
+                        torch.from_numpy(learner.act(state)), min=-1.0, max=1.0
+                    )
+                    action_tensor_list = [row.unsqueeze(0) for row in action]
                     state, reward, done, _ = env.step(action_tensor_list)
                     data.append([state, reward])
                     learner.add_reward_terminal(reward, done)
@@ -109,7 +106,7 @@ class IPPO_Trainer:
         params.state_dim = env_config.observation_size
 
         learner = IPPO(params)
-        learner.load(self.models_dir / "a0")
+        learner.load(self.models_dir / "a1")
 
         while True:
             done = False
@@ -117,8 +114,12 @@ class IPPO_Trainer:
             R = np.zeros(env.n_agents)
             r = []
             while not done:
-                action = learner.act_deterministic(state)
-                action_tensor_list = [torch.tensor(row).unsqueeze(0) for row in action]
+                action = torch.clamp(
+                    torch.from_numpy(learner.act_deterministic(state)),
+                    min=-1.0,
+                    max=1.0,
+                )
+                action_tensor_list = [row.unsqueeze(0) for row in action]
                 state, reward, done, _ = env.step(action_tensor_list)
                 r.append(reward)
                 R += np.array(reward[0].cpu())
@@ -129,4 +130,6 @@ class IPPO_Trainer:
                     visualize_when_rgb=True,
                 )
 
-            print(R, max(r), min(r))
+            print(f"TOTAL RETURN: {R}")
+            print(f"MAX {max(r)}")
+            print(f"MIN {min(r)}")

@@ -22,6 +22,9 @@ from learning.environments.salp.utils import (
     COLOR_LIST,
     generate_target_points,
     batch_discrete_frechet_distance,
+    angle_between_vectors,
+    is_within_any_range,
+    closest_number,
 )
 from learning.environments.salp.types import Chain
 import random
@@ -36,7 +39,7 @@ class SalpDomain(BaseScenario):
     def make_world(self, batch_dim: int, device: torch.device, **kwargs):
         # CONSTANTS
         self.agent_radius = 0.02
-        self.agent_joint_length = 0.04
+        self.agent_joint_length = 0.043
         self.agent_max_angle = 45
         self.agent_min_angle = -45
         self.u_multiplier = 1.0
@@ -143,7 +146,7 @@ class SalpDomain(BaseScenario):
             substeps=15,
             collision_force=1500,
             joint_force=900,
-            torque_constraint_force=0.05,
+            torque_constraint_force=0.01,
             # gravity=(
             #     self.gravity_x_val,
             #     self.gravity_y_val,
@@ -174,7 +177,9 @@ class SalpDomain(BaseScenario):
                 agent = Agent(
                     name=f"chain_{agent_chain.idx}_agent_{idx}",
                     render_action=True,
-                    shape=Sphere(radius=self.agent_radius),
+                    shape=Box(
+                        length=self.agent_radius * 2, width=self.agent_radius * 2.5
+                    ),
                     dynamics=SalpDynamics(),
                     color=self.agents_colors[idx],
                     u_multiplier=self.u_multiplier,
@@ -246,23 +251,27 @@ class SalpDomain(BaseScenario):
                     batch_index=env_index,
                 )
 
+                # agent.state.rot += -4 * torch.pi + torch.pi / 8
+
         for target_chain in self.target_chains:
 
-            target_x = self.targets_start_positions[0][0]
-            target_y = self.targets_start_positions[0][1]
+            target_x = self.targets_start_positions[0][0] + random.uniform(-1, 1)
+            target_y = self.targets_start_positions[0][1] + random.uniform(-1, 1)
 
-            target_chain.path = torch.tensor(
-                generate_target_points(
-                    x=target_x,
-                    y=target_y,
-                    n_points=self.n_agents,
-                    d_max=self.agent_joint_length,
-                    theta_range=[self.agent_min_angle, self.agent_max_angle],
-                ),
-                dtype=torch.float32,
-            ).unsqueeze(0)
-
-            target_chain.path.repeat(self.world.batch_dim, 1, 1)
+            target_chain.path = (
+                torch.tensor(
+                    generate_target_points(
+                        x=target_x,
+                        y=target_y,
+                        n_points=self.n_agents,
+                        d_max=self.agent_joint_length,
+                        theta_range=[self.agent_min_angle, self.agent_max_angle],
+                    ),
+                    dtype=torch.float32,
+                )
+                .unsqueeze(0)
+                .repeat(self.world.batch_dim, 1, 1)
+            )
 
             for idx, target in enumerate(target_chain.entities):
 
@@ -279,6 +288,8 @@ class SalpDomain(BaseScenario):
                     batch_index=env_index,
                 )
 
+            target_chain.update()
+
         self.frechet_shaping = self.calculate_frechet_reward()
         self.centroid_shaping = self.calculate_centroid_reward()
 
@@ -287,8 +298,8 @@ class SalpDomain(BaseScenario):
         value,
         source_min=-1,
         source_max=1,
-        target_min=-torch.pi / 8,
-        target_max=torch.pi / 8,
+        target_min=-torch.pi,
+        target_max=torch.pi,
     ):
         # Linear interpolation using PyTorch
         return target_min + (value - source_min) / (source_max - source_min) * (
@@ -296,18 +307,40 @@ class SalpDomain(BaseScenario):
         )
 
     def process_action(self, agent: Agent):
+        magnitude = (
+            self.interpolate(agent.action.u[:, 0], target_min=0, target_max=1) * 0.2
+        )
+        turn_angle = torch.pi / 4
+        in_theta = self.interpolate(
+            agent.action.u[:, 1], target_min=-turn_angle, target_max=turn_angle
+        )
 
         # Get heading vector
-        magnitude = agent.action.u[:, 0]
-        x = torch.cos(agent.state.rot + 1.5 * torch.pi).squeeze(-1) * -magnitude
-        y = torch.sin(agent.state.rot + 1.5 * torch.pi).squeeze(-1) * -magnitude
+        agent_rot = agent.state.rot % (2 * torch.pi)
+        heading_offset = agent_rot + torch.pi / 2
 
-        # Rotate vector
-        theta = self.interpolate(agent.action.u[:, 1])
-        _x = x * torch.cos(-theta) - y * torch.sin(-theta)
-        _y = x * torch.sin(-theta) + y * torch.cos(-theta)
+        theta = (in_theta + heading_offset) % (2 * torch.pi)
 
-        agent.state.force = torch.stack((_x, _y), dim=-1)
+        theta_clamps = [
+            (heading_offset - turn_angle) % (2 * torch.pi),
+            (heading_offset + turn_angle) % (2 * torch.pi),
+            # (heading_offset + torch.pi - segment_size) % (2 * torch.pi),
+            # (heading_offset + torch.pi + segment_size) % (2 * torch.pi),
+        ]
+        theta_ranges = [
+            (theta_clamps[0], theta_clamps[1]),
+            # (theta_clamps[2], theta_clamps[3]),
+        ]
+
+        if is_within_any_range(theta, theta_ranges):
+            x = torch.cos(theta).squeeze(-1) * magnitude
+            y = torch.sin(theta).squeeze(-1) * magnitude
+            agent.state.force = torch.stack((x, y), dim=-1)
+        else:
+            theta_clamp = closest_number(theta, theta_clamps)
+            x = torch.cos(theta_clamp).squeeze(-1) * magnitude
+            y = torch.sin(theta_clamp).squeeze(-1) * magnitude
+            agent.state.force = torch.stack((x, y), dim=-1)
 
         # Join action
         # if agent.state.join.any():
@@ -342,6 +375,7 @@ class SalpDomain(BaseScenario):
             self.agent_chains[0].update()
 
             self.frechet_rew[:] = 0
+            self.centroid_rew[:] = 0
 
             f_rew = self.calculate_frechet_reward()
             frechet_shaping = f_rew * self.frechet_shaping_factor
@@ -355,14 +389,14 @@ class SalpDomain(BaseScenario):
 
             self.total_rew = f_rew
 
-            self.global_rew = self.frechet_rew + self.centroid_rew
+            self.global_rew = self.frechet_rew
 
         if is_last:
             self.current_order_per_env = torch.sum(
                 self.all_time_covered_targets, dim=1
             ).unsqueeze(-1)
 
-        rew = torch.cat([self.global_rew])
+        rew = torch.cat([self.global_rew * 10])
 
         return rew
 
@@ -407,135 +441,6 @@ class SalpDomain(BaseScenario):
 
         return torch.stack((x, y), dim=-1)
 
-    def neighbors_representation(self, agent: Agent):
-
-        neighbor_states = []
-
-        for neighbor in agent.state.local_neighbors:
-            norm_force = torch.linalg.norm(
-                F.normalize(neighbor.state.force), dim=-1
-            ).unsqueeze(-1)
-            neighbor_states.extend([norm_force, neighbor.state.rot])
-
-        # Calculate heading and distance to target
-        heading = self.get_heading(agent)
-
-        dist_to_target = agent.state.pos - self._targets[0].state.pos
-        norm_dist = torch.linalg.norm(dist_to_target, dim=-1).unsqueeze(-1)
-
-        normalized_dist_to_target = F.normalize(dist_to_target)
-
-        heading_difference = torch.sum(
-            heading * normalized_dist_to_target, dim=1
-        ).unsqueeze(-1)
-
-        # Add zeros to observation to keep size consistent
-        if len(agent.state.local_neighbors) < 2:
-            pos_vel = torch.ones(
-                (self.world.batch_dim, 1), device=self.world.device
-            ) * torch.tensor([0.0], device=self.world.device)
-
-            neighbor_states.extend([pos_vel, pos_vel])
-
-        return torch.cat(
-            [
-                norm_dist,
-                heading_difference,
-                torch.linalg.norm(F.normalize(agent.state.force), dim=-1).unsqueeze(-1),
-                agent.state.rot,
-                *neighbor_states,
-            ],
-            dim=-1,
-        )
-
-    def aggregate_local_neighbors(self, agent: Agent):
-        # Calculate heading and distance to target
-
-        heading = self.get_heading(agent)
-
-        dist_to_target = agent.state.pos - torch.Tensor(self.target_chains[0].centroid)
-        norm_dist = torch.linalg.norm(dist_to_target, dim=-1).unsqueeze(-1)
-
-        normalized_dist_to_target = F.normalize(dist_to_target)
-
-        heading_difference = torch.sum(
-            heading * normalized_dist_to_target, dim=1
-        ).unsqueeze(-1)
-
-        # Get all neighbors states
-        left_neighbors_total_force = torch.zeros_like(agent.state.force)
-        right_neighbors_total_force = torch.zeros_like(agent.state.force)
-
-        for l_neighbor in agent.state.left_neighbors:
-            left_neighbors_total_force += l_neighbor.state.force
-
-        for r_neighbor in agent.state.right_neighbors:
-            right_neighbors_total_force += r_neighbor.state.force
-
-        left_norm_force = torch.linalg.norm(
-            left_neighbors_total_force, dim=-1
-        ).unsqueeze(-1) / ((self.n_agents - 1) * self.u_multiplier)
-
-        right_norm_force = torch.linalg.norm(
-            right_neighbors_total_force, dim=-1
-        ).unsqueeze(-1) / ((self.n_agents - 1) * self.u_multiplier)
-
-        return torch.cat(
-            [
-                norm_dist,
-                heading_difference,
-                agent.state.rot,
-                left_norm_force,
-                right_norm_force,
-            ],
-            dim=-1,
-        )
-
-    def all_agents_representation(self, agent: Agent):
-
-        # Calculate heading and distance to target
-
-        heading = self.get_heading(agent)
-
-        dist_to_target = agent.state.pos - self._targets[0].state.pos
-        norm_dist = torch.linalg.norm(dist_to_target, dim=-1).unsqueeze(-1)
-
-        normalized_dist_to_target = F.normalize(dist_to_target)
-
-        heading_difference = torch.sum(
-            heading * normalized_dist_to_target, dim=1
-        ).unsqueeze(-1)
-
-        # Get all neighbors states
-        r_neighbors_states = []
-        l_neighbors_states = []
-
-        for r_neighbor in agent.state.right_neighbors:
-            r_neighbors_states.extend(
-                [torch.linalg.norm(r_neighbor.state.force, dim=-1).unsqueeze(-1)]
-            )
-
-        for l_neighbor in agent.state.left_neighbors:
-            l_neighbors_states.extend(
-                [torch.linalg.norm(l_neighbor.state.force, dim=-1).unsqueeze(-1)]
-            )
-
-        r_len = torch.zeros_like(agent.state.rot) + len(r_neighbors_states)
-        l_len = torch.zeros_like(agent.state.rot) + len(l_neighbors_states)
-
-        return torch.cat(
-            [
-                r_len,
-                l_len,
-                norm_dist,
-                heading_difference,
-                agent.state.rot,
-                *l_neighbors_states,
-                *r_neighbors_states,
-            ],
-            dim=-1,
-        )
-
     def calculate_moment(self, position, force):
         """
         Calculate the moment generated by a 2D force at a given position using PyTorch.
@@ -563,9 +468,11 @@ class SalpDomain(BaseScenario):
 
     def single_agent_representation(self, agent: Agent):
 
-        centroid = self.agent_chains[0].centroid
+        self.agent_chains[0].update()
 
-        agent_dist_to_centroid = agent.state.pos - self.agent_chains[0].centroid
+        agent_vect_2_agent_centroid = agent.state.pos - self.agent_chains[0].centroid
+
+        agent_vect_2_target_centroid = agent.state.pos - self.target_chains[0].centroid
 
         f_dist = batch_discrete_frechet_distance(
             self.agent_chains[0].path, self.target_chains[0].path
@@ -576,32 +483,25 @@ class SalpDomain(BaseScenario):
             dim=1,
         )
 
-        left_neighbors_total_force = 0
-        for l_neighbor in agent.state.left_neighbors:
-            left_neighbors_total_force += l_neighbor.state.force
-
-        right_neighbors_total_force = 0
-        for r_neighbor in agent.state.right_neighbors:
-            right_neighbors_total_force += r_neighbor.state.force
-
         total_moment = 0
         total_force = 0
         for a in self.world.agents:
             if a != agent:
-                r = agent.state.pos - centroid
+                r = self.agent_chains[0].centroid - agent.state.pos
                 total_moment += self.calculate_moment(r, agent.state.force)
                 total_force += agent.state.force
 
         observation = torch.cat(
             [
                 total_moment.unsqueeze(-1),
-                total_force,
+                # total_force,
                 f_dist.unsqueeze(-1),
-                c_dist.unsqueeze(-1),
-                agent_dist_to_centroid,
+                agent_vect_2_agent_centroid,
+                # agent_vect_2_target_centroid,
                 agent.state.pos,
                 agent.state.vel,
-                agent.state.rot,
+                agent.state.rot % (2 * torch.pi),
+                agent.state.ang_vel,
             ],
             dim=-1,
         )
@@ -609,14 +509,7 @@ class SalpDomain(BaseScenario):
         return observation
 
     def observation(self, agent: Agent):
-
-        match (self.state_representation):
-            case "local":
-                return self.aggregate_local_neighbors(agent)
-            case "all_neighbors":
-                return self.all_agents_representation(agent)
-            case "single":
-                return self.single_agent_representation(agent)
+        return self.single_agent_representation(agent)
 
     def done(self):
         return self.total_rew > 0.98

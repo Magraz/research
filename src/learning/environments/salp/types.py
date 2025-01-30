@@ -64,4 +64,4 @@ class Chain:
         for idx, entity in enumerate(self.entities):
             self.path[:, idx, :] = entity.state.pos
 
-        self.calculate_centroid()
+        self.centroid = self.calculate_centroid()
