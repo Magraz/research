@@ -25,6 +25,7 @@ from learning.environments.salp.utils import (
     angle_between_vectors,
     is_within_any_range,
     closest_number,
+    angular_velocity,
 )
 from learning.environments.salp.types import Chain
 import random
@@ -48,7 +49,7 @@ class SalpDomain(BaseScenario):
         # Environment
         self.x_semidim = kwargs.pop("x_semidim", 1)
         self.y_semidim = kwargs.pop("y_semidim", 1)
-        self.viewer_zoom = kwargs.pop("viewer_zoom", 1.5)
+        self.viewer_zoom = kwargs.pop("viewer_zoom", 1.05)
 
         # Agents
         self.n_agents = kwargs.pop("n_agents", 2)
@@ -219,6 +220,7 @@ class SalpDomain(BaseScenario):
         self.global_rew = torch.zeros(batch_dim, device=device, dtype=torch.float32)
         self.centroid_rew = self.global_rew.clone()
         self.frechet_rew = self.global_rew.clone()
+        self.spinning_penalty = self.global_rew.clone()
 
         world.zero_grad()
 
@@ -255,8 +257,26 @@ class SalpDomain(BaseScenario):
 
         for target_chain in self.target_chains:
 
-            target_x = self.targets_start_positions[0][0] + random.uniform(-1, 1)
-            target_y = self.targets_start_positions[0][1] + random.uniform(-1, 1)
+            offset = 0.2
+            scale = 1.5
+
+            target_x = self.targets_start_positions[0][0] + random.uniform(
+                -self.x_semidim / scale, self.x_semidim / scale
+            )
+
+            target_y = self.targets_start_positions[0][1] + random.uniform(
+                -self.y_semidim / scale, self.y_semidim / scale
+            )
+
+            if target_x > 0:
+                target_x += offset
+            else:
+                target_x -= offset
+
+            if target_y > 0:
+                target_y += offset
+            else:
+                target_y -= offset
 
             target_chain.path = (
                 torch.tensor(
@@ -307,40 +327,26 @@ class SalpDomain(BaseScenario):
         )
 
     def process_action(self, agent: Agent):
-        magnitude = (
-            self.interpolate(agent.action.u[:, 0], target_min=0, target_max=1) * 0.2
-        )
-        turn_angle = torch.pi / 4
-        in_theta = self.interpolate(
-            agent.action.u[:, 1], target_min=-turn_angle, target_max=turn_angle
-        )
+        # magnitude = (
+        #     self.interpolate(agent.action.u[:, 0], target_min=0, target_max=1) * 0.4
+        # )
+        # # magnitude = agent.action.u[:, 0] * 0.4
+        # turn_angle = torch.pi / 4
+        # in_theta = self.interpolate(
+        #     agent.action.u[:, 1], target_min=-turn_angle, target_max=turn_angle
+        # )
 
-        # Get heading vector
-        agent_rot = agent.state.rot % (2 * torch.pi)
-        heading_offset = agent_rot + torch.pi / 2
+        # # Get heading vector
+        # agent_rot = agent.state.rot % (2 * torch.pi)
+        # heading_offset = agent_rot + torch.pi / 2
 
-        theta = (in_theta + heading_offset) % (2 * torch.pi)
+        # theta = (in_theta + heading_offset) % (2 * torch.pi)
 
-        theta_clamps = [
-            (heading_offset - turn_angle) % (2 * torch.pi),
-            (heading_offset + turn_angle) % (2 * torch.pi),
-            # (heading_offset + torch.pi - segment_size) % (2 * torch.pi),
-            # (heading_offset + torch.pi + segment_size) % (2 * torch.pi),
-        ]
-        theta_ranges = [
-            (theta_clamps[0], theta_clamps[1]),
-            # (theta_clamps[2], theta_clamps[3]),
-        ]
+        # x = torch.cos(theta).squeeze(-1) * magnitude
+        # y = torch.sin(theta).squeeze(-1) * magnitude
+        # agent.state.force = torch.stack((x, y), dim=-1)
 
-        if is_within_any_range(theta, theta_ranges):
-            x = torch.cos(theta).squeeze(-1) * magnitude
-            y = torch.sin(theta).squeeze(-1) * magnitude
-            agent.state.force = torch.stack((x, y), dim=-1)
-        else:
-            theta_clamp = closest_number(theta, theta_clamps)
-            x = torch.cos(theta_clamp).squeeze(-1) * magnitude
-            y = torch.sin(theta_clamp).squeeze(-1) * magnitude
-            agent.state.force = torch.stack((x, y), dim=-1)
+        agent.state.force = agent.action.u[:] * 0.4
 
         # Join action
         # if agent.state.join.any():
@@ -365,6 +371,20 @@ class SalpDomain(BaseScenario):
 
         return c_rew
 
+    def calculate_spinning_penalty(self) -> torch.Tensor:
+
+        ang_vels = []
+        for a in self.world.agents:
+            ang_vels.append(torch.abs(a.state.ang_vel))
+
+        ang_vels = torch.stack(ang_vels, dim=1)
+
+        a_chain_centroid_ang_vel = ang_vels.mean(dim=1)
+
+        ang_vel_penalty = torch.abs(torch.tanh(a_chain_centroid_ang_vel))
+
+        return ang_vel_penalty.squeeze(0)
+
     def reward(self, agent: Agent):
         is_first = agent == self.world.agents[0]
         is_last = agent == self.world.agents[-1]
@@ -376,6 +396,7 @@ class SalpDomain(BaseScenario):
 
             self.frechet_rew[:] = 0
             self.centroid_rew[:] = 0
+            self.spinning_penalty[:] = 0
 
             f_rew = self.calculate_frechet_reward()
             frechet_shaping = f_rew * self.frechet_shaping_factor
@@ -387,9 +408,13 @@ class SalpDomain(BaseScenario):
             self.centroid_rew += centroid_shaping - self.centroid_shaping
             self.centroid_shaping = centroid_shaping
 
+            # self.spinning_penalty += self.calculate_spinning_penalty()
+
             self.total_rew = f_rew
 
-            self.global_rew = self.frechet_rew
+            self.global_rew = (
+                self.frechet_rew + self.centroid_rew  # - self.spinning_penalty
+            )
 
         if is_last:
             self.current_order_per_env = torch.sum(
@@ -470,38 +495,61 @@ class SalpDomain(BaseScenario):
 
         self.agent_chains[0].update()
 
-        agent_vect_2_agent_centroid = agent.state.pos - self.agent_chains[0].centroid
+        a_chain_centroid_pos = self.agent_chains[0].centroid
 
-        agent_vect_2_target_centroid = agent.state.pos - self.target_chains[0].centroid
+        t_chain_centroid = self.target_chains[0].centroid
+
+        a_pos_rel_2_t_centroid = agent.state.pos - t_chain_centroid
 
         f_dist = batch_discrete_frechet_distance(
             self.agent_chains[0].path, self.target_chains[0].path
         )
 
         c_dist = torch.norm(
-            self.target_chains[0].centroid - self.agent_chains[0].centroid,
+            t_chain_centroid - a_chain_centroid_pos,
             dim=1,
         )
 
         total_moment = 0
         total_force = 0
+        vels = []
+        ang_vels = []
         for a in self.world.agents:
-            if a != agent:
-                r = self.agent_chains[0].centroid - agent.state.pos
-                total_moment += self.calculate_moment(r, agent.state.force)
-                total_force += agent.state.force
+            r = a_chain_centroid_pos - a.state.pos
+            total_moment += self.calculate_moment(r, a.state.force)
+            total_force += a.state.force
+            vels.append(a.state.vel)
+            ang_vels.append(a.state.ang_vel)
 
+        vels = torch.stack(vels, dim=1)
+        ang_vels = torch.stack(ang_vels, dim=1)
+
+        a_chain_centroid_vel = vels.mean(dim=1)
+        a_chain_centroid_ang_vel = ang_vels.mean(dim=1)
+
+        # Agent specific
+        a_pos_rel_2_centroid = a_chain_centroid_pos - agent.state.pos
+        a_ang_vel_rel_2_centroid = angular_velocity(
+            a_pos_rel_2_centroid, agent.state.vel
+        ).unsqueeze(0)
+
+        # Complete observation
         observation = torch.cat(
             [
-                total_moment.unsqueeze(-1),
-                # total_force,
-                f_dist.unsqueeze(-1),
-                agent_vect_2_agent_centroid,
+                a_chain_centroid_pos,
+                a_chain_centroid_vel,
+                a_chain_centroid_ang_vel,
+                total_force,
+                total_moment.unsqueeze(0),
+                f_dist.unsqueeze(0),
+                c_dist.unsqueeze(0),
+                # a_pos_rel_2_centroid,
+                # a_ang_vel_rel_2_centroid,
                 # agent_vect_2_target_centroid,
-                agent.state.pos,
-                agent.state.vel,
-                agent.state.rot % (2 * torch.pi),
-                agent.state.ang_vel,
+                # agent.state.pos,
+                # agent.state.vel,
+                # agent.state.rot % (2 * torch.pi),
+                # agent.state.ang_vel,
             ],
             dim=-1,
         )

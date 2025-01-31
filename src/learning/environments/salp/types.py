@@ -50,14 +50,16 @@ class Chain:
             tuple: The centroid as (x_c, y_c).
         """
 
-        # Calculate the centroid
-        n_points = self.path.shape[1]
-        x_c = torch.sum(self.path[:, :, 0], dim=1) / n_points
-        y_c = torch.sum(self.path[:, :, 1], dim=1) / n_points
+        # # Calculate the centroid
+        # n_points = self.path.shape[1]
+        # x_c = torch.sum(self.path[:, :, 0], dim=1) / n_points
+        # y_c = torch.sum(self.path[:, :, 1], dim=1) / n_points
 
-        centroid = torch.stack((x_c, y_c), dim=1)
+        # centroid = torch.stack((x_c, y_c), dim=1)
 
-        return centroid
+        temp_centroid = self.path.mean(dim=1)
+
+        return temp_centroid
 
     def update(self):
         # Update path

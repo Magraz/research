@@ -85,7 +85,6 @@ def create_env(
                 "x_semidim": env_config["map_size"][0],
                 "y_semidim": env_config["map_size"][1],
                 "max_steps": env_config["max_steps"],
-                "viewer_zoom": kwargs.pop("viewer_zoom", 1),
                 # Agent data
                 "n_agents": env_config["agents"]["n_agents"],
                 "lidar_range": env_config["agents"]["observation_radius"],

@@ -1,10 +1,10 @@
 
-map_size: [2.0, 2.0]
+map_size: [1.0, 1.0]
 observation_size: 10
-action_size: 2
+action_size: 4
 state_representation: single
 shuffle_agents_positions: False
-max_steps: 300
+max_steps: 500
 
 agents:
   observation_radius: 4.0

@@ -201,3 +201,26 @@ def closest_number(target, numbers):
     closest_value = numbers_tensor[closest_index]
 
     return closest_value
+
+
+def angular_velocity(R, V):
+    """
+    Computes the angular velocity given a distance vector and a velocity vector in 2D.
+
+    Parameters:
+        R (torch.Tensor): Tensor of shape [N, 2] representing the distance vectors.
+        V (torch.Tensor): Tensor of shape [N, 2] representing the velocity vectors.
+
+    Returns:
+        torch.Tensor: Tensor of shape [N] representing the angular velocities.
+    """
+    # Compute 2D cross product: R_x * V_y - R_y * V_x
+    cross_product = R[:, 0] * V[:, 1] - R[:, 1] * V[:, 0]
+
+    # Compute squared norm of R (add small epsilon to avoid division by zero)
+    r_norm_sq = (R**2).sum(dim=1) + 1e-8
+
+    # Compute angular velocity
+    omega = cross_product / r_norm_sq
+
+    return omega
