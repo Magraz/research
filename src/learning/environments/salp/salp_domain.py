@@ -499,6 +499,10 @@ class SalpDomain(BaseScenario):
 
         t_chain_centroid = self.target_chains[0].centroid
 
+        t_chain_orientation = self.target_chains[0].orientation
+
+        a_chain_orientation = self.agent_chains[0].orientation
+
         a_pos_rel_2_t_centroid = agent.state.pos - t_chain_centroid
 
         f_dist = batch_discrete_frechet_distance(
@@ -510,22 +514,32 @@ class SalpDomain(BaseScenario):
             dim=1,
         )
 
+        c_diff_vect = t_chain_centroid - a_chain_centroid_pos
+
         total_moment = 0
         total_force = 0
         vels = []
         ang_vels = []
+        ang_pos = []
         for a in self.world.agents:
             r = a_chain_centroid_pos - a.state.pos
             total_moment += self.calculate_moment(r, a.state.force)
             total_force += a.state.force
             vels.append(a.state.vel)
             ang_vels.append(a.state.ang_vel)
+            ang_pos.append(a.state.rot)
 
         vels = torch.stack(vels, dim=1)
         ang_vels = torch.stack(ang_vels, dim=1)
+        ang_pos = torch.stack(ang_pos, dim=1)
 
         a_chain_centroid_vel = vels.mean(dim=1)
         a_chain_centroid_ang_vel = ang_vels.mean(dim=1)
+        a_chain_centroid_ang_pos = ang_pos.mean(dim=1) % (2 * torch.pi)
+
+        a_chain_orientation_rel_2_target = (
+            t_chain_orientation - a_chain_orientation
+        ).unsqueeze(0)
 
         # Agent specific
         a_pos_rel_2_centroid = a_chain_centroid_pos - agent.state.pos
@@ -539,10 +553,12 @@ class SalpDomain(BaseScenario):
                 a_chain_centroid_pos,
                 a_chain_centroid_vel,
                 a_chain_centroid_ang_vel,
+                # a_chain_centroid_ang_pos,
+                a_chain_orientation_rel_2_target,
                 total_force,
                 total_moment.unsqueeze(0),
                 f_dist.unsqueeze(0),
-                c_dist.unsqueeze(0),
+                c_diff_vect,
                 # a_pos_rel_2_centroid,
                 # a_ang_vel_rel_2_centroid,
                 # agent_vect_2_target_centroid,

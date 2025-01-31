@@ -1,6 +1,6 @@
 
 map_size: [1.0, 1.0]
-observation_size: 10
+observation_size: 12
 action_size: 4
 state_representation: single
 shuffle_agents_positions: False
