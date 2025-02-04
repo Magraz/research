@@ -65,7 +65,8 @@ class ActorCritic(nn.Module):
             torch.rand(action_dim, requires_grad=True, device=self.device) / 100
             + params.action_std
         ).to(self.device)
-        # actor
+
+        # Actor
         self.actor = nn.Sequential(
             nn.Linear(state_dim, actor_hidden),
             active_fn(),
@@ -82,7 +83,7 @@ class ActorCritic(nn.Module):
             )
         )
 
-        # critic
+        # Critic
         self.critic = nn.Sequential(
             nn.Linear(state_dim, critic_hidden),
             active_fn(),
@@ -146,6 +147,7 @@ class PPO:
         # self.action_std = params.action_std
 
         self.gamma = params.gamma
+        self.lmbda = params.lmbda
         self.eps_clip = params.eps_clip
         self.K_epochs = params.K_epochs
 
@@ -272,7 +274,7 @@ class PPO:
                 old_states, old_actions
             )
 
-            # match state_values tensor dimensions with rewards tensor
+            # Match state_values tensor dimensions with rewards tensor
             state_values = torch.squeeze(state_values)
 
             # Finding the ratio (pi_theta / pi_theta__old)
@@ -293,7 +295,8 @@ class PPO:
             Entropy.append(dist_entropy.mean().item())
             Aloss.append(loss_actor.item())
             Closs.append(loss_critic.item())
-            # take gradient step
+
+            # Take gradient step
             self.opt_actor.zero_grad()
             loss_actor.backward()
             torch.nn.utils.clip_grad_norm_(
@@ -307,6 +310,7 @@ class PPO:
                 self.policy.critic.parameters(), self.params.grad_clip
             )
             self.opt_critic.step()
+
         if self.params.log_indiv:
             prefix = "Agent" + str(self.idx) + "/"
             self.params.writer.add_scalar(
@@ -314,17 +318,18 @@ class PPO:
             )
             self.params.writer.add_scalar(prefix + "Loss/actor", np.mean(Aloss), idx)
             self.params.writer.add_scalar(prefix + "Loss/critic", np.mean(Closs), idx)
-            self.params.writer.add_scalar(prefix + "Acton_std", self.action_std, idx)
+            self.params.writer.add_scalar(prefix + "Action_std", self.action_std, idx)
             self.params.writer.add_scalar(
                 prefix + "Action/STD_Mean", torch.mean(self.policy.log_action_var), idx
             )
             # elf.params.writer.add_scalars(prefix+"Action/STD_Vals",{str(i):self.policy.log_action_var[i] for i in range(self.params.action_dim)},idx)
             self.params.writer.add_scalar(
-                prefix + "Loss/Advantage_min", min(advantages), idx
+                prefix + "Loss/Advantage_min", advantages.min().item(), idx
             )
             self.params.writer.add_scalar(
-                prefix + "Loss/Advantage_max", max(advantages), idx
+                prefix + "Loss/Advantage_max", advantages.max().item(), idx
             )
+
             self.params.writer.add_scalar(
                 prefix + "Reward", sum(self.buffer.rewards) / self.params.N_batch, idx
             )
