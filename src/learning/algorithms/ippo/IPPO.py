@@ -30,8 +30,8 @@ class IPPO:
 
     def save(self, fname):
         for i, agent in zip(range(self.n_agents), self.agents):
-            agent.save(str(fname) + str(i))
+            agent.save(f"{str(fname)}_a{str(i)}")
 
     def load(self, fname):
         for i, agent in zip(range(self.n_agents), self.agents):
-            agent.load(str(fname) + str(i))
+            agent.load(f"{str(fname)}_a{str(i)}")

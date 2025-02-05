@@ -50,7 +50,6 @@ class ActorCritic(nn.Module):
         super(ActorCritic, self).__init__()
         state_dim = params.state_dim
         action_dim = params.action_dim
-        action_std_init = params.action_std
         actor_hidden = params.actor_hidden
         critic_hidden = params.critic_hidden
         active_fn = params.active_fn
@@ -58,10 +57,7 @@ class ActorCritic(nn.Module):
 
         self.var_learned = params.var_learned
         self.action_dim = action_dim
-        self.action_var = torch.full(
-            (action_dim,), action_std_init * action_std_init
-        ).to(self.device)
-        self.log_action_var = nn.Parameter(
+        self.log_action_std = nn.Parameter(
             torch.rand(action_dim, requires_grad=True, device=self.device) / 100
             + params.action_std
         ).to(self.device)
@@ -92,11 +88,6 @@ class ActorCritic(nn.Module):
             nn.Linear(critic_hidden, 1),
         )
 
-    def set_action_std(self, new_action_std):
-        self.action_var = torch.full(
-            (self.action_dim,), new_action_std * new_action_std
-        ).to(self.device)
-
     def forward(self):
         raise NotImplementedError
 
@@ -107,9 +98,10 @@ class ActorCritic(nn.Module):
         if deterministic:
             return action_mean.detach()
 
-        action_std = torch.exp(self.log_action_var)
+        action_std = torch.exp(self.log_action_std)
 
         dist = Normal(action_mean, action_std)
+
         action = dist.sample()
         action_logprob = dist.log_prob(action)
 
@@ -125,7 +117,7 @@ class ActorCritic(nn.Module):
 
         action_mean = self.actor(state)
 
-        action_std = torch.exp(self.log_action_var)
+        action_std = torch.exp(self.log_action_std)
 
         dist = Normal(action_mean, action_std)
 
@@ -142,7 +134,6 @@ class PPO:
 
         self.params = params
         self.device = params.device
-        # self.action_std = params.action_std
 
         self.gamma = params.gamma
         self.lmbda = params.lmbda
@@ -153,7 +144,7 @@ class PPO:
 
         self.policy = ActorCritic(params).to(self.device)
         self.opt_actor = torch.optim.Adam(
-            [p for p in self.policy.actor.parameters()] + [self.policy.log_action_var],
+            [p for p in self.policy.actor.parameters()] + [self.policy.log_action_std],
             lr=params.lr_actor,
         )
         self.opt_critic = torch.optim.Adam(
@@ -164,19 +155,7 @@ class PPO:
         self.policy_old.load_state_dict(self.policy.state_dict())
 
         self.MSELoss = nn.MSELoss()
-        self.decay_action_std(0)
         self.idx = idx
-
-    def set_action_std(self, new_action_std):
-        self.action_std = new_action_std
-        self.policy.set_action_std(new_action_std)
-        self.policy_old.set_action_std(new_action_std)
-
-    def decay_action_std(self, idx):
-        percent = float(idx) / 1.0e5
-        # val=max(self.params.action_std-(self.params.decay_rate*percent),0.1)
-        val = np.exp(self.params.action_std - (self.params.decay_rate * percent))
-        self.set_action_std(val)
 
     def select_action(self, state):
         with torch.no_grad():
@@ -222,7 +201,6 @@ class PPO:
 
     def update(self, idx: int):
         # Monte Carlo estimate of returns
-        self.decay_action_std(idx)
         rewards = []
         discounted_reward = 0
         for reward, is_terminal in zip(
@@ -311,9 +289,8 @@ class PPO:
             )
             self.params.writer.add_scalar(prefix + "Loss/actor", np.mean(Aloss), idx)
             self.params.writer.add_scalar(prefix + "Loss/critic", np.mean(Closs), idx)
-            self.params.writer.add_scalar(prefix + "Action_std", self.action_std, idx)
             self.params.writer.add_scalar(
-                prefix + "Action/STD_Mean", torch.mean(self.policy.log_action_var), idx
+                prefix + "Action/STD_Mean", torch.mean(self.policy.log_action_std), idx
             )
             # elf.params.writer.add_scalars(prefix+"Action/STD_Vals",{str(i):self.policy.log_action_var[i] for i in range(self.params.action_dim)},idx)
             self.params.writer.add_scalar(
@@ -356,7 +333,6 @@ class Params:
         self.lr_actor = 0.0003  # learning rate for actor network
         self.lr_critic = 0.001  # learning rate for critic network
         self.action_std = -0.8
-        self.decay_rate = 0.07  # per 100k steps
         self.random_seed = 0
         self.grad_clip = 1.0
 
