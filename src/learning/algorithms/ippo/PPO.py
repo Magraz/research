@@ -104,36 +104,34 @@ class ActorCritic(nn.Module):
 
         action_mean = self.actor(state)
 
-        if self.var_learned:
-            action_var = torch.exp(self.log_action_var)
-        else:
-            action_var = self.action_var
-
-        dist = Normal(action_mean, action_var)
-        action = dist.sample()
-        action_logprob = dist.log_prob(action)
-        state_val = self.critic(state)
-
         if deterministic:
             return action_mean.detach()
-        else:
-            return (
-                action.detach(),
-                action_logprob.detach(),
-                state_val.detach(),
-            )
+
+        action_std = torch.exp(self.log_action_var)
+
+        dist = Normal(action_mean, action_std)
+        action = dist.sample()
+        action_logprob = dist.log_prob(action)
+
+        state_val = self.critic(state)
+
+        return (
+            action.detach(),
+            action_logprob.detach(),
+            state_val.detach(),
+        )
 
     def evaluate(self, state, action):
 
         action_mean = self.actor(state)
-        if self.var_learned:
-            action_var = torch.exp(self.log_action_var)
-        else:
-            action_var = self.action_var
 
-        dist = Normal(action_mean, action_var)
+        action_std = torch.exp(self.log_action_var)
+
+        dist = Normal(action_mean, action_std)
+
         action_logprobs = dist.log_prob(action)
         dist_entropy = dist.entropy()
+
         state_values = self.critic(state)
 
         return action_logprobs, state_values, dist_entropy
@@ -165,7 +163,7 @@ class PPO:
         self.policy_old = ActorCritic(params).to(self.device)
         self.policy_old.load_state_dict(self.policy.state_dict())
 
-        self.MseLoss = nn.MSELoss()
+        self.MSELoss = nn.MSELoss()
         self.decay_action_std(0)
         self.idx = idx
 
@@ -197,27 +195,32 @@ class PPO:
 
         return action.detach().cpu().numpy().flatten()
 
-    def add_reward_terminal(self, reward, done):
-        self.buffer.rewards.append(float(reward))
+    def add_reward_terminal(self, reward: float, done: bool):
+        self.buffer.rewards.append(reward)
         self.buffer.is_terminals.append(done)
 
-    def gae(self, rewards, values, is_terminals):
+    def gae(
+        self, rewards: torch.Tensor, values: torch.Tensor, is_terminals: torch.Tensor
+    ):
+        values = torch.cat(
+            (values, torch.tensor([0.0], device=self.device))
+        )  # Bootstrap value
         returns = []
-        gae = 0
-        for i in reversed(range(len(rewards))):
-            if is_terminals[i]:
-                delta = rewards[i] - values[i]
-                gae = delta
-            else:
-                delta = rewards[i] + self.params.gamma * values[i + 1] - values[i]
-                gae = delta + self.params.gamma * self.params.lmbda * gae
-            returns.append([(gae).item()])
-        returns = [r for r in reversed(returns)]
-        adv = np.array(returns)
-        adv = (adv - np.mean(adv)) / (np.std(adv) + 1e-10)
-        return torch.from_numpy(adv).to(self.device)
+        gae = 0.0
 
-    def update(self, idx):
+        for i in reversed(range(len(rewards))):
+            mask = 1.0 - float(is_terminals[i])  # Convert bool to float
+            delta = rewards[i] + self.gamma * values[i + 1] * mask - values[i]
+            gae = delta + self.gamma * self.lmbda * mask * gae
+            returns.insert(0, gae)
+
+        returns = torch.tensor(returns, dtype=torch.float32, device=self.device)
+        returns = (returns - returns.mean()) / (
+            returns.std() + 1e-8
+        )  # Normalize advantages
+        return returns
+
+    def update(self, idx: int):
         # Monte Carlo estimate of returns
         self.decay_action_std(idx)
         rewards = []
@@ -233,28 +236,13 @@ class PPO:
         # Normalizing the rewards
         rewards = torch.tensor(rewards, dtype=torch.float32).to(self.device)
 
-        # rewards = (rewards - rewards.mean()) / (rewards.std() + 1e-7)
+        # Convert lists to tensors
+        old_states = torch.stack(self.buffer.states, dim=0).detach().to(self.device)
+        old_actions = torch.stack(self.buffer.actions, dim=0).detach().to(self.device)
 
-        # convert list to tensor
-        old_states = (
-            torch.squeeze(torch.stack(self.buffer.states, dim=0))
-            .detach()
-            .to(self.device)
-        )
-        old_actions = (
-            torch.squeeze(torch.stack(self.buffer.actions, dim=0))
-            .detach()
-            .to(self.device)
-        )
-        old_logprobs = (
-            torch.squeeze(torch.stack(self.buffer.logprobs, dim=0))
-            .detach()
-            .to(self.device)
-        )
+        old_logprobs = torch.stack(self.buffer.logprobs, dim=0).detach().to(self.device)
         old_state_values = (
-            torch.squeeze(torch.stack(self.buffer.state_values, dim=0))
-            .detach()
-            .to(self.device)
+            torch.stack(self.buffer.state_values, dim=0).detach().to(self.device)
         )
 
         # calculate advantages
@@ -262,7 +250,9 @@ class PPO:
         # advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-7)
 
         advantages = self.gae(
-            self.buffer.rewards, self.buffer.state_values, self.buffer.is_terminals
+            torch.tensor(self.buffer.rewards, dtype=torch.float32).to(self.device),
+            torch.tensor(self.buffer.state_values, dtype=torch.float32).to(self.device),
+            torch.tensor(self.buffer.is_terminals, dtype=torch.float32).to(self.device),
         )
 
         Aloss, Closs, Entropy = [], [], []
@@ -278,20 +268,23 @@ class PPO:
             state_values = torch.squeeze(state_values)
 
             # Finding the ratio (pi_theta / pi_theta__old)
-            ratios = torch.exp(logprobs - old_logprobs.detach())
+            ratios = torch.exp(logprobs - old_logprobs)
 
             # Finding Surrogate Loss
-            surr1 = ratios * advantages
-            surr2 = (
-                torch.clamp(ratios, 1 - self.eps_clip, 1 + self.eps_clip) * advantages
-            )
+            surr1 = ratios * advantages.unsqueeze(-1)
+            surr2 = torch.clamp(
+                ratios, 1 - self.eps_clip, 1 + self.eps_clip
+            ) * advantages.unsqueeze(-1)
 
             # final loss of clipped objective PPO
             loss_actor = -torch.min(surr1, surr2)
+
             if self.params.var_learned:
                 loss_actor = loss_actor - self.params.beta_ent * dist_entropy
+
             loss_actor = loss_actor.mean()
-            loss_critic = self.MseLoss(state_values, rewards)
+            loss_critic = self.MSELoss(state_values, rewards)
+
             Entropy.append(dist_entropy.mean().item())
             Aloss.append(loss_actor.item())
             Closs.append(loss_critic.item())
@@ -373,7 +366,6 @@ class Params:
         self.actor_hidden = 64
         self.critic_hidden = 64
         self.active_fn = nn.LeakyReLU
-        # self.active_fn = nn.Tanh
 
         self.lmbda = 0.95
 
