@@ -563,22 +563,22 @@ class SalpDomain(BaseScenario):
         # Complete observation
         observation = torch.cat(
             [
+                # Global state
                 a_chain_centroid_pos,
                 a_chain_centroid_vel,
                 a_chain_centroid_ang_pos / (2 * torch.pi),
                 a_chain_centroid_ang_vel,
-                # a_chain_orientation_rel_2_target,
                 total_force,
                 total_moment.unsqueeze(0),
                 f_dist.unsqueeze(0),
                 c_diff_vect,
-                # a_pos_rel_2_centroid,
-                # a_ang_vel_rel_2_centroid,
-                # agent_vect_2_target_centroid,
-                # agent.state.pos,
-                # agent.state.vel,
-                # agent.state.rot % (2 * torch.pi),
-                # agent.state.ang_vel,
+                # For IPPO actor
+                a_pos_rel_2_centroid,
+                a_pos_rel_2_t_centroid,
+                agent.state.pos,
+                agent.state.vel,
+                agent.state.rot % (2 * torch.pi) / (2 * torch.pi),
+                agent.state.ang_vel,
             ],
             dim=-1,
         )

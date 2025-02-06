@@ -44,7 +44,7 @@ class IPPO_Trainer:
             self.batch_dir, 1, device=self.device, env_name=env_config.environment
         )
 
-        params = Params(fname=self.logs_dir, n_agents=1)  # env.n_agents)
+        params = Params(fname=self.logs_dir, n_agents=env.n_agents)
         params.device = self.device
         params.action_dim = env_config.action_size
         params.state_dim = env_config.observation_size
@@ -78,12 +78,16 @@ class IPPO_Trainer:
 
                     # Process action and step in environment
                     action = torch.clamp(
-                        torch.from_numpy(learner.act(state[0])), min=-1.0, max=1.0
+                        torch.from_numpy(learner.act(state)), min=-1.0, max=1.0
                     )
 
-                    action = action.reshape(
-                        (env.n_agents, env_config.action_size // env.n_agents)
-                    )
+                    # Uncomment for single agent PPO
+                    # action = torch.clamp(
+                    #     torch.from_numpy(learner.act(state[0])), min=-1.0, max=1.0
+                    # )
+                    # action = action.reshape(
+                    #     (env.n_agents, env_config.action_size // env.n_agents)
+                    # )
 
                     action_tensor_list = [row.unsqueeze(0) for row in action]
                     state, reward, done, _ = env.step(action_tensor_list)
@@ -123,7 +127,7 @@ class IPPO_Trainer:
             self.batch_dir, 1, device=self.device, env_name=env_config.environment
         )
 
-        params = Params(n_agents=1)  # env.n_agents)
+        params = Params(n_agents=env.n_agents)
         params.device = self.device
         params.action_dim = env_config.action_size
         params.state_dim = env_config.observation_size
@@ -141,15 +145,22 @@ class IPPO_Trainer:
             R = np.zeros(env.n_agents)
             r = []
             while not done:
+
                 action = torch.clamp(
-                    torch.from_numpy(learner.act_deterministic(state[0])),
+                    torch.from_numpy(learner.act_deterministic(state)),
                     min=-1.0,
                     max=1.0,
                 )
 
-                action = action.reshape(
-                    (env.n_agents, env_config.action_size // env.n_agents)
-                )
+                # Uncomment for single agent PPO
+                # action = torch.clamp(
+                #     torch.from_numpy(learner.act_deterministic(state[0])),
+                #     min=-1.0,
+                #     max=1.0,
+                # )
+                # action = action.reshape(
+                #     (env.n_agents, env_config.action_size // env.n_agents)
+                # )
 
                 action_tensor_list = [row.unsqueeze(0) for row in action]
 
