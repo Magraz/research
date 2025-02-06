@@ -201,8 +201,8 @@ class SalpDomain(BaseScenario):
                 anchor_a=(0, 0),
                 anchor_b=(0, 0),
                 dist=self.agent_joint_length,
-                rotate_a=False,
-                rotate_b=False,
+                rotate_a=True,
+                rotate_b=True,
                 collidable=False,
                 width=0,
             )
@@ -327,26 +327,38 @@ class SalpDomain(BaseScenario):
         )
 
     def process_action(self, agent: Agent):
-        # magnitude = (
-        #     self.interpolate(agent.action.u[:, 0], target_min=0, target_max=1) * 0.4
-        # )
-        # # magnitude = agent.action.u[:, 0] * 0.4
+        magnitude_pos = (
+            self.interpolate(agent.action.u[:, 0], target_min=0, target_max=1) * 0.8
+        )
+
+        magnitude_neg = (
+            self.interpolate(agent.action.u[:, 1], target_min=0, target_max=1) * 0.8
+        )
+
+        magnitude = magnitude_pos - magnitude_neg
+
+        # Set angle
         # turn_angle = torch.pi / 4
+
         # in_theta = self.interpolate(
         #     agent.action.u[:, 1], target_min=-turn_angle, target_max=turn_angle
         # )
 
-        # # Get heading vector
-        # agent_rot = agent.state.rot % (2 * torch.pi)
-        # heading_offset = agent_rot + torch.pi / 2
+        in_theta = 0
 
-        # theta = (in_theta + heading_offset) % (2 * torch.pi)
+        # Get heading vector
+        agent_rot = agent.state.rot % (2 * torch.pi)
+        heading_offset = agent_rot + torch.pi / 2
 
-        # x = torch.cos(theta).squeeze(-1) * magnitude
-        # y = torch.sin(theta).squeeze(-1) * magnitude
-        # agent.state.force = torch.stack((x, y), dim=-1)
+        theta = (in_theta + heading_offset) % (2 * torch.pi)
 
-        agent.state.force = agent.action.u[:] * 0.4
+        x = torch.cos(theta).squeeze(-1) * magnitude
+        y = torch.sin(theta).squeeze(-1) * magnitude
+
+        agent.state.force = torch.stack((x, y), dim=-1)
+
+        # Unconstrained action
+        # agent.state.force = agent.action.u[:] * 0.4
 
         # Join action
         # if agent.state.join.any():
@@ -509,26 +521,27 @@ class SalpDomain(BaseScenario):
             self.agent_chains[0].path, self.target_chains[0].path
         )
 
-        c_dist = torch.norm(
-            t_chain_centroid - a_chain_centroid_pos,
-            dim=1,
-        )
-
         c_diff_vect = t_chain_centroid - a_chain_centroid_pos
 
         total_moment = 0
         total_force = 0
+
+        positions = []
         vels = []
         ang_vels = []
         ang_pos = []
+
         for a in self.world.agents:
-            r = a_chain_centroid_pos - a.state.pos
+            r = a.state.pos - a_chain_centroid_pos
             total_moment += self.calculate_moment(r, a.state.force)
             total_force += a.state.force
+
+            positions.append(a.state.pos)
             vels.append(a.state.vel)
             ang_vels.append(a.state.ang_vel)
             ang_pos.append(a.state.rot)
 
+        positions = torch.stack(positions, dim=1)
         vels = torch.stack(vels, dim=1)
         ang_vels = torch.stack(ang_vels, dim=1)
         ang_pos = torch.stack(ang_pos, dim=1)
@@ -542,7 +555,7 @@ class SalpDomain(BaseScenario):
         ).unsqueeze(0)
 
         # Agent specific
-        a_pos_rel_2_centroid = a_chain_centroid_pos - agent.state.pos
+        a_pos_rel_2_centroid = agent.state.pos - a_chain_centroid_pos
         a_ang_vel_rel_2_centroid = angular_velocity(
             a_pos_rel_2_centroid, agent.state.vel
         ).unsqueeze(0)
@@ -552,9 +565,9 @@ class SalpDomain(BaseScenario):
             [
                 a_chain_centroid_pos,
                 a_chain_centroid_vel,
+                a_chain_centroid_ang_pos / (2 * torch.pi),
                 a_chain_centroid_ang_vel,
-                # a_chain_centroid_ang_pos,
-                a_chain_orientation_rel_2_target,
+                # a_chain_orientation_rel_2_target,
                 total_force,
                 total_moment.unsqueeze(0),
                 f_dist.unsqueeze(0),

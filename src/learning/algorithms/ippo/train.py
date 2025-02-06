@@ -10,6 +10,8 @@ import numpy as np
 import pickle as pkl
 from pathlib import Path
 
+from vmas.simulator.utils import save_video
+
 
 class IPPO_Trainer:
     def __init__(
@@ -57,6 +59,7 @@ class IPPO_Trainer:
         learner = IPPO(params)
         step = 0
         rmax = -1e10
+        running_avg_reward = 0
         data = []
         idx = 0
 
@@ -66,10 +69,14 @@ class IPPO_Trainer:
                 idx += 1
                 done = False
                 state = env.reset()
-                R = np.zeros(env.n_agents)
+                R = torch.zeros(env.n_agents).detach()
+
+                episode_data = []
 
                 while not done:
                     step += 1
+
+                    # Process action and step in environment
                     action = torch.clamp(
                         torch.from_numpy(learner.act(state[0])), min=-1.0, max=1.0
                     )
@@ -80,24 +87,35 @@ class IPPO_Trainer:
 
                     action_tensor_list = [row.unsqueeze(0) for row in action]
                     state, reward, done, _ = env.step(action_tensor_list)
-                    data.append([state, reward])
+
+                    # Store transition
+                    # episode_data.append((state, action, reward, done))
+
                     learner.add_reward_terminal(reward, done)
-                    R += torch.cat(reward).cpu().numpy()
+                    R += torch.cat(reward)
+
+                # Append episode summary instead of per-step data
+                data.append(R.tolist()[0])
 
                 print(step, R)
 
-                if rmax < R[0]:
-                    print("Best: " + str(rmax) + "  step: " + str(rmax))
-                    learner.save(self.models_dir / "a0")
-                    rmax = R[0]
+                running_avg_reward = (
+                    0.99 * running_avg_reward + 0.01 * R[0] if step > 0 else R[0]
+                )
 
-                learner.save(self.models_dir / "a1")
+            if running_avg_reward > rmax:
+                print(f"New best reward: {running_avg_reward:.3f} at step {step}")
+                rmax = running_avg_reward
+                learner.save(self.models_dir / "best_model")
 
-            learner.train(step)
+            if step % 10000 == 0:
+                learner.save(self.models_dir / f"checkpoint_{step}")
 
-            if idx % 10 == 0:
+            if idx % 2 == 0:
                 with open(self.models_dir / "data.dat", "wb") as f:
                     pkl.dump(data, f)
+
+            learner.train(step)
 
     def view(self, exp_config, env_config: EnvironmentParams):
 
@@ -111,9 +129,13 @@ class IPPO_Trainer:
         params.state_dim = env_config.observation_size
 
         learner = IPPO(params)
-        learner.load(self.models_dir / "a1")
+        learner.load(self.models_dir / "best_model")
 
-        while True:
+        frame_list = []
+
+        n_rollouts = 3
+
+        for i in range(n_rollouts):
             done = False
             state = env.reset()
             R = np.zeros(env.n_agents)
@@ -135,12 +157,16 @@ class IPPO_Trainer:
                 r.append(reward)
                 R += np.array(reward[0].cpu())
 
-                _ = env.render(
+                frame = env.render(
                     mode="rgb_array",
                     agent_index_focus=None,  # Can give the camera an agent index to focus on
                     visualize_when_rgb=True,
                 )
 
+                frame_list.append(frame)
+
             print(f"TOTAL RETURN: {R}")
             print(f"MAX {max(r)}")
             print(f"MIN {min(r)}")
+
+        save_video(self.video_name, frame_list, fps=1 / env.scenario.world.dt)
