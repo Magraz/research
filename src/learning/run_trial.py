@@ -39,7 +39,7 @@ if __name__ == "__main__":
         help="Runs view method instead of train",
     )
 
-    parser.add_argument("--trial_id", default=0, help="Sets trial ID", type=int)
+    parser.add_argument("--trial_id", default="0", help="Sets trial ID", type=str)
 
     args = vars(parser.parse_args())
 

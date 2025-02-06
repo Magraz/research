@@ -25,7 +25,7 @@ def run_algorithm(
     experiment_name: str,
     algorithm: str,
     environment: str,
-    trial_id: int,
+    trial_id: str,
     train: bool,
 ):
 
