@@ -1,4 +1,4 @@
-from learning.algorithms.ippo.PPO import PPO
+from learning.algorithms.ippo.ppo import PPO
 import numpy as np
 
 
