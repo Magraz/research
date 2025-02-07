@@ -40,8 +40,9 @@ class IPPO_Trainer:
 
     def train(self, exp_config, env_config: EnvironmentParams):
 
+        n_envs = 1
         env = create_env(
-            self.batch_dir, 1, device=self.device, env_name=env_config.environment
+            self.batch_dir, n_envs, device=self.device, env_name=env_config.environment
         )
 
         params = Params(fname=self.logs_dir, n_agents=env.n_agents)
@@ -69,7 +70,7 @@ class IPPO_Trainer:
                 idx += 1
                 done = False
                 state = env.reset()
-                R = torch.zeros(env.n_agents).detach()
+                R = torch.zeros(n_envs).detach()
 
                 episode_data = []
 
@@ -81,6 +82,10 @@ class IPPO_Trainer:
                         torch.from_numpy(learner.act(state)), min=-1.0, max=1.0
                     )
 
+                    action = action.reshape(
+                        env.n_agents, n_envs, env_config.action_size
+                    )
+
                     # Uncomment for single agent PPO
                     # action = torch.clamp(
                     #     torch.from_numpy(learner.act(state[0])), min=-1.0, max=1.0
@@ -89,14 +94,14 @@ class IPPO_Trainer:
                     #     (env.n_agents, env_config.action_size // env.n_agents)
                     # )
 
-                    action_tensor_list = [row.unsqueeze(0) for row in action]
+                    action_tensor_list = [agent for agent in action]
                     state, reward, done, _ = env.step(action_tensor_list)
 
                     # Store transition
                     # episode_data.append((state, action, reward, done))
 
                     learner.add_reward_terminal(reward, done)
-                    R += torch.cat(reward)
+                    R += reward[0]
 
                 # Append episode summary instead of per-step data
                 data.append(R.tolist()[0])

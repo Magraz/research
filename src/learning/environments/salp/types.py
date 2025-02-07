@@ -38,7 +38,7 @@ class Chain:
         self.path = path
         self.entities = entities
         self.centroid = self.calculate_centroid()
-        self.orientation = self.calculate_orientation()
+        # self.orientation = self.calculate_orientation()
 
     def calculate_centroid(self):
         """
@@ -95,4 +95,4 @@ class Chain:
             self.path[:, idx, :] = entity.state.pos
 
         self.centroid = self.calculate_centroid()
-        self.orientation = self.calculate_orientation()
+        # self.orientation = self.calculate_orientation()

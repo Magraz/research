@@ -511,9 +511,9 @@ class SalpDomain(BaseScenario):
 
         t_chain_centroid = self.target_chains[0].centroid
 
-        t_chain_orientation = self.target_chains[0].orientation
+        # t_chain_orientation = self.target_chains[0].orientation
 
-        a_chain_orientation = self.agent_chains[0].orientation
+        # a_chain_orientation = self.agent_chains[0].orientation
 
         a_pos_rel_2_t_centroid = agent.state.pos - t_chain_centroid
 
@@ -550,9 +550,9 @@ class SalpDomain(BaseScenario):
         a_chain_centroid_ang_vel = ang_vels.mean(dim=1)
         a_chain_centroid_ang_pos = ang_pos.mean(dim=1) % (2 * torch.pi)
 
-        a_chain_orientation_rel_2_target = (
-            t_chain_orientation - a_chain_orientation
-        ).unsqueeze(0)
+        # a_chain_orientation_rel_2_target = (
+        #     t_chain_orientation - a_chain_orientation
+        # ).unsqueeze(0)
 
         # Agent specific
         a_pos_rel_2_centroid = agent.state.pos - a_chain_centroid_pos
@@ -569,8 +569,8 @@ class SalpDomain(BaseScenario):
                 a_chain_centroid_ang_pos / (2 * torch.pi),
                 a_chain_centroid_ang_vel,
                 total_force,
-                total_moment.unsqueeze(0),
-                f_dist.unsqueeze(0),
+                total_moment.unsqueeze(-1),
+                f_dist.unsqueeze(-1),
                 c_diff_vect,
                 # For IPPO actor
                 a_pos_rel_2_centroid,
