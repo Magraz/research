@@ -40,9 +40,11 @@ class IPPO_Trainer:
 
     def train(self, exp_config, env_config: EnvironmentParams):
 
-        n_envs = 1
         env = create_env(
-            self.batch_dir, n_envs, device=self.device, env_name=env_config.environment
+            self.batch_dir,
+            env_config.n_envs,
+            device=self.device,
+            env_name=env_config.environment,
         )
 
         params = Params(fname=self.logs_dir, n_agents=env.n_agents)
@@ -57,7 +59,7 @@ class IPPO_Trainer:
         params.grad_clip = 0.3  # clip_grad_val
         params.write()
 
-        learner = IPPO(params)
+        learner = IPPO(params, shared_params=True)
         step = 0
         rmax = -1e10
         running_avg_reward = 0
@@ -70,7 +72,7 @@ class IPPO_Trainer:
                 idx += 1
                 done = False
                 state = env.reset()
-                R = torch.zeros(n_envs).detach()
+                R = torch.zeros(env_config.n_envs)
 
                 episode_data = []
 
@@ -79,19 +81,21 @@ class IPPO_Trainer:
 
                     # Process action and step in environment
                     action = torch.clamp(
-                        torch.from_numpy(learner.act(state)), min=-1.0, max=1.0
+                        torch.stack(learner.act(state)), min=-1.0, max=1.0
                     )
 
                     action = action.reshape(
-                        env.n_agents, n_envs, env_config.action_size
+                        env.n_agents, env_config.n_envs, env_config.action_size
                     )
 
                     # Uncomment for single agent PPO
                     # action = torch.clamp(
-                    #     torch.from_numpy(learner.act(state[0])), min=-1.0, max=1.0
+                    #     learner.act(state[0]), min=-1.0, max=1.0
                     # )
                     # action = action.reshape(
-                    #     (env.n_agents, env_config.action_size // env.n_agents)
+                    #     env.n_agents,
+                    #     env_config.n_envs,
+                    #     env_config.action_size // env.n_agents,
                     # )
 
                     action_tensor_list = [agent for agent in action]
@@ -101,6 +105,7 @@ class IPPO_Trainer:
                     # episode_data.append((state, action, reward, done))
 
                     learner.add_reward_terminal(reward, done)
+
                     R += reward[0]
 
                 # Append episode summary instead of per-step data
@@ -109,11 +114,11 @@ class IPPO_Trainer:
                 print(step, R)
 
                 running_avg_reward = (
-                    0.99 * running_avg_reward + 0.01 * R[0] if step > 0 else R[0]
+                    0.99 * running_avg_reward + 0.01 * R if step > 0 else R
                 )
 
             if running_avg_reward > rmax:
-                print(f"New best reward: {running_avg_reward:.3f} at step {step}")
+                print(f"New best reward: {running_avg_reward} at step {step}")
                 rmax = running_avg_reward
                 learner.save(self.models_dir / "best_model")
 
@@ -124,7 +129,7 @@ class IPPO_Trainer:
                 with open(self.models_dir / "data.dat", "wb") as f:
                     pkl.dump(data, f)
 
-            learner.train(step)
+            learner.train()
 
     def view(self, exp_config, env_config: EnvironmentParams):
 
@@ -147,15 +152,15 @@ class IPPO_Trainer:
         for i in range(n_rollouts):
             done = False
             state = env.reset()
-            R = np.zeros(env.n_agents)
+            R = torch.zeros(env.n_agents)
             r = []
             while not done:
 
                 action = torch.clamp(
-                    torch.from_numpy(learner.act_deterministic(state)),
-                    min=-1.0,
-                    max=1.0,
+                    torch.stack(learner.act_deterministic(state)), min=-1.0, max=1.0
                 )
+
+                action = action.reshape(env.n_agents, 1, env_config.action_size)
 
                 # Uncomment for single agent PPO
                 # action = torch.clamp(
@@ -167,11 +172,11 @@ class IPPO_Trainer:
                 #     (env.n_agents, env_config.action_size // env.n_agents)
                 # )
 
-                action_tensor_list = [row.unsqueeze(0) for row in action]
-
+                action_tensor_list = [agent for agent in action]
                 state, reward, done, _ = env.step(action_tensor_list)
+
                 r.append(reward)
-                R += np.array(reward[0].cpu())
+                R += reward[0]
 
                 frame = env.render(
                     mode="rgb_array",

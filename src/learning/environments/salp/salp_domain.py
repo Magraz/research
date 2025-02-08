@@ -54,7 +54,7 @@ class SalpDomain(BaseScenario):
         # Agents
         self.n_agents = kwargs.pop("n_agents", 2)
         self.starting_position = kwargs.pop("starting_position", [0.0, 0.0])
-        self.state_representation = kwargs.pop("state_representation", "single")
+        self.state_representation = kwargs.pop("state_representation", "global")
         self.agents_colors = []
         self.agents_positions = []
         self.agents_idx = []
@@ -503,7 +503,7 @@ class SalpDomain(BaseScenario):
 
         return moment
 
-    def single_agent_representation(self, agent: Agent):
+    def agent_representation(self, agent: Agent, scope: str):
 
         self.agent_chains[0].update()
 
@@ -561,32 +561,56 @@ class SalpDomain(BaseScenario):
         ).unsqueeze(0)
 
         # Complete observation
-        observation = torch.cat(
-            [
-                # Global state
-                a_chain_centroid_pos,
-                a_chain_centroid_vel,
-                a_chain_centroid_ang_pos / (2 * torch.pi),
-                a_chain_centroid_ang_vel,
-                total_force,
-                total_moment.unsqueeze(-1),
-                f_dist.unsqueeze(-1),
-                c_diff_vect,
-                # For IPPO actor
-                a_pos_rel_2_centroid,
-                a_pos_rel_2_t_centroid,
-                agent.state.pos,
-                agent.state.vel,
-                agent.state.rot % (2 * torch.pi) / (2 * torch.pi),
-                agent.state.ang_vel,
-            ],
-            dim=-1,
-        )
+        match (scope):
+            case "global":
+                observation = torch.cat(
+                    [
+                        # Global state
+                        a_chain_centroid_pos,
+                        a_chain_centroid_vel,
+                        a_chain_centroid_ang_pos / (2 * torch.pi),
+                        a_chain_centroid_ang_vel,
+                        total_force,
+                        total_moment.unsqueeze(-1),
+                        f_dist.unsqueeze(-1),
+                        c_diff_vect,
+                        # For IPPO actor
+                        a_pos_rel_2_centroid,
+                        a_pos_rel_2_t_centroid,
+                        agent.state.pos,
+                        agent.state.vel,
+                        agent.state.rot % (2 * torch.pi) / (2 * torch.pi),
+                        agent.state.ang_vel,
+                    ],
+                    dim=-1,
+                )
+            case "global_plus_local":
+                observation = torch.cat(
+                    [
+                        # Global state
+                        a_chain_centroid_pos,
+                        a_chain_centroid_vel,
+                        a_chain_centroid_ang_pos / (2 * torch.pi),
+                        a_chain_centroid_ang_vel,
+                        total_force,
+                        total_moment.unsqueeze(-1),
+                        f_dist.unsqueeze(-1),
+                        c_diff_vect,
+                        # For IPPO actor
+                        a_pos_rel_2_centroid,
+                        a_pos_rel_2_t_centroid,
+                        agent.state.pos,
+                        agent.state.vel,
+                        agent.state.rot % (2 * torch.pi) / (2 * torch.pi),
+                        agent.state.ang_vel,
+                    ],
+                    dim=-1,
+                )
 
         return observation
 
     def observation(self, agent: Agent):
-        return self.single_agent_representation(agent)
+        return self.agent_representation(agent, self.state_representation)
 
     def done(self):
         return self.total_rew > 0.98

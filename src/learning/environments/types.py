@@ -10,6 +10,7 @@ class EnvironmentParams:
     observation_size: int = 0
     action_size: int = 0
     max_steps: int = 0
+    n_envs: int = 1
 
 
 class EnvironmentEnum(StrEnum):
