@@ -3,9 +3,10 @@ from dataclasses import dataclass
 
 @dataclass
 class Params:
-    n_steps: int
+    shared_params: bool
+    single_policy: bool
 
 
 @dataclass
 class Experiment:
-    ippo_config: Params = None
+    params: Params = None

@@ -4,8 +4,10 @@ import torch
 
 from learning.environments.types import EnvironmentParams
 from learning.environments.create_env import create_env
-from learning.algorithms.ippo.ppo import Params
+from learning.algorithms.ippo.ppo import Params as PPO_Params
 from learning.algorithms.ippo.ippo import IPPO
+from learning.algorithms.ippo.types import Experiment, Params
+
 import numpy as np
 import pickle as pkl
 from pathlib import Path
@@ -38,7 +40,12 @@ class IPPO_Trainer:
         # Create directories
         self.models_dir.mkdir(parents=True, exist_ok=True)
 
-    def train(self, exp_config, env_config: EnvironmentParams):
+    def train(
+        self,
+        exp_config: Experiment,
+        env_config: EnvironmentParams,
+    ):
+        ippo_params = Params(**exp_config.params)
 
         env = create_env(
             self.batch_dir,
@@ -47,7 +54,11 @@ class IPPO_Trainer:
             env_name=env_config.environment,
         )
 
-        params = Params(fname=self.logs_dir, n_agents=env.n_agents)
+        if ippo_params.single_policy:
+            params = PPO_Params(fname=self.logs_dir, n_agents=1)
+        else:
+            params = PPO_Params(fname=self.logs_dir, n_agents=env.n_agents)
+
         params.device = self.device
         params.action_dim = env_config.action_size
         params.state_dim = env_config.observation_size
@@ -59,7 +70,7 @@ class IPPO_Trainer:
         params.grad_clip = 0.3  # clip_grad_val
         params.write()
 
-        learner = IPPO(params, shared_params=True)
+        learner = IPPO(params, shared_params=ippo_params.shared_params)
         step = 0
         rmax = -1e10
         running_avg_reward = 0
@@ -79,24 +90,23 @@ class IPPO_Trainer:
                 while not done:
                     step += 1
 
-                    # Process action and step in environment
-                    action = torch.clamp(
-                        torch.stack(learner.act(state)), min=-1.0, max=1.0
-                    )
+                    # In case of single agent PPO, mainly for testing environment
+                    if ippo_params.single_policy:
+                        action = torch.clamp(learner.act(state[0]), min=-1.0, max=1.0)
+                        action = action.reshape(
+                            env.n_agents,
+                            env_config.n_envs,
+                            env_config.action_size // env.n_agents,
+                        )
+                    else:
+                        # Process action and step in environment
+                        action = torch.clamp(
+                            torch.stack(learner.act(state)), min=-1.0, max=1.0
+                        )
 
-                    action = action.reshape(
-                        env.n_agents, env_config.n_envs, env_config.action_size
-                    )
-
-                    # Uncomment for single agent PPO
-                    # action = torch.clamp(
-                    #     learner.act(state[0]), min=-1.0, max=1.0
-                    # )
-                    # action = action.reshape(
-                    #     env.n_agents,
-                    #     env_config.n_envs,
-                    #     env_config.action_size // env.n_agents,
-                    # )
+                        action = action.reshape(
+                            env.n_agents, env_config.n_envs, env_config.action_size
+                        )
 
                     action_tensor_list = [agent for agent in action]
                     state, reward, done, _ = env.step(action_tensor_list)
@@ -137,7 +147,7 @@ class IPPO_Trainer:
             self.batch_dir, 1, device=self.device, env_name=env_config.environment
         )
 
-        params = Params(n_agents=env.n_agents)
+        params = PPO_Params(n_agents=env.n_agents)
         params.device = self.device
         params.action_dim = env_config.action_size
         params.state_dim = env_config.observation_size

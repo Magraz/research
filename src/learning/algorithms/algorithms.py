@@ -7,6 +7,7 @@ from learning.algorithms.ccea.train import CCEA_Trainer
 from learning.algorithms.ccea.types import Experiment as CCEA_Experiment
 
 from learning.algorithms.ippo.train import IPPO_Trainer
+from learning.algorithms.ippo.types import Experiment as IPPO_Experiment
 
 from learning.algorithms.manual.control import ManualControl
 
@@ -70,7 +71,7 @@ def run_algorithm(
             )
 
         case AlgorithmEnum.IPPO:
-            exp_config = None
+            exp_config = IPPO_Experiment(**exp_dict)
             trainer = IPPO_Trainer(
                 device="cpu",
                 batch_dir=batch_dir,
