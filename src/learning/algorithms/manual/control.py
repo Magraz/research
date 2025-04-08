@@ -4,10 +4,7 @@ import torch
 
 from learning.environments.types import EnvironmentParams
 from learning.environments.create_env import create_env
-from learning.algorithms.ippo.ppo import Params
-from learning.algorithms.ippo.ippo import IPPO
-import numpy as np
-import pickle as pkl
+
 from pathlib import Path
 
 from pynput.keyboard import Listener

@@ -1,16 +1,16 @@
 
 map_size: [1.0, 1.0]
-observation_size: 22
-action_size: 4
-state_representation: global
+observation_size: 10
+action_size: 2
+state_representation: local
 shuffle_agents_positions: False
 max_steps: 500
 n_envs: 1
+n_agents: 5
 
 agents:
   observation_radius: 4.0
   starting_position: [0.0, 0.0]
-  n_agents: 2
 
 targets:
   spawn_rule: fixed

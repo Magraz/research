@@ -1,30 +1,15 @@
 import torch
 import torch.nn as nn
-from torch.distributions.normal import Normal
 from torch.utils.tensorboard import SummaryWriter
-import numpy as np
-from pathlib import Path
+from learning.algorithms.ppo.types import Params
+
+# from learning.algorithms.ppo.models.mlp_ac import ActorCritic
+
+from learning.algorithms.ppo.models.transformer_ac import ActorCritic
 
 torch.autograd.set_detect_anomaly(False)
 torch.autograd.profiler.profile(False)
 torch.autograd.profiler.emit_nvtx(False)
-
-
-def orthogonal_init(m, gain=1.0):
-    """
-    Applies orthogonal initialization to the model layers.
-
-    Parameters:
-        m (torch.nn.Module): The layer to initialize.
-        gain (float): Scaling factor for the weights.
-                      - Use 1.0 for standard layers.
-                      - Use sqrt(2) for ReLU activations.
-                      - Use 0.01 for small initial weights.
-    """
-    if isinstance(m, nn.Linear):
-        nn.init.orthogonal_(m.weight, gain=gain)  # Apply orthogonal init
-        if m.bias is not None:
-            nn.init.constant_(m.bias, 0)  # Set biases to zero
 
 
 class RolloutBuffer:
@@ -45,91 +30,8 @@ class RolloutBuffer:
         del self.is_terminals[:]
 
 
-class ActorCritic(nn.Module):
-    def __init__(self, params):
-        super(ActorCritic, self).__init__()
-        state_dim = params.state_dim
-        action_dim = params.action_dim
-        actor_hidden = params.actor_hidden
-        critic_hidden = params.critic_hidden
-        active_fn = params.active_fn
-        self.device = params.device
-
-        self.action_dim = action_dim
-        self.log_action_std = nn.Parameter(
-            torch.rand(action_dim, requires_grad=True, device=self.device) / 100
-            + params.action_std
-        ).to(self.device)
-
-        # Actor
-        self.actor = nn.Sequential(
-            nn.Linear(state_dim, actor_hidden),
-            active_fn(),
-            nn.Linear(actor_hidden, actor_hidden),
-            active_fn(),
-            nn.Linear(actor_hidden, action_dim),
-            nn.Tanh(),
-        )
-
-        # Apply orthogonal initialization
-        self.actor.apply(
-            lambda m: orthogonal_init(
-                m, gain=torch.nn.init.calculate_gain("leaky_relu")
-            )
-        )
-
-        # Critic
-        self.critic = nn.Sequential(
-            nn.Linear(state_dim, critic_hidden),
-            active_fn(),
-            nn.Linear(critic_hidden, critic_hidden),
-            active_fn(),
-            nn.Linear(critic_hidden, 1),
-        )
-
-    def forward(self):
-        raise NotImplementedError
-
-    def act(self, state, deterministic=False):
-
-        action_mean = self.actor(state)
-
-        if deterministic:
-            return action_mean.detach()
-
-        action_std = torch.exp(self.log_action_std)
-
-        dist = Normal(action_mean, action_std)
-
-        action = dist.sample()
-        action_logprob = dist.log_prob(action)
-
-        state_val = self.critic(state)
-
-        return (
-            action.detach(),
-            action_logprob.detach(),
-            state_val.detach(),
-        )
-
-    def evaluate(self, state, action):
-
-        action_mean = self.actor(state)
-
-        action_std = torch.exp(self.log_action_std)
-
-        dist = Normal(action_mean, action_std)
-
-        action_logprobs = dist.log_prob(action)
-        dist_entropy = dist.entropy()
-
-        state_values = self.critic(state)
-
-        return action_logprobs, state_values, dist_entropy
-
-
 class PPO:
-    def __init__(self, params, idx=0, n_buffers=1):
+    def __init__(self, params: Params, idx: int = 0, n_buffers: int = 1):
 
         self.params = params
         self.device = params.device
@@ -141,30 +43,43 @@ class PPO:
 
         self.buffers = [RolloutBuffer() for i in range(n_buffers)]
 
-        self.policy = ActorCritic(params).to(self.device)
+        self.policy = ActorCritic(
+            d_action=params.action_dim,
+            d_state=params.state_dim,
+        ).to(self.device)
+
         self.opt_actor = torch.optim.Adam(
-            [p for p in self.policy.actor.parameters()] + [self.policy.log_action_std],
+            self.policy.actor + [self.policy.log_action_std],
             lr=params.lr_actor,
         )
+
         self.opt_critic = torch.optim.Adam(
             self.policy.critic.parameters(), lr=params.lr_critic
         )
 
-        self.policy_old = ActorCritic(params).to(self.device)
+        self.policy_old = ActorCritic(
+            d_action=params.action_dim,
+            d_state=params.state_dim,
+        ).to(self.device)
+
         self.policy_old.load_state_dict(self.policy.state_dict())
 
-        self.MSELoss = nn.MSELoss()
+        self.loss_fn = nn.MSELoss()
+
+        self.writer = SummaryWriter(params.log_filename)
 
     def select_action(self, state, n_buffer):
         with torch.no_grad():
-            action, action_logprob, state_val = self.policy_old.act(state)
+            action, action_logprob, state_val = self.policy_old.act(
+                state, actions_buffer=self.buffers[n_buffer].actions
+            )
 
-        self.buffers[n_buffer].states.append(state.squeeze(0))
-        self.buffers[n_buffer].actions.append(action.squeeze(0))
+        self.buffers[n_buffer].states.append(state)
+        self.buffers[n_buffer].actions.append(action)
         self.buffers[n_buffer].logprobs.append(action_logprob.squeeze(0))
-        self.buffers[n_buffer].state_values.append(state_val.squeeze(0))
+        self.buffers[n_buffer].state_values.append(state_val)
 
-        return action.detach().flatten()
+        return action.detach()
 
     def deterministic_action(self, state):
         with torch.no_grad():
@@ -227,13 +142,22 @@ class PPO:
             )
 
             # Calculate advantages
-            advantages = self.gae(
-                torch.tensor(buffer.rewards, dtype=torch.float32).to(self.device),
-                torch.tensor(buffer.state_values, dtype=torch.float32).to(self.device),
-                torch.tensor(buffer.is_terminals, dtype=torch.float32).to(self.device),
-            ).unsqueeze(-1)
+            advantages = (
+                self.gae(
+                    torch.tensor(buffer.rewards, dtype=torch.float32).to(self.device),
+                    torch.tensor(buffer.state_values, dtype=torch.float32).to(
+                        self.device
+                    ),
+                    torch.tensor(buffer.is_terminals, dtype=torch.float32).to(
+                        self.device
+                    ),
+                )
+                .unsqueeze(-1)
+                .unsqueeze(-1)
+            )
 
-            Aloss, Closs, Entropy = [], [], []
+            actor_loss, critic_loss, entropy = [], [], []
+
             # Optimize policy for K epochs
             for _ in range(self.K_epochs):
 
@@ -261,18 +185,16 @@ class PPO:
                 loss_actor = loss_actor - self.params.beta_ent * dist_entropy
 
                 loss_actor = loss_actor.mean()
-                loss_critic = self.MSELoss(state_values, rewards)
+                loss_critic = self.loss_fn(state_values, rewards)
 
-                Entropy.append(dist_entropy.mean().item())
-                Aloss.append(loss_actor.item())
-                Closs.append(loss_critic.item())
+                entropy.append(dist_entropy.mean().item())
+                actor_loss.append(loss_actor.item())
+                critic_loss.append(loss_critic.item())
 
                 # Take gradient step
                 self.opt_actor.zero_grad()
-                loss_actor.backward()
-                torch.nn.utils.clip_grad_norm_(
-                    self.policy.actor.parameters(), self.params.grad_clip
-                )
+                loss_actor.backward(retain_graph=True)
+                torch.nn.utils.clip_grad_norm_(self.policy.actor, self.params.grad_clip)
                 self.opt_actor.step()
 
                 self.opt_critic.zero_grad()
@@ -283,12 +205,13 @@ class PPO:
                 self.opt_critic.step()
 
         # if self.params.log_indiv:
+
         #     prefix = "Agent" + str(self.idx) + "/"
         #     self.params.writer.add_scalar(
-        #         prefix + "Loss/entropy", np.mean(Entropy), idx
+        #         prefix + "Loss/entropy", np.mean(entropy), idx
         #     )
-        #     self.params.writer.add_scalar(prefix + "Loss/actor", np.mean(Aloss), idx)
-        #     self.params.writer.add_scalar(prefix + "Loss/critic", np.mean(Closs), idx)
+        #     self.params.writer.add_scalar(prefix + "Loss/actor", np.mean(actor_loss), idx)
+        #     self.params.writer.add_scalar(prefix + "Loss/critic", np.mean(critic_loss), idx)
         #     self.params.writer.add_scalar(
         #         prefix + "Action/STD_Mean", torch.mean(self.policy.log_action_std), idx
         #     )
@@ -299,7 +222,6 @@ class PPO:
         #     self.params.writer.add_scalar(
         #         prefix + "Loss/Advantage_max", advantages.max().item(), idx
         #     )
-
         # self.params.writer.add_scalar(
         #     prefix + "Reward", sum(self.buffer.rewards) / self.params.N_batch, idx
         # )
@@ -321,45 +243,6 @@ class PPO:
         self.policy.load_state_dict(
             torch.load(checkpoint_path, map_location=lambda storage, loc: storage)
         )
-
-
-class Params:
-    def __init__(self, fname=None, n_agents=0):
-        self.K_epochs = 20  # update policy for K epochs in one PPO update
-        self.N_batch = 8
-        self.N_steps = 3e6
-        self.eps_clip = 0.2  # clip parameter for PPO
-        self.gamma = 0.99  # discount factor
-
-        self.lr_actor = 0.0003  # learning rate for actor network
-        self.lr_critic = 0.001  # learning rate for critic network
-        self.action_std = -0.8
-        self.random_seed = 0
-        self.grad_clip = 1.0
-
-        self.action_dim = 4
-        self.state_dim = 24
-
-        self.actor_hidden = 64
-        self.critic_hidden = 64
-        self.active_fn = nn.LeakyReLU
-
-        self.lmbda = 0.95
-
-        self.device = "cpu"
-        self.log_indiv = True
-
-        if fname is not None:
-            self.writer = SummaryWriter(fname)
-        else:
-            self.log_indiv = False
-
-        self.beta_ent = 0.001
-        self.n_agents = n_agents
-
-    def write(self):
-        for key, val in self.__dict__.items():
-            self.writer.add_text("Params/" + key, key + " : " + str(val))
 
 
 if __name__ == "__main__":

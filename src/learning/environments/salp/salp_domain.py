@@ -575,12 +575,12 @@ class SalpDomain(BaseScenario):
                         f_dist.unsqueeze(-1),
                         c_diff_vect,
                         # For IPPO actor
-                        a_pos_rel_2_centroid,
-                        a_pos_rel_2_t_centroid,
-                        agent.state.pos,
-                        agent.state.vel,
-                        agent.state.rot % (2 * torch.pi) / (2 * torch.pi),
-                        agent.state.ang_vel,
+                        # a_pos_rel_2_centroid,
+                        # a_pos_rel_2_t_centroid,
+                        # agent.state.pos,
+                        # agent.state.vel,
+                        # agent.state.rot % (2 * torch.pi) / (2 * torch.pi),
+                        # agent.state.ang_vel,
                     ],
                     dim=-1,
                 )
@@ -597,6 +597,19 @@ class SalpDomain(BaseScenario):
                         f_dist.unsqueeze(-1),
                         c_diff_vect,
                         # For IPPO actor
+                        a_pos_rel_2_centroid,
+                        a_pos_rel_2_t_centroid,
+                        agent.state.pos,
+                        agent.state.vel,
+                        agent.state.rot % (2 * torch.pi) / (2 * torch.pi),
+                        agent.state.ang_vel,
+                    ],
+                    dim=-1,
+                )
+
+            case "local":
+                observation = torch.cat(
+                    [
                         a_pos_rel_2_centroid,
                         a_pos_rel_2_t_centroid,
                         agent.state.pos,

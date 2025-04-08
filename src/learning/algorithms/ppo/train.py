@@ -4,7 +4,7 @@ import torch
 
 from learning.environments.types import EnvironmentParams
 from learning.environments.create_env import create_env
-from learning.algorithms.ippo.ippo import IPPO
+from learning.algorithms.ippo.ippo import PPO
 from learning.algorithms.ppo.types import Experiment, Params
 
 import numpy as np
@@ -15,7 +15,7 @@ from dataclasses import make_dataclass
 from vmas.simulator.utils import save_video
 
 
-class IPPO_Trainer:
+class PPO_Trainer:
     def __init__(
         self,
         device: str,
@@ -57,9 +57,10 @@ class IPPO_Trainer:
 
         params.device = self.device
         params.log_filename = self.logs_dir
-        params.n_agents = env.n_agents
+        params.action_dim = env_config.action_size
+        params.state_dim = env_config.observation_size
 
-        learner = IPPO(params)
+        learner = PPO(params)
         step = 0
         rmax = -1e10
         running_avg_reward = 0
@@ -80,22 +81,23 @@ class IPPO_Trainer:
                 while not done:
                     step += 1
 
-                    # Process action and step in environment
+                    batched_state = torch.stack(state)
+
                     action = torch.clamp(
-                        torch.stack(learner.act(state)), min=-1.0, max=1.0
+                        learner.select_action(
+                            batched_state.permute(1, 0, 2), n_buffer=0
+                        ),
+                        min=-1.0,
+                        max=1.0,
                     )
 
-                    action = action.reshape(
-                        env.n_agents, env_config.n_envs, env_config.action_size
-                    )
-
-                    action_tensor_list = [agent for agent in action]
+                    action_tensor_list = [agent for agent in action.permute(1, 0, 2)]
                     state, reward, done, _ = env.step(action_tensor_list)
 
                     # Store transition
                     # episode_data.append((state, action, reward, done))
 
-                    learner.add_reward_terminal(reward, done)
+                    learner.add_reward_terminal(reward[0], done, n_buffer=0)
 
                     R += reward[0]
 
@@ -120,7 +122,7 @@ class IPPO_Trainer:
                 with open(self.models_dir / "data.dat", "wb") as f:
                     pkl.dump(data, f)
 
-            learner.train()
+            learner.update()
 
     def view(self, exp_config: Experiment, env_config: EnvironmentParams):
 
@@ -132,9 +134,8 @@ class IPPO_Trainer:
         params = Params(**exp_config.params)
 
         params.device = self.device
-        params.n_agents = 1
 
-        learner = IPPO(params)
+        learner = PPO(params)
         learner.load(self.models_dir / "best_model")
 
         frame_list = []
@@ -149,10 +150,11 @@ class IPPO_Trainer:
             while not done:
 
                 action = torch.clamp(
-                    torch.stack(learner.act_deterministic(state)), min=-1.0, max=1.0
+                    torch.stack(learner.deterministic_action(state)),
+                    min=-1.0,
+                    max=1.0,
                 )
-
-                action = action.reshape(env.n_agents, 1, env_config.action_size)
+                action = action.reshape((env.n_agents, 1, env_config.action_size))
 
                 action_tensor_list = [agent for agent in action]
                 state, reward, done, _ = env.step(action_tensor_list)

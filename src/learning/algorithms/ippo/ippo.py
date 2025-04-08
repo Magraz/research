@@ -1,15 +1,14 @@
-from learning.algorithms.ippo.ppo import PPO
-from copy import deepcopy
-import torch
+from learning.algorithms.ppo.ppo import PPO
+from learning.algorithms.ppo.types import Params
 
 
 class IPPO:
-    def __init__(self, params, shared_params: bool = False):
+    def __init__(self, params: Params):
         self.params = params
         self.n_agents = params.n_agents
-        self.shared_params = shared_params
+        self.shared_params = params.shared_params
 
-        if not shared_params:
+        if not self.shared_params:
             self.agents = [PPO(params, n_buffers=1) for i in range(self.n_agents)]
         else:
             self.shared_policy = PPO(params, n_buffers=self.n_agents)
