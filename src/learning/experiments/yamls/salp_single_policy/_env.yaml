@@ -1,12 +1,9 @@
 
-map_size: [1.0, 1.0]
-observation_size: 10
-action_size: 2
-state_representation: local
+map_size: [0.8, 0.8]
+state_representation: global
 shuffle_agents_positions: False
-max_steps: 500
-n_envs: 1
-n_agents: 5
+n_envs: 10
+n_agents: 3
 
 agents:
   observation_radius: 4.0

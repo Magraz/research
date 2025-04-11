@@ -5,11 +5,11 @@ import torch.nn as nn
 @dataclass
 class Params:
 
-    shared_params: bool
-    single_policy: bool
-    K_epochs: int
-    N_batch: int
-    N_steps: int
+    n_epochs: int
+    n_total_steps: int
+    n_steps: int
+    n_minibatches: int
+
     eps_clip: float
     gamma: float
 
@@ -24,6 +24,10 @@ class Params:
     # Default params
     device: str = ""
     n_agents: int = 0
+
+    batch_size: int = 0
+    minibatch_size: int = 0
+
     log_filename: str = ""
     action_dim: int = 0
     state_dim: int = 0

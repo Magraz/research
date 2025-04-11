@@ -76,6 +76,7 @@ class SalpDomain(BaseScenario):
                         theta_range=[0, 0],
                     ),
                     dtype=torch.float32,
+                    device=device,
                 )
                 .unsqueeze(0)
                 .repeat(batch_dim, 1, 1),
@@ -288,6 +289,7 @@ class SalpDomain(BaseScenario):
                         theta_range=[self.agent_min_angle, self.agent_max_angle],
                     ),
                     dtype=torch.float32,
+                    device=self.world.device,
                 )
                 .unsqueeze(0)
                 .repeat(self.world.batch_dim, 1, 1)

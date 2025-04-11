@@ -12,7 +12,7 @@ from learning.environments.types import EnvironmentEnum
 
 
 def create_env(
-    batch_dir, n_envs: int, device: str, env_name: str, **kwargs
+    batch_dir, n_envs: int, device: str, env_name: str, seed: int, **kwargs
 ) -> Environment:
 
     env_file = os.path.join(batch_dir, "_env.yaml")
@@ -26,7 +26,6 @@ def create_env(
             env_args = {
                 # Environment data
                 "scenario": "buzz_wire",
-                "max_steps": env_config["max_steps"],
             }
 
         case EnvironmentEnum.VMAS_BALANCE:
@@ -84,7 +83,6 @@ def create_env(
                 "scenario": SalpDomain(),
                 "x_semidim": env_config["map_size"][0],
                 "y_semidim": env_config["map_size"][1],
-                "max_steps": env_config["max_steps"],
                 # Agent data
                 "n_agents": env_config["n_agents"],
                 "lidar_range": env_config["agents"]["observation_radius"],
@@ -98,7 +96,7 @@ def create_env(
     env = make_env(
         num_envs=n_envs,
         device=device,
-        seed=None,
+        seed=seed,
         # Environment specific variables
         **env_args,
     )

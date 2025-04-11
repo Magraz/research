@@ -22,37 +22,39 @@ def orthogonal_init(m, gain=1.0):
 
 
 class ActorCritic(nn.Module):
-    def __init__(self, dim_action, dim_state):
+    def __init__(self, d_action, d_state, n_agents):
         super(ActorCritic, self).__init__()
 
         actor_hidden = 64
         critic_hidden = 64
         active_fn = nn.LeakyReLU
 
-        self.log_action_std = nn.Parameter(torch.zeros(dim_action, requires_grad=True))
+        self.log_action_std = nn.Parameter(
+            torch.zeros(d_action * n_agents, requires_grad=True)
+        )
 
         # Actor
-        self.actor_policy = nn.Sequential(
-            nn.Linear(dim_state, actor_hidden),
+        self.actor = nn.Sequential(
+            nn.Linear(d_state, actor_hidden),
             active_fn(),
             nn.Linear(actor_hidden, actor_hidden),
             active_fn(),
-            nn.Linear(actor_hidden, dim_action),
+            nn.Linear(actor_hidden, d_action * n_agents),
             nn.Tanh(),
         )
 
+        self.actor_params = list(self.actor.parameters())
+
         # Apply orthogonal initialization
-        self.actor_policy.apply(
+        self.actor.apply(
             lambda m: orthogonal_init(
                 m, gain=torch.nn.init.calculate_gain("leaky_relu")
             )
         )
 
-        self.actor = self.actor_policy.parameters()
-
         # Critic
         self.critic = nn.Sequential(
-            nn.Linear(dim_state, critic_hidden),
+            nn.Linear(d_state, critic_hidden),
             active_fn(),
             nn.Linear(critic_hidden, critic_hidden),
             active_fn(),
@@ -64,7 +66,7 @@ class ActorCritic(nn.Module):
 
     def act(self, state, deterministic=False, **kwargs):
 
-        action_mean = self.actor_policy(state)
+        action_mean = self.actor(state)
 
         if deterministic:
             return action_mean.detach()
@@ -86,7 +88,7 @@ class ActorCritic(nn.Module):
 
     def evaluate(self, state, action):
 
-        action_mean = self.actor_policy(state)
+        action_mean = self.actor(state)
 
         action_std = torch.exp(self.log_action_std)
 
