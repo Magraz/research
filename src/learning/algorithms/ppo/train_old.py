@@ -1,6 +1,6 @@
 import os
 import torch
-
+import numpy as np
 
 from learning.environments.types import EnvironmentParams
 from learning.environments.create_env import create_env
@@ -62,6 +62,11 @@ class PPO_Trainer:
         # Set params
         params = Params(**exp_config.params)
 
+        # Set seeds
+        np.random.seed(params.random_seed)
+        torch.manual_seed(params.random_seed)
+        torch.cuda.manual_seed(params.random_seed)
+
         env = create_env(
             self.batch_dir,
             env_config.n_envs,
@@ -77,35 +82,26 @@ class PPO_Trainer:
         params.n_agents = env_config.n_agents
         params.action_dim = env.action_space.spaces[0].shape[0]
         params.state_dim = env.observation_space.spaces[0].shape[0] * params.n_agents
+        params.batch_size = env_config.n_envs * params.n_steps
+        params.minibatch_size = params.batch_size // params.n_minibatches
 
-        learner = PPO(
-            state_dim=params.state_dim,
-            action_dim=params.action_dim * params.n_agents,
-            lr_actor=params.lr_actor,
-            lr_critic=params.lr_critic,
-            gamma=params.gamma,
-            K_epochs=params.n_epochs,
-            eps_clip=params.eps_clip,
-            has_continuous_action_space=True,
-        )
+        learner = PPO(params=params)
 
         step = 0
         episodes = 0
         rmax = -1e10
         running_avg_reward = 0
         data = []
-        idx = 0
+        iterations = 0
 
         while step < params.n_total_steps:
 
             for j in range(n_batches):
-                idx += 1
                 done = False
                 state = env.reset()
-                R = torch.zeros(env_config.n_envs)
+                R = 0.0
 
-                while not done:
-                    step += 1
+                for t in range(0, params.n_steps):
 
                     action = torch.clamp(
                         learner.select_action(
@@ -132,12 +128,17 @@ class PPO_Trainer:
                     learner.buffer.rewards.append(reward[0])
                     learner.buffer.is_terminals.append(done)
 
-                    R += reward[0]
+                    R += reward[0].item()
 
-                # Append episode summary instead of per-step data
-                data.append(R.tolist()[0])
+                    step += 1
 
-                print(step, R)
+                    if done:
+                        break
+
+                # Append cumulative reward per episode
+                data.append(R)
+
+                print(f"Step {step}, Reward: {R}")
 
                 running_avg_reward = (
                     0.99 * running_avg_reward + 0.01 * R if episodes > 0 else R
@@ -153,11 +154,13 @@ class PPO_Trainer:
             # if step % 10000 == 0:
             #     learner.save(self.models_dir / f"checkpoint_{step}")
 
-            if idx % 2 == 0:
+            if iterations % 2 == 0:
                 with open(self.models_dir / "data.dat", "wb") as f:
                     pkl.dump(data, f)
 
             learner.update()
+
+            iterations += 1
 
     def view(self, exp_config: Experiment, env_config: EnvironmentParams):
 
@@ -184,7 +187,7 @@ class PPO_Trainer:
             gamma=params.gamma,
             K_epochs=params.n_epochs,
             eps_clip=params.eps_clip,
-            has_continuous_action_space=True,
+            device=params.device,
         )
         learner.load(self.models_dir / "best_model")
 

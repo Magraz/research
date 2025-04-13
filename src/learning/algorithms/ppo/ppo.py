@@ -10,10 +10,6 @@ from learning.algorithms.ppo.models.mlp_ac import ActorCritic
 
 # from learning.algorithms.ppo.models.transformer_ac import ActorCritic
 
-torch.autograd.set_detect_anomaly(False)
-torch.autograd.profiler.profile(False)
-torch.autograd.profiler.emit_nvtx(False)
-
 
 class RolloutBuffer:
     def __init__(self):
