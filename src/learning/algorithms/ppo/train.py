@@ -109,8 +109,6 @@ class PPO_Trainer:
 
             state = env.reset()
 
-            episode_data = []
-
             for _ in range(0, params.n_steps):
                 total_steps += env_config.n_envs
 
@@ -134,9 +132,6 @@ class PPO_Trainer:
 
                 state, reward, done, _ = env.step(action_tensor_list)
 
-                # Store transition
-                # episode_data.append((state, action, reward, done))
-
                 learner.add_reward_terminal(reward[0], done)
 
                 cum_rewards += reward[0]
@@ -146,8 +141,10 @@ class PPO_Trainer:
                     indices = torch.nonzero(done, as_tuple=True)[0]
                     for idx in indices:
                         state = env.reset_at(index=idx.item())
-                        rewards_per_episode[idx].append(cum_rewards[idx].item())
-                        cum_rewards[idx] = 0
+                        rewards_per_episode[idx.item()].append(
+                            cum_rewards[idx.item()].item()
+                        )
+                        cum_rewards[idx.item()] = 0
 
             means = [
                 sum(sublist) / len(sublist)

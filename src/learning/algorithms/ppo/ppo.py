@@ -134,32 +134,27 @@ class PPO:
         self, rewards: torch.Tensor, values: torch.Tensor, is_terminals: torch.Tensor
     ):
         values = torch.cat(
-            (values, torch.zeros((1, self.n_envs, 1), device=self.device))
+            (values, torch.zeros((1, 1), device=self.device))
         )  # Bootstrap value
 
         advantages = torch.zeros_like(rewards)
         gae = 0.0
 
         for i in reversed(range(len(rewards))):
-            mask = 1 - float(is_terminals[i])  # Convert bool to float
-            delta = (
-                rewards[i]
-                + self.gamma * values[i + 1].view(self.n_envs) * mask
-                - values[i].view(self.n_envs)
-            )
+            mask = 1 - is_terminals[i].int()  # Convert bool to float
+            delta = rewards[i] + self.gamma * values[i + 1] * mask - values[i]
             gae = delta + self.gamma * self.lmbda * mask * gae
             advantages[i] = gae
 
-        norm_advantages = (advantages - advantages.mean()) / (
-            advantages.std() + 1e-7
-        )  # Normalize advantages
+        # Normalize advantages
+        norm_advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-7)
         return norm_advantages
 
     def update(self):
         # Monte Carlo estimate of returns
         for buffer in self.buffers:
 
-            rewards = []
+            discounted_rewards = []
             discounted_reward = torch.zeros(self.n_envs, device=self.device)
 
             for reward, is_terminal in zip(
@@ -169,55 +164,46 @@ class PPO:
                 discounted_reward *= ~is_terminal
 
                 discounted_reward = reward + (self.gamma * discounted_reward)
-                rewards.insert(0, discounted_reward)
+                discounted_rewards.insert(0, discounted_reward)
 
-            # Normalizing the rewards
-            # rewards = torch.stack(rewards).T.unsqueeze(-1)
-            # rewards = rewards.reshape(-1, rewards.shape[-1])
-
-            rewards = torch.stack(rewards).unsqueeze(-1)
-            rewards = (rewards - rewards.mean()) / (rewards.std() + 1e-7)
-            rewards = rewards.reshape(-1, rewards.shape[-1])
+            # Normalizing the discounted rewards
+            discounted_rewards = torch.stack(discounted_rewards)
+            # discounted_rewards = (
+            #     discounted_rewards - discounted_rewards.mean(dim=0)
+            # ) / (discounted_rewards.std(dim=0) + 1e-7)
+            discounted_rewards = discounted_rewards.T.flatten().unsqueeze(-1)
 
             # Convert lists to tensors
-            old_states = torch.stack(buffer.states, dim=0).detach().to(self.device)
-            old_states = old_states.reshape(-1, old_states.shape[-1])
-
-            old_actions = torch.stack(buffer.actions, dim=0).detach().to(self.device)
-            old_actions = old_actions.reshape(-1, old_actions.shape[-1])
-
+            old_states = (
+                torch.stack(buffer.states, dim=1).flatten(end_dim=-2).detach()
+            )  # dim=1 to have (n_env,timestep,data), and dim=-2 to flatten the first and second dimension
+            old_actions = (
+                torch.stack(buffer.actions, dim=1).flatten(end_dim=-2).detach()
+            )
             old_logprobs = (
-                torch.stack(buffer.logprobs, dim=0)
-                .detach()
-                .to(self.device)
-                .unsqueeze(-1)
+                torch.stack(buffer.logprobs, dim=1).flatten(end_dim=-2).detach()
             )
-            old_logprobs = old_logprobs.reshape(-1, old_logprobs.shape[-1])
-
             old_state_values = (
-                torch.stack(buffer.state_values, dim=0).detach().to(self.device)
+                torch.stack(buffer.state_values, dim=1).flatten(end_dim=-2).detach()
             )
-            old_state_values = old_state_values.reshape(-1, old_state_values.shape[-1])
 
             # Calculate advantages
-            advantages = (
-                self.gae(
-                    torch.stack(buffer.rewards),
-                    torch.stack(buffer.state_values),
-                    torch.stack(buffer.is_terminals),
-                )
-                .reshape(-1)
-                .unsqueeze(-1)
-            )
+            advantages = self.gae(
+                torch.stack(buffer.rewards).T.flatten().unsqueeze(-1),
+                old_state_values,
+                torch.stack(buffer.is_terminals).T.flatten().unsqueeze(-1),
+            ).unsqueeze(-1)
 
             # calculate advantages
+            # rewards = torch.stack(buffer.rewards)
+            # rewards = rewards.T.flatten().unsqueeze(-1)
             # advantages = rewards.detach() - old_state_values.detach()
 
             actor_loss, critic_loss, entropy = [], [], []
 
             # Create old_states and old_actions dataset
             dataset = RolloutData(
-                old_states, old_actions, old_logprobs, advantages, rewards
+                old_states, old_actions, old_logprobs, advantages, discounted_rewards
             )
             loader = DataLoader(dataset, batch_size=self.minibatch_size, shuffle=True)
 
@@ -290,13 +276,10 @@ class PPO:
                 self.writer.add_scalar(
                     prefix + "Loss/advantage_max", advantages.max().item()
                 )
-                # rewards_tensor = torch.stack(rewards)
 
-                # rew_sum = torch.sum(rewards_tensor, dim=0)
-
-                # mean_rew = float(torch.mean(rew_sum))
-
-                self.writer.add_scalar(prefix + "Reward", torch.mean(rewards))
+                self.writer.add_scalar(
+                    prefix + "Reward", torch.mean(discounted_rewards)
+                )
 
             # Copy new weights into old policy
             self.policy_old.load_state_dict(self.policy.state_dict())

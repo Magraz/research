@@ -1,5 +1,5 @@
 map_size: [2.0, 2.0]
-n_envs: 10
+n_envs: 1
 n_agents: 2
 
 state_representation: None

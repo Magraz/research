@@ -6,7 +6,11 @@ from pathlib import Path
 from learning.algorithms.ccea.train import CCEA_Trainer
 from learning.algorithms.ccea.types import Experiment as CCEA_Experiment
 
-from learning.algorithms.ppo.train import PPO_Trainer
+# from learning.algorithms.ppo.train import PPO_Trainer
+
+from learning.algorithms.ppo.train_old import PPO_Trainer
+from learning.algorithms.td3.train import TD3_Trainer
+
 from learning.algorithms.ippo.train import IPPO_Trainer
 from learning.algorithms.ppo.types import Experiment as PPO_Experiment
 
@@ -17,8 +21,6 @@ from learning.algorithms.types import AlgorithmEnum
 from learning.environments.types import EnvironmentEnum, EnvironmentParams
 from learning.environments.rover.types import RoverEnvironmentParams
 from learning.environments.salp.types import SalpEnvironmentParams
-
-from dataclasses import asdict
 
 
 def run_algorithm(
@@ -88,6 +90,20 @@ def run_algorithm(
         case AlgorithmEnum.PPO:
             exp_config = PPO_Experiment(**exp_dict)
             trainer = PPO_Trainer(
+                device="cpu",
+                batch_dir=batch_dir,
+                trials_dir=Path(batch_dir).parents[1]
+                / "results"
+                / batch_name
+                / experiment_name,
+                trial_id=trial_id,
+                trial_name=Path(exp_file).stem,
+                video_name=f"{experiment_name}_{trial_id}",
+            )
+
+        case AlgorithmEnum.TD3:
+            exp_config = None
+            trainer = TD3_Trainer(
                 device="cpu",
                 batch_dir=batch_dir,
                 trials_dir=Path(batch_dir).parents[1]
