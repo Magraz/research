@@ -179,16 +179,7 @@ class PPO_Trainer:
         params.action_dim = env.action_space.spaces[0].shape[0]
         params.state_dim = env.observation_space.spaces[0].shape[0] * params.n_agents
 
-        learner = PPO(
-            state_dim=params.state_dim,
-            action_dim=params.action_dim * params.n_agents,
-            lr_actor=params.lr_actor,
-            lr_critic=params.lr_critic,
-            gamma=params.gamma,
-            K_epochs=params.n_epochs,
-            eps_clip=params.eps_clip,
-            device=params.device,
-        )
+        learner = PPO(params=params)
         learner.load(self.models_dir / "best_model")
 
         frame_list = []
@@ -200,11 +191,11 @@ class PPO_Trainer:
             state = env.reset()
             R = torch.zeros(env.n_agents)
             r = []
-            while not done:
+            for t in range(0, params.n_steps):
 
                 action = torch.clamp(
-                    learner.select_action(
-                        torch.stack(state).permute(1, 0, 2).reshape(1, -1)
+                    learner.deterministic_action(
+                        torch.stack(state).permute(1, 0, 2).reshape(1, -1),
                     ),
                     min=-1.0,
                     max=1.0,
@@ -215,16 +206,6 @@ class PPO_Trainer:
                     env_config.n_envs,
                     params.action_dim,
                 )
-
-                # Uncomment for single agent PPO
-                # action = torch.clamp(
-                #     torch.from_numpy(learner.act_deterministic(state[0])),
-                #     min=-1.0,
-                #     max=1.0,
-                # )
-                # action = action.reshape(
-                #     (env.n_agents, env_config.action_size // env.n_agents)
-                # )
 
                 action_tensor_list = [agent for agent in action]
                 state, reward, done, _ = env.step(action_tensor_list)
@@ -239,6 +220,10 @@ class PPO_Trainer:
                 )
 
                 frame_list.append(frame)
+
+                if done:
+                    print("DONE")
+                    break
 
             print(f"TOTAL RETURN: {R}")
             print(f"MAX {max(r)}")

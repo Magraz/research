@@ -1,8 +1,8 @@
 import torch
 import torch.nn as nn
-from torch.distributions import MultivariateNormal
 from torch.utils.data import Dataset, DataLoader
 
+from learning.algorithms.ppo.models.mlp_ac import ActorCritic
 from learning.algorithms.ppo.types import Params
 
 
@@ -52,65 +52,6 @@ class RolloutData(Dataset):
         )
 
 
-class ActorCritic(nn.Module):
-    def __init__(self, params: Params, action_std_init):
-        super(ActorCritic, self).__init__()
-
-        self.device = params.device
-
-        self.action_var = torch.full(
-            (params.action_dim * params.n_agents,), action_std_init * action_std_init
-        ).to(self.device)
-
-        # actor
-        self.actor = nn.Sequential(
-            nn.Linear(params.state_dim, 64),
-            nn.Tanh(),
-            nn.Linear(64, 64),
-            nn.Tanh(),
-            nn.Linear(64, params.action_dim * params.n_agents),
-            nn.Tanh(),
-        )
-
-        # critic
-        self.critic = nn.Sequential(
-            nn.Linear(params.state_dim, 64),
-            nn.Tanh(),
-            nn.Linear(64, 64),
-            nn.Tanh(),
-            nn.Linear(64, 1),
-        )
-
-    def forward(self):
-        raise NotImplementedError
-
-    def act(self, state):
-
-        action_mean = self.actor(state)
-        cov_mat = torch.diag(self.action_var).unsqueeze(dim=0)
-        dist = MultivariateNormal(action_mean, cov_mat)
-
-        action = dist.sample()
-        action_logprob = dist.log_prob(action)
-        state_val = self.critic(state)
-
-        return action.detach(), action_logprob.detach(), state_val.detach()
-
-    def evaluate(self, state, action):
-
-        action_mean = self.actor(state)
-
-        action_var = self.action_var.expand_as(action_mean)
-        cov_mat = torch.diag_embed(action_var).to(self.device)
-        dist = MultivariateNormal(action_mean, cov_mat)
-
-        action_logprobs = dist.log_prob(action)
-        dist_entropy = dist.entropy()
-        state_values = self.critic(state)
-
-        return action_logprobs, state_values, dist_entropy
-
-
 class PPO:
     def __init__(
         self,
@@ -138,11 +79,13 @@ class PPO:
             action_std_init,
         ).to(self.device)
 
-        self.optimizer = torch.optim.Adam(
-            [
-                {"params": self.policy.actor.parameters(), "lr": params.lr_actor},
-                {"params": self.policy.critic.parameters(), "lr": params.lr_critic},
-            ]
+        self.opt_actor = torch.optim.Adam(
+            [p for p in self.policy.actor.parameters()] + [self.policy.log_action_std],
+            lr=params.lr_actor,
+        )
+
+        self.opt_critic = torch.optim.Adam(
+            self.policy.critic.parameters(), lr=params.lr_critic
         )
 
         self.policy_old = ActorCritic(params, action_std_init).to(self.device)
@@ -161,6 +104,12 @@ class PPO:
         self.buffer.state_values.append(state_val)
 
         return action.detach().cpu().flatten()
+
+    def deterministic_action(self, state):
+        with torch.no_grad():
+            action = self.policy_old.act(state, deterministic=True)
+
+        return action.detach().flatten()
 
     def update(self):
         # Monte Carlo estimate of returns
@@ -242,17 +191,29 @@ class PPO:
                     * b_advantages
                 )
 
-                # final loss of clipped objective PPO
-                loss = (
-                    -torch.min(surr1, surr2)
-                    + 0.5 * self.loss_fn(state_values, b_rewards)
-                    - self.beta_ent * dist_entropy
-                )
+                # Calculate log_std regularization terms
+                log_std_penalty = 1e-4 * torch.sum(self.policy.log_action_std.square())
+                entropy_bonus = -self.beta_ent * dist_entropy
 
-                # take gradient step
-                self.optimizer.zero_grad()
-                loss.mean().backward()
-                self.optimizer.step()
+                # Calculate actor and critic losses
+                actor_loss = -torch.min(surr1, surr2) + log_std_penalty + entropy_bonus
+                critic_loss = self.loss_fn(state_values, b_rewards)
+
+                # Take actor gradient step
+                self.opt_actor.zero_grad()
+                actor_loss.mean().backward()
+                torch.nn.utils.clip_grad_norm_(
+                    self.policy.actor.parameters(), self.grad_clip
+                )
+                self.opt_actor.step()
+
+                # Take critic gradient step
+                self.opt_critic.zero_grad()
+                critic_loss.backward()
+                torch.nn.utils.clip_grad_norm_(
+                    self.policy.critic.parameters(), self.grad_clip
+                )
+                self.opt_critic.step()
 
         # Copy new weights into old policy
         self.policy_old.load_state_dict(self.policy.state_dict())

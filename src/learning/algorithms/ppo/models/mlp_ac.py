@@ -1,7 +1,8 @@
 import torch
 import torch.nn as nn
 
-from torch.distributions.normal import Normal
+from torch.distributions import MultivariateNormal
+from learning.algorithms.ppo.types import Params
 
 
 def orthogonal_init(m, gain=1.0):
@@ -22,28 +23,24 @@ def orthogonal_init(m, gain=1.0):
 
 
 class ActorCritic(nn.Module):
-    def __init__(self, d_action, d_state, n_agents):
+    def __init__(self, params: Params, action_std_init):
         super(ActorCritic, self).__init__()
 
-        actor_hidden = 64
-        critic_hidden = 64
-        active_fn = nn.LeakyReLU
+        self.device = params.device
 
         self.log_action_std = nn.Parameter(
-            torch.zeros(d_action * n_agents, requires_grad=True)
-        )
+            torch.zeros(params.action_dim * params.n_agents, requires_grad=True)
+        ).to(self.device)
 
-        # Actor
+        # actor
         self.actor = nn.Sequential(
-            nn.Linear(d_state, actor_hidden),
-            active_fn(),
-            nn.Linear(actor_hidden, actor_hidden),
-            active_fn(),
-            nn.Linear(actor_hidden, d_action * n_agents),
+            nn.Linear(params.state_dim, 64),
+            nn.LeakyReLU(),
+            nn.Linear(64, 64),
+            nn.LeakyReLU(),
+            nn.Linear(64, params.action_dim * params.n_agents),
             nn.Tanh(),
         )
-
-        self.actor_params = list(self.actor.parameters())
 
         # Apply orthogonal initialization
         self.actor.apply(
@@ -51,20 +48,23 @@ class ActorCritic(nn.Module):
                 m, gain=torch.nn.init.calculate_gain("leaky_relu")
             )
         )
-
-        # Critic
+        # critic
         self.critic = nn.Sequential(
-            nn.Linear(d_state, critic_hidden),
-            active_fn(),
-            nn.Linear(critic_hidden, critic_hidden),
-            active_fn(),
-            nn.Linear(critic_hidden, 1),
+            nn.Linear(params.state_dim, 64),
+            nn.LeakyReLU(),
+            nn.Linear(64, 64),
+            nn.LeakyReLU(),
+            nn.Linear(64, 1),
         )
 
     def forward(self):
         raise NotImplementedError
 
-    def act(self, state, deterministic=False, **kwargs):
+    def act(
+        self,
+        state,
+        deterministic=False,
+    ):
 
         action_mean = self.actor(state)
 
@@ -72,31 +72,30 @@ class ActorCritic(nn.Module):
             return action_mean.detach()
 
         action_std = torch.exp(self.log_action_std)
+        action_var = action_std.square()
 
-        dist = Normal(action_mean, action_std)
+        cov_mat = torch.diag(action_var).unsqueeze(dim=0)
+        dist = MultivariateNormal(action_mean, cov_mat)
 
         action = dist.sample()
         action_logprob = dist.log_prob(action)
-
         state_val = self.critic(state)
 
-        return (
-            action.detach(),
-            action_logprob.detach(),
-            state_val.detach(),
-        )
+        return action.detach(), action_logprob.detach(), state_val.detach()
 
     def evaluate(self, state, action):
 
         action_mean = self.actor(state)
 
         action_std = torch.exp(self.log_action_std)
+        action_var = action_std.square()
 
-        dist = Normal(action_mean, action_std)
+        action_var = action_var.expand_as(action_mean)
+        cov_mat = torch.diag_embed(action_var).to(self.device)
+        dist = MultivariateNormal(action_mean, cov_mat)
 
         action_logprobs = dist.log_prob(action)
         dist_entropy = dist.entropy()
-
         state_values = self.critic(state)
 
         return action_logprobs, state_values, dist_entropy
