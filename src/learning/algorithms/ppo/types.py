@@ -17,7 +17,8 @@ class Params:
     lr_actor: float
     random_seed: int
     grad_clip: float
-    beta_ent: float
+    ent_coef: float
+    std_coef: float
     lmbda: float
     log_data: bool
 

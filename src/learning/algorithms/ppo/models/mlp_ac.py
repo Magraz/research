@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-from torch.distributions import MultivariateNormal
+from torch.distributions import Normal
 from learning.algorithms.ppo.types import Params
 
 
@@ -60,11 +60,7 @@ class ActorCritic(nn.Module):
     def forward(self):
         raise NotImplementedError
 
-    def act(
-        self,
-        state,
-        deterministic=False,
-    ):
+    def act(self, state, deterministic=False):
 
         action_mean = self.actor(state)
 
@@ -72,30 +68,31 @@ class ActorCritic(nn.Module):
             return action_mean.detach()
 
         action_std = torch.exp(self.log_action_std)
-        action_var = action_std.square()
 
-        cov_mat = torch.diag(action_var).unsqueeze(dim=0)
-        dist = MultivariateNormal(action_mean, cov_mat)
+        dist = Normal(action_mean, action_std)
 
         action = dist.sample()
         action_logprob = dist.log_prob(action)
+
         state_val = self.critic(state)
 
-        return action.detach(), action_logprob.detach(), state_val.detach()
+        return (
+            action.detach(),
+            action_logprob.detach(),
+            state_val.detach(),
+        )
 
     def evaluate(self, state, action):
 
         action_mean = self.actor(state)
 
         action_std = torch.exp(self.log_action_std)
-        action_var = action_std.square()
 
-        action_var = action_var.expand_as(action_mean)
-        cov_mat = torch.diag_embed(action_var).to(self.device)
-        dist = MultivariateNormal(action_mean, cov_mat)
+        dist = Normal(action_mean, action_std)
 
         action_logprobs = dist.log_prob(action)
         dist_entropy = dist.entropy()
+
         state_values = self.critic(state)
 
         return action_logprobs, state_values, dist_entropy

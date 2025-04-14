@@ -56,18 +56,20 @@ class PPO:
     def __init__(
         self,
         params: Params,
+        n_envs: int = 1,
     ):
 
         self.device = params.device
         self.n_epochs = params.n_epochs
         self.minibatch_size = params.minibatch_size
 
+        self.n_envs = n_envs
         self.gamma = params.gamma
         self.lmbda = params.lmbda
         self.eps_clip = params.eps_clip
         self.grad_clip = params.grad_clip
-        self.entropy_coef = params.beta_ent
-        self.std_coef = 1e-4
+        self.ent_coef = params.ent_coef
+        self.std_coef = params.std_coef
         self.n_epochs = params.n_epochs
 
         self.buffer = RolloutBuffer()
@@ -98,54 +100,44 @@ class PPO:
         self.buffer.logprobs.append(action_logprob)
         self.buffer.state_values.append(state_val)
 
-        return action.detach().cpu().flatten()
+        return action.detach()
 
     def deterministic_action(self, state):
         with torch.no_grad():
             action = self.policy_old.act(state, deterministic=True)
 
-        return action.detach().flatten()
+        return action.detach()
+
+    def add_reward_terminal(self, reward: float, done: bool):
+        self.buffer.rewards.append(reward)
+        self.buffer.is_terminals.append(done)
 
     def update(self):
         # Monte Carlo estimate of returns
         discounted_rewards = []
-        discounted_reward = 0
+        discounted_reward = torch.zeros(self.n_envs, device=self.device)
+
         for reward, is_terminal in zip(
             reversed(self.buffer.rewards), reversed(self.buffer.is_terminals)
         ):
-            if is_terminal:
-                discounted_reward = 0
+            # If episode terminated reset discounted reward
+            discounted_reward *= ~is_terminal
+
             discounted_reward = reward + (self.gamma * discounted_reward)
             discounted_rewards.insert(0, discounted_reward)
 
         # Normalizing the rewards
-        discounted_rewards = torch.tensor(discounted_rewards, dtype=torch.float32).to(
-            self.device
-        )
+        discounted_rewards = torch.stack(discounted_rewards)
         discounted_rewards = (discounted_rewards - discounted_rewards.mean()) / (
             discounted_rewards.std() + 1e-7
         )
 
         # convert list to tensor
-        old_states = (
-            torch.squeeze(torch.stack(self.buffer.states, dim=0))
-            .detach()
-            .to(self.device)
-        )
-        old_actions = (
-            torch.squeeze(torch.stack(self.buffer.actions, dim=0))
-            .detach()
-            .to(self.device)
-        )
-        old_logprobs = (
-            torch.squeeze(torch.stack(self.buffer.logprobs, dim=0))
-            .detach()
-            .to(self.device)
-        )
+        old_states = torch.stack(self.buffer.states).flatten(end_dim=1).detach()
+        old_actions = torch.stack(self.buffer.actions).flatten(end_dim=1).detach()
+        old_logprobs = torch.stack(self.buffer.logprobs).flatten(end_dim=1).detach()
         old_state_values = (
-            torch.squeeze(torch.stack(self.buffer.state_values, dim=0))
-            .detach()
-            .to(self.device)
+            torch.stack(self.buffer.state_values).flatten(end_dim=1).detach()
         )
 
         # calculate advantages
@@ -173,11 +165,8 @@ class PPO:
                     b_old_states, b_old_actions
                 )
 
-                # match state_values tensor dimensions with rewards tensor
-                state_values = torch.squeeze(state_values)
-
                 # Finding the ratio (pi_theta / pi_theta__old)
-                ratios = torch.exp(logprobs - b_old_logprobs.detach())
+                ratios = torch.exp(logprobs - b_old_logprobs)
 
                 # Finding Surrogate Loss
                 surr1 = ratios * b_advantages
@@ -190,7 +179,7 @@ class PPO:
                 log_std_penalty = self.std_coef * torch.sum(
                     self.policy.log_action_std.square()
                 )
-                entropy_bonus = -self.entropy_coef * dist_entropy
+                entropy_bonus = -self.ent_coef * dist_entropy
 
                 # Calculate actor and critic losses
                 actor_loss = -torch.min(surr1, surr2) + log_std_penalty + entropy_bonus

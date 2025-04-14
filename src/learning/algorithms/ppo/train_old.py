@@ -97,9 +97,9 @@ class PPO_Trainer:
         while step < params.n_total_steps:
 
             for j in range(n_batches):
-                done = False
+                done = False  # If episode terminated reset discounted reward
                 state = env.reset()
-                R = 0.0
+                cum_rewards = 0.0
 
                 for t in range(0, params.n_steps):
 
@@ -125,10 +125,9 @@ class PPO_Trainer:
 
                     state, reward, done, _ = env.step(action_tensor_list)
 
-                    learner.buffer.rewards.append(reward[0])
-                    learner.buffer.is_terminals.append(done)
+                    learner.add_reward_terminal(reward[0], done)
 
-                    R += reward[0].item()
+                    cum_rewards += reward[0].item()
 
                     step += 1
 
@@ -136,12 +135,14 @@ class PPO_Trainer:
                         break
 
                 # Append cumulative reward per episode
-                data.append(R)
+                data.append(cum_rewards)
 
-                print(f"Step {step}, Reward: {R}")
+                print(f"Step {step}, Reward: {cum_rewards}")
 
                 running_avg_reward = (
-                    0.99 * running_avg_reward + 0.01 * R if episodes > 0 else R
+                    0.99 * running_avg_reward + 0.01 * cum_rewards
+                    if episodes > 0
+                    else cum_rewards
                 )
 
                 episodes += 1
