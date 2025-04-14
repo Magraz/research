@@ -56,10 +56,7 @@ class PPO:
     def __init__(
         self,
         params: Params,
-        action_std_init=0.6,
     ):
-
-        self.action_std = action_std_init
 
         self.device = params.device
         self.n_epochs = params.n_epochs
@@ -69,15 +66,13 @@ class PPO:
         self.lmbda = params.lmbda
         self.eps_clip = params.eps_clip
         self.grad_clip = params.grad_clip
-        self.beta_ent = params.beta_ent
+        self.entropy_coef = params.beta_ent
+        self.std_coef = 1e-4
         self.n_epochs = params.n_epochs
 
         self.buffer = RolloutBuffer()
 
-        self.policy = ActorCritic(
-            params,
-            action_std_init,
-        ).to(self.device)
+        self.policy = ActorCritic(params).to(self.device)
 
         self.opt_actor = torch.optim.Adam(
             [p for p in self.policy.actor.parameters()] + [self.policy.log_action_std],
@@ -88,7 +83,7 @@ class PPO:
             self.policy.critic.parameters(), lr=params.lr_critic
         )
 
-        self.policy_old = ActorCritic(params, action_std_init).to(self.device)
+        self.policy_old = ActorCritic(params).to(self.device)
         self.policy_old.load_state_dict(self.policy.state_dict())
 
         self.loss_fn = nn.MSELoss()
@@ -162,7 +157,7 @@ class PPO:
         )
         loader = DataLoader(dataset, batch_size=self.minibatch_size, shuffle=True)
 
-        # Optimize policy for K epochs
+        # Optimize policy for n epochs
         for _ in range(self.n_epochs):
 
             for (
@@ -192,8 +187,10 @@ class PPO:
                 )
 
                 # Calculate log_std regularization terms
-                log_std_penalty = 1e-4 * torch.sum(self.policy.log_action_std.square())
-                entropy_bonus = -self.beta_ent * dist_entropy
+                log_std_penalty = self.std_coef * torch.sum(
+                    self.policy.log_action_std.square()
+                )
+                entropy_bonus = -self.entropy_coef * dist_entropy
 
                 # Calculate actor and critic losses
                 actor_loss = -torch.min(surr1, surr2) + log_std_penalty + entropy_bonus

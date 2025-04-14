@@ -23,7 +23,7 @@ def orthogonal_init(m, gain=1.0):
 
 
 class ActorCritic(nn.Module):
-    def __init__(self, params: Params, action_std_init):
+    def __init__(self, params: Params):
         super(ActorCritic, self).__init__()
 
         self.device = params.device
