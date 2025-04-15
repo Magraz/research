@@ -29,7 +29,11 @@ class ActorCritic(nn.Module):
         self.device = params.device
 
         self.log_action_std = nn.Parameter(
-            torch.zeros(params.action_dim * params.n_agents, requires_grad=True)
+            torch.zeros(
+                params.action_dim * params.n_agents,
+                requires_grad=True,
+                device=params.device,
+            )
         ).to(self.device)
 
         # actor
@@ -40,7 +44,7 @@ class ActorCritic(nn.Module):
             nn.LeakyReLU(),
             nn.Linear(64, params.action_dim * params.n_agents),
             nn.Tanh(),
-        )
+        ).to(self.device)
 
         # Apply orthogonal initialization
         self.actor.apply(
@@ -55,7 +59,7 @@ class ActorCritic(nn.Module):
             nn.Linear(64, 64),
             nn.LeakyReLU(),
             nn.Linear(64, 1),
-        )
+        ).to(self.device)
 
     def forward(self):
         raise NotImplementedError
@@ -72,7 +76,7 @@ class ActorCritic(nn.Module):
         dist = Normal(action_mean, action_std)
 
         action = dist.sample()
-        action_logprob = dist.log_prob(action)
+        action_logprob = torch.sum(dist.log_prob(action), dim=-1, keepdim=True)
 
         state_val = self.critic(state)
 
@@ -90,8 +94,8 @@ class ActorCritic(nn.Module):
 
         dist = Normal(action_mean, action_std)
 
-        action_logprobs = dist.log_prob(action)
-        dist_entropy = dist.entropy()
+        action_logprobs = torch.sum(dist.log_prob(action), dim=-1, keepdim=True)
+        dist_entropy = torch.sum(dist.entropy(), dim=-1, keepdim=True)
 
         state_values = self.critic(state)
 

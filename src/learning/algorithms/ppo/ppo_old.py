@@ -90,9 +90,8 @@ class PPO:
 
         self.loss_fn = nn.MSELoss()
 
-    def select_action(self, state):
+    def select_action(self, state: torch.Tensor):
         with torch.no_grad():
-            state = torch.FloatTensor(state).to(self.device)
             action, action_logprob, state_val = self.policy_old.act(state)
 
         self.buffer.states.append(state)
@@ -113,21 +112,35 @@ class PPO:
         self.buffer.is_terminals.append(done)
 
     def update(self):
+
+        # Bootstrap episodes by calculating the value of the final state if not terminated
+        with torch.no_grad():
+            bootstrap_values = (
+                self.policy_old.critic(self.buffer.states[-1]).squeeze()
+                * ~self.buffer.is_terminals[-1]
+            )
+
+        bootstrapped_rewards = self.buffer.rewards.copy()
+        bootstrapped_rewards.append(bootstrap_values)
+
+        bootstrapped_is_terminals = self.buffer.is_terminals.copy()
+        bootstrapped_is_terminals.append(torch.ones(self.n_envs, dtype=bool))
+
         # Monte Carlo estimate of returns
         discounted_rewards = []
         discounted_reward = torch.zeros(self.n_envs, device=self.device)
-
         for reward, is_terminal in zip(
-            reversed(self.buffer.rewards), reversed(self.buffer.is_terminals)
+            reversed(bootstrapped_rewards),
+            reversed(bootstrapped_is_terminals),
         ):
-            # If episode terminated reset discounted reward
+            # If episode terminated reset discounting
             discounted_reward *= ~is_terminal
 
             discounted_reward = reward + (self.gamma * discounted_reward)
             discounted_rewards.insert(0, discounted_reward)
 
         # Normalizing the rewards
-        discounted_rewards = torch.stack(discounted_rewards)
+        discounted_rewards = torch.stack(discounted_rewards[:-1])
         discounted_rewards = (discounted_rewards - discounted_rewards.mean()) / (
             discounted_rewards.std() + 1e-7
         )
@@ -176,18 +189,22 @@ class PPO:
                 )
 
                 # Calculate log_std regularization terms
-                log_std_penalty = self.std_coef * torch.sum(
-                    self.policy.log_action_std.square()
-                )
-                entropy_bonus = -self.ent_coef * dist_entropy
+                log_std_penalty = 0
+                # log_std_penalty = (
+                #     self.std_coef * self.policy.log_action_std.square().mean()
+                # )
+
+                entropy_bonus = self.ent_coef * dist_entropy.mean()
+
+                ppo_loss = -torch.min(surr1, surr2).mean()
 
                 # Calculate actor and critic losses
-                actor_loss = -torch.min(surr1, surr2) + log_std_penalty + entropy_bonus
+                actor_loss = ppo_loss + log_std_penalty - entropy_bonus
                 critic_loss = self.loss_fn(state_values, b_rewards)
 
                 # Take actor gradient step
                 self.opt_actor.zero_grad()
-                actor_loss.mean().backward()
+                actor_loss.backward()
                 torch.nn.utils.clip_grad_norm_(
                     self.policy.actor.parameters(), self.grad_clip
                 )
