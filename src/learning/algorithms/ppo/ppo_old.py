@@ -140,17 +140,34 @@ class PPO:
             discounted_rewards.insert(0, discounted_reward)
 
         # Normalizing the rewards
-        discounted_rewards = torch.stack(discounted_rewards[:-1])
+        discounted_rewards = (
+            torch.stack(discounted_rewards[:-1])
+            .transpose(1, 0)
+            .flatten(end_dim=1)
+            .unsqueeze(-1)
+        )
         discounted_rewards = (discounted_rewards - discounted_rewards.mean()) / (
             discounted_rewards.std() + 1e-7
         )
 
         # convert list to tensor
-        old_states = torch.stack(self.buffer.states).flatten(end_dim=1).detach()
-        old_actions = torch.stack(self.buffer.actions).flatten(end_dim=1).detach()
-        old_logprobs = torch.stack(self.buffer.logprobs).flatten(end_dim=1).detach()
+        old_states = (
+            torch.stack(self.buffer.states).transpose(1, 0).flatten(end_dim=1).detach()
+        )
+        old_actions = (
+            torch.stack(self.buffer.actions).transpose(1, 0).flatten(end_dim=1).detach()
+        )
+        old_logprobs = (
+            torch.stack(self.buffer.logprobs)
+            .transpose(1, 0)
+            .flatten(end_dim=1)
+            .detach()
+        )
         old_state_values = (
-            torch.stack(self.buffer.state_values).flatten(end_dim=1).detach()
+            torch.stack(self.buffer.state_values)
+            .transpose(1, 0)
+            .flatten(end_dim=1)
+            .detach()
         )
 
         # calculate advantages

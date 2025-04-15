@@ -40,7 +40,6 @@ class PPO_Trainer:
 
     def process_state(
         self,
-        n_envs: int,
         state: list,
         representation: str,
     ):
@@ -48,7 +47,7 @@ class PPO_Trainer:
             case "global":
                 return state[0]
             case _:
-                state = torch.stack(state).permute(1, 0, 2).reshape(n_envs, -1)
+                state = torch.stack(state).transpose(1, 0).flatten(start_dim=1)
                 return state
 
         return state
@@ -66,10 +65,11 @@ class PPO_Trainer:
         np.random.seed(params.random_seed)
         torch.manual_seed(params.random_seed)
         torch.cuda.manual_seed(params.random_seed)
+        n_envs = env_config.n_envs
 
         env = create_env(
             self.batch_dir,
-            env_config.n_envs,
+            n_envs,
             device=self.device,
             env_name=env_config.environment,
             seed=params.random_seed,
@@ -80,14 +80,14 @@ class PPO_Trainer:
         params.n_agents = env_config.n_agents
         params.action_dim = env.action_space.spaces[0].shape[0]
         params.state_dim = env.observation_space.spaces[0].shape[0] * params.n_agents
-        params.batch_size = env_config.n_envs * params.n_steps
+        params.batch_size = n_envs * params.n_steps
         params.minibatch_size = 64
 
-        learner = PPO(params=params)
+        learner = PPO(params=params, n_envs=n_envs)
 
         step = 0
         total_episodes = 0
-        max_episodes_per_epoch = 10
+        max_episodes_per_rollout = 10
         max_steps_per_episode = 512
         rmax = -1e10
         running_avg_reward = 0
@@ -96,15 +96,21 @@ class PPO_Trainer:
 
         while step < params.n_total_steps:
 
-            rollout_episodes, cum_rewards, state = 0, 0, env.reset()
-            episode_len = 0
+            rollout_episodes = 0
+            episode_len = torch.zeros(
+                env_config.n_envs, dtype=torch.int32, device=params.device
+            )
+            cum_rewards = torch.zeros(
+                env_config.n_envs, dtype=torch.float32, device=params.device
+            )
+
+            state = env.reset()
 
             for _ in range(0, params.n_steps):
 
                 action = torch.clamp(
                     learner.select_action(
                         self.process_state(
-                            env_config.n_envs,
                             state,
                             env_config.state_representation,
                         )
@@ -115,7 +121,7 @@ class PPO_Trainer:
 
                 action = action.reshape(
                     params.n_agents,
-                    env_config.n_envs,
+                    n_envs,
                     params.action_dim,
                 )
 
@@ -125,32 +131,48 @@ class PPO_Trainer:
 
                 learner.add_reward_terminal(reward[0], done)
 
-                cum_rewards += reward[0].item()
+                cum_rewards += reward[0]
 
-                step += 1
-                episode_len += 1
+                step += env_config.n_envs
+                episode_len += torch.ones(
+                    env_config.n_envs, dtype=torch.int32, device=params.device
+                )
+
+                # Create timeout boolean mask
                 timeout = episode_len == max_steps_per_episode
 
-                if done or timeout:
-                    # Log data
-                    data.append(cum_rewards)
+                if torch.any(done) or torch.any(timeout):
 
-                    print(f"Step {step}, Reward: {cum_rewards}")
+                    # Get done and timeout indices
+                    done_indices = torch.nonzero(done).flatten().tolist()
+                    timeout_indices = torch.nonzero(timeout).flatten().tolist()
 
-                    running_avg_reward = (
-                        0.99 * running_avg_reward + 0.01 * cum_rewards
-                        if total_episodes > 0
-                        else cum_rewards
-                    )
+                    # Merge indices and remove duplicates
+                    indices = list(set(done_indices + timeout_indices))
 
-                    # Reset vars, and increase counters
-                    state, cum_rewards, episode_len = env.reset(), 0, 0
+                    for idx in indices:
+                        # Log data when episode is done
+                        r = cum_rewards[idx].item()
 
-                    total_episodes += 1
-                    rollout_episodes += 1
+                        data.append(r)
 
-                    if rollout_episodes == max_episodes_per_epoch:
-                        break
+                        print(f"Step {step}, Reward: {r}")
+
+                        running_avg_reward = (
+                            0.99 * running_avg_reward + 0.01 * r
+                            if total_episodes > 0
+                            else r
+                        )
+
+                        # Reset vars, and increase counters
+                        state = env.reset_at(index=idx)
+                        cum_rewards[idx], episode_len[idx] = 0, 0
+
+                        total_episodes += 1
+                        rollout_episodes += 1
+
+                if rollout_episodes == max_episodes_per_rollout:
+                    break
 
             if running_avg_reward > rmax:
                 print(f"New best reward: {running_avg_reward} at step {step}")
