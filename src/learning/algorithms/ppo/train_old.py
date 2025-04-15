@@ -75,20 +75,20 @@ class PPO_Trainer:
             seed=params.random_seed,
         )
 
-        n_batches = 10
-
         params.device = self.device
         params.log_filename = self.logs_dir
         params.n_agents = env_config.n_agents
         params.action_dim = env.action_space.spaces[0].shape[0]
         params.state_dim = env.observation_space.spaces[0].shape[0] * params.n_agents
         params.batch_size = env_config.n_envs * params.n_steps
-        params.minibatch_size = params.batch_size // params.n_minibatches
+        params.minibatch_size = 64
 
         learner = PPO(params=params)
 
         step = 0
-        episodes = 0
+        total_episodes = 0
+        max_episodes_per_epoch = 10
+        max_steps_per_episode = 512
         rmax = -1e10
         running_avg_reward = 0
         data = []
@@ -96,56 +96,61 @@ class PPO_Trainer:
 
         while step < params.n_total_steps:
 
-            for j in range(n_batches):
-                done = False  # If episode terminated reset discounted reward
-                state = env.reset()
-                cum_rewards = 0.0
+            rollout_episodes, cum_rewards, state = 0, 0, env.reset()
+            episode_len = 0
 
-                for t in range(0, params.n_steps):
+            for _ in range(0, params.n_steps):
 
-                    action = torch.clamp(
-                        learner.select_action(
-                            self.process_state(
-                                env_config.n_envs,
-                                state,
-                                env_config.state_representation,
-                            )
-                        ),
-                        min=-1.0,
-                        max=1.0,
-                    )
-
-                    action = action.reshape(
-                        params.n_agents,
-                        env_config.n_envs,
-                        params.action_dim,
-                    )
-
-                    action_tensor_list = [agent for agent in action]
-
-                    state, reward, done, _ = env.step(action_tensor_list)
-
-                    learner.add_reward_terminal(reward[0], done)
-
-                    cum_rewards += reward[0].item()
-
-                    step += 1
-
-                    if done:
-                        break
-
-                # Append cumulative reward per episode
-                data.append(cum_rewards)
-
-                print(f"Step {step}, Reward: {cum_rewards}")
-
-                running_avg_reward = (
-                    0.99 * running_avg_reward + 0.01 * cum_rewards
-                    if episodes > 0
-                    else cum_rewards
+                action = torch.clamp(
+                    learner.select_action(
+                        self.process_state(
+                            env_config.n_envs,
+                            state,
+                            env_config.state_representation,
+                        )
+                    ),
+                    min=-1.0,
+                    max=1.0,
                 )
 
-                episodes += 1
+                action = action.reshape(
+                    params.n_agents,
+                    env_config.n_envs,
+                    params.action_dim,
+                )
+
+                action_tensor_list = [agent for agent in action]
+
+                state, reward, done, _ = env.step(action_tensor_list)
+
+                learner.add_reward_terminal(reward[0], done)
+
+                cum_rewards += reward[0].item()
+
+                step += 1
+                episode_len += 1
+                timeout = episode_len == max_steps_per_episode
+
+                if done or timeout:
+                    # Log data
+                    data.append(cum_rewards)
+
+                    print(f"Step {step}, Reward: {cum_rewards}")
+
+                    running_avg_reward = (
+                        0.99 * running_avg_reward + 0.01 * cum_rewards
+                        if total_episodes > 0
+                        else cum_rewards
+                    )
+
+                    # Reset vars, and increase counters
+                    state, cum_rewards, episode_len = env.reset(), 0, 0
+
+                    total_episodes += 1
+                    rollout_episodes += 1
+
+                    if rollout_episodes == max_episodes_per_epoch:
+                        break
 
             if running_avg_reward > rmax:
                 print(f"New best reward: {running_avg_reward} at step {step}")
