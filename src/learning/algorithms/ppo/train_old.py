@@ -120,10 +120,10 @@ class PPO_Trainer:
                 )
 
                 action = action.reshape(
-                    params.n_agents,
                     n_envs,
+                    params.n_agents,
                     params.action_dim,
-                )
+                ).transpose(1, 0)
 
                 action_tensor_list = [agent for agent in action]
 
