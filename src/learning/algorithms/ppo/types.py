@@ -8,7 +8,7 @@ class Params:
     n_epochs: int
     n_total_steps: int
     n_steps: int
-    n_minibatches: int
+    minibatch_size: int
 
     eps_clip: float
     gamma: float
@@ -25,9 +25,6 @@ class Params:
     # Default params
     device: str = ""
     n_agents: int = 0
-
-    batch_size: int = 0
-    minibatch_size: int = 0
 
     log_filename: str = ""
     action_dim: int = 0

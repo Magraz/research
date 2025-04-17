@@ -47,6 +47,7 @@ class PPO_Trainer:
             case "global":
                 return state[0]
             case _:
+                # Need state to be in the shape (n_env, agent, state_dim)
                 state = torch.stack(state).transpose(1, 0).flatten(start_dim=1)
                 return state
 
@@ -80,19 +81,17 @@ class PPO_Trainer:
         params.n_agents = env_config.n_agents
         params.action_dim = env.action_space.spaces[0].shape[0]
         params.state_dim = env.observation_space.spaces[0].shape[0] * params.n_agents
-        params.batch_size = n_envs * params.n_steps
-        params.minibatch_size = 64
 
         learner = PPO(params=params, n_envs=n_envs)
 
         step = 0
         total_episodes = 0
         max_episodes_per_rollout = 10
-        max_steps_per_episode = 512
-        rmax = -1e10
+        max_steps_per_episode = params.n_steps // max_episodes_per_rollout
+        rmax = -1e6
         running_avg_reward = 0
-        data = []
         iterations = 0
+        data = []
 
         while step < params.n_total_steps:
 
@@ -108,7 +107,7 @@ class PPO_Trainer:
 
             for _ in range(0, params.n_steps):
 
-                action = torch.clamp(
+                actions_per_env = torch.clamp(
                     learner.select_action(
                         self.process_state(
                             state,
@@ -119,13 +118,15 @@ class PPO_Trainer:
                     max=1.0,
                 )
 
-                action = action.reshape(
+                # Permute action tensor of shape (n_envs, n_agents*action_dim) to (agents, n_env, action_dim)
+                action_tensor = actions_per_env.reshape(
                     n_envs,
                     params.n_agents,
                     params.action_dim,
                 ).transpose(1, 0)
 
-                action_tensor_list = [agent for agent in action]
+                # Turn action tensor into list of tensors with shape (n_env, action_dim)
+                action_tensor_list = torch.unbind(action_tensor)
 
                 state, reward, done, _ = env.step(action_tensor_list)
 
@@ -196,7 +197,7 @@ class PPO_Trainer:
 
         env = create_env(
             self.batch_dir,
-            env_config.n_envs,
+            1,
             device=self.device,
             env_name=env_config.environment,
             seed=params.random_seed,
@@ -217,25 +218,27 @@ class PPO_Trainer:
         for i in range(n_rollouts):
             done = False
             state = env.reset()
-            R = torch.zeros(env.n_agents)
+            R = 0
             r = []
             for t in range(0, params.n_steps):
 
                 action = torch.clamp(
                     learner.deterministic_action(
-                        torch.stack(state).permute(1, 0, 2).reshape(1, -1),
+                        torch.stack(state).transpose(1, 0).flatten(start_dim=1),
                     ),
                     min=-1.0,
                     max=1.0,
                 )
 
-                action = action.reshape(
+                action_tensor = action.reshape(
+                    1,
                     params.n_agents,
-                    env_config.n_envs,
                     params.action_dim,
-                )
+                ).transpose(1, 0)
 
-                action_tensor_list = [agent for agent in action]
+                # Turn action tensor into list of tensors with shape (n_env, action_dim)
+                action_tensor_list = torch.unbind(action_tensor)
+
                 state, reward, done, _ = env.step(action_tensor_list)
 
                 r.append(reward)
@@ -249,12 +252,12 @@ class PPO_Trainer:
 
                 frame_list.append(frame)
 
-                if done:
+                if torch.any(done):
                     print("DONE")
                     break
 
             print(f"TOTAL RETURN: {R}")
-            print(f"MAX {max(r)}")
-            print(f"MIN {min(r)}")
+            # print(f"MAX {max(r)}")
+            # print(f"MIN {min(r)}")
 
         save_video(self.video_name, frame_list, fps=1 / env.scenario.world.dt)

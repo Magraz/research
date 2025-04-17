@@ -150,7 +150,7 @@ class PPO:
             discounted_rewards.std() + 1e-7
         )
 
-        # convert list to tensor
+        # Convert buffer lists from list of (n_env,dim) per timestep to a tensor of shape (timestep*n_envs, dim)
         old_states = (
             torch.stack(self.buffer.states).transpose(1, 0).flatten(end_dim=1).detach()
         )
@@ -170,10 +170,10 @@ class PPO:
             .detach()
         )
 
-        # calculate advantages
+        # Calculate advantages
         advantages = discounted_rewards.detach() - old_state_values.detach()
 
-        # Create old_states and old_actions dataset
+        # Create dataset from rollout
         dataset = RolloutData(
             old_states, old_actions, old_logprobs, advantages, discounted_rewards
         )
@@ -205,12 +205,12 @@ class PPO:
                     * b_advantages
                 )
 
-                # Calculate log_std regularization terms
-                log_std_penalty = 0
-                # log_std_penalty = (
-                #     self.std_coef * self.policy.log_action_std.square().mean()
-                # )
+                # Penalize high values of log_std by increasing the loss, thus decreasing exploration
+                log_std_penalty = (
+                    self.std_coef * self.policy.log_action_std.square().mean()
+                )
 
+                # Promote exploration by reducing the loss if entropy increases
                 entropy_bonus = self.ent_coef * dist_entropy.mean()
 
                 ppo_loss = -torch.min(surr1, surr2).mean()
