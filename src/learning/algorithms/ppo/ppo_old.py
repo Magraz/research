@@ -111,21 +111,58 @@ class PPO:
         self.buffer.rewards.append(reward)
         self.buffer.is_terminals.append(done)
 
-    def update(self):
+    def gae(
+        self,
+        bootstrapped_values: list[torch.Tensor],
+    ):
+        values = torch.stack(bootstrapped_values).squeeze()
+        rewards = torch.stack(self.buffer.rewards)
+        is_terminals = torch.stack(self.buffer.is_terminals)
 
+        advantages = torch.zeros_like(rewards)
+        gae = torch.zeros(self.n_envs)
+
+        timesteps, _ = rewards.shape
+
+        for t in reversed(range(timesteps)):
+            mask = 1 - is_terminals[t].int()  # Convert bool to float
+            delta = rewards[t] + self.gamma * values[t + 1] * mask - values[t]
+            gae = delta + self.gamma * self.lmbda * mask * gae
+            advantages[t] = gae
+
+        returns = advantages + values[:-1, :]
+
+        # Normalize advantages
+        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+
+        return (
+            advantages.transpose(1, 0).flatten().unsqueeze(-1).detach(),
+            returns.transpose(1, 0).flatten().unsqueeze(-1).detach(),
+        )
+
+    def bootstrap_episodes(self):
         # Bootstrap episodes by calculating the value of the final state if not terminated
         with torch.no_grad():
-            bootstrap_values = (
-                self.policy_old.critic(self.buffer.states[-1]).squeeze()
-                * ~self.buffer.is_terminals[-1]
-            )
+            final_values = self.policy_old.critic(
+                self.buffer.states[-1]
+            ) * ~self.buffer.is_terminals[-1].unsqueeze(-1)
 
-        bootstrapped_rewards = self.buffer.rewards.copy()
-        bootstrapped_rewards.append(bootstrap_values)
+        bootstrapped_values = self.buffer.state_values.copy()
+        bootstrapped_values.append(final_values)
 
-        bootstrapped_is_terminals = self.buffer.is_terminals.copy()
-        bootstrapped_is_terminals.append(torch.ones(self.n_envs, dtype=bool))
+        # bootstrapped_rewards = self.buffer.rewards.copy()
+        # bootstrapped_rewards.append(final_values.squeeze())
 
+        # bootstrapped_is_terminals = self.buffer.is_terminals.copy()
+        # bootstrapped_is_terminals.append(torch.ones(self.n_envs, dtype=bool))
+
+        return bootstrapped_values  # , bootstrapped_rewards, bootstrapped_is_terminals
+
+    def get_discounted_rewards(
+        self,
+        bootstrapped_rewards: list[torch.Tensor],
+        bootstrapped_is_terminals: list[torch.Tensor],
+    ):
         # Monte Carlo estimate of returns
         discounted_rewards = []
         discounted_reward = torch.zeros(self.n_envs, device=self.device)
@@ -139,16 +176,27 @@ class PPO:
             discounted_reward = reward + (self.gamma * discounted_reward)
             discounted_rewards.insert(0, discounted_reward)
 
-        # Normalizing the rewards
         discounted_rewards = (
             torch.stack(discounted_rewards[:-1])
             .transpose(1, 0)
             .flatten(end_dim=1)
             .unsqueeze(-1)
         )
+
+        # Normalizing the rewards
         discounted_rewards = (discounted_rewards - discounted_rewards.mean()) / (
-            discounted_rewards.std() + 1e-7
+            discounted_rewards.std() + 1e-8
         )
+
+        return discounted_rewards.detach()
+
+    def update(self):
+
+        # Bootstrapped incomplete episodes
+        boots_values = self.bootstrap_episodes()
+
+        # Calculate advantages
+        advantages, returns = self.gae(boots_values)
 
         # Convert buffer lists from list of (n_env,dim) per timestep to a tensor of shape (timestep*n_envs, dim)
         old_states = (
@@ -163,19 +211,10 @@ class PPO:
             .flatten(end_dim=1)
             .detach()
         )
-        old_state_values = (
-            torch.stack(self.buffer.state_values)
-            .transpose(1, 0)
-            .flatten(end_dim=1)
-            .detach()
-        )
-
-        # Calculate advantages
-        advantages = discounted_rewards.detach() - old_state_values.detach()
 
         # Create dataset from rollout
         dataset = RolloutData(
-            old_states, old_actions, old_logprobs, advantages, discounted_rewards
+            old_states, old_actions, old_logprobs, advantages, returns
         )
         loader = DataLoader(dataset, batch_size=self.minibatch_size, shuffle=True)
 
@@ -187,7 +226,7 @@ class PPO:
                 b_old_actions,
                 b_old_logprobs,
                 b_advantages,
-                b_rewards,
+                b_returns,
             ) in loader:
 
                 # Evaluating old actions and values
@@ -217,7 +256,7 @@ class PPO:
 
                 # Calculate actor and critic losses
                 actor_loss = ppo_loss + log_std_penalty - entropy_bonus
-                critic_loss = self.loss_fn(state_values, b_rewards)
+                critic_loss = self.loss_fn(state_values, b_returns)
 
                 # Take actor gradient step
                 self.opt_actor.zero_grad()

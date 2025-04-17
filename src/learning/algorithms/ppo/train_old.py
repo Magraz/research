@@ -66,8 +66,8 @@ class PPO_Trainer:
         np.random.seed(params.random_seed)
         torch.manual_seed(params.random_seed)
         torch.cuda.manual_seed(params.random_seed)
-        n_envs = env_config.n_envs
 
+        n_envs = env_config.n_envs
         env = create_env(
             self.batch_dir,
             n_envs,
@@ -80,10 +80,20 @@ class PPO_Trainer:
         params.log_filename = self.logs_dir
         params.n_agents = env_config.n_agents
         params.action_dim = env.action_space.spaces[0].shape[0]
-        params.state_dim = env.observation_space.spaces[0].shape[0] * params.n_agents
 
+        # Check state representation
+        match (env_config.state_representation):
+            case "global":
+                params.state_dim = env.observation_space.spaces[0].shape[0]
+            case _:
+                params.state_dim = (
+                    env.observation_space.spaces[0].shape[0] * params.n_agents
+                )
+
+        # Create learner object
         learner = PPO(params=params, n_envs=n_envs)
 
+        # Setup loop variables
         step = 0
         total_episodes = 0
         max_episodes_per_rollout = 10
@@ -96,6 +106,7 @@ class PPO_Trainer:
         while step < params.n_total_steps:
 
             rollout_episodes = 0
+
             episode_len = torch.zeros(
                 env_config.n_envs, dtype=torch.int32, device=params.device
             )
@@ -183,9 +194,8 @@ class PPO_Trainer:
             # if step % 10000 == 0:
             #     learner.save(self.models_dir / f"checkpoint_{step}")
 
-            if iterations % 2 == 0:
-                with open(self.models_dir / "data.dat", "wb") as f:
-                    pkl.dump(data, f)
+            with open(self.models_dir / "data.dat", "wb") as f:
+                pkl.dump(data, f)
 
             learner.update()
 
