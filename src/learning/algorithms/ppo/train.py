@@ -1,18 +1,14 @@
 import os
 import torch
-
+import numpy as np
 
 from learning.environments.types import EnvironmentParams
 from learning.environments.create_env import create_env
-from learning.algorithms.ippo.ippo import PPO
 from learning.algorithms.ppo.types import Experiment, Params
+from learning.algorithms.ppo.ppo import PPO
 
-import numpy as np
 import pickle as pkl
 from pathlib import Path
-from dataclasses import make_dataclass
-import time
-from statistics import mean
 
 from vmas.simulator.utils import save_video
 
@@ -44,7 +40,6 @@ class PPO_Trainer:
 
     def process_state(
         self,
-        n_envs: int,
         state: list,
         representation: str,
     ):
@@ -52,7 +47,8 @@ class PPO_Trainer:
             case "global":
                 return state[0]
             case _:
-                state = torch.stack(state).permute(1, 0, 2).reshape(n_envs, -1)
+                # Need state to be in the shape (n_env, agent, state_dim)
+                state = torch.stack(state).transpose(1, 0).flatten(start_dim=1)
                 return state
 
         return state
@@ -66,69 +62,82 @@ class PPO_Trainer:
         # Set params
         params = Params(**exp_config.params)
 
+        # Set seeds
+        np.random.seed(params.random_seed)
+        torch.manual_seed(params.random_seed)
+        torch.cuda.manual_seed(params.random_seed)
+
+        n_envs = env_config.n_envs
         env = create_env(
             self.batch_dir,
-            env_config.n_envs,
+            n_envs,
             device=self.device,
             env_name=env_config.environment,
             seed=params.random_seed,
         )
 
-        # NumPy
-        np.random.seed(params.random_seed)
-
-        # PyTorch (CPU)
-        torch.manual_seed(params.random_seed)
-        torch.cuda.manual_seed(params.random_seed)
-
         params.device = self.device
         params.log_filename = self.logs_dir
         params.n_agents = env_config.n_agents
         params.action_dim = env.action_space.spaces[0].shape[0]
-        params.state_dim = env.observation_space.spaces[0].shape[0] * params.n_agents
-        params.batch_size = env_config.n_envs * params.n_steps
-        params.minibatch_size = params.batch_size // params.n_minibatches
 
-        learner = PPO(params, n_envs=env_config.n_envs)
-        total_steps = 0
-        rmax = -1e5
+        # Check state representation
+        match (env_config.state_representation):
+            case "global":
+                params.state_dim = env.observation_space.spaces[0].shape[0]
+            case _:
+                params.state_dim = (
+                    env.observation_space.spaces[0].shape[0] * params.n_agents
+                )
+
+        # Create learner object
+        learner = PPO(params=params, n_envs=n_envs)
+
+        # Setup loop variables
+        step = 0
+        total_episodes = 0
+        max_episodes_per_rollout = 10
+        max_steps_per_episode = params.n_steps // max_episodes_per_rollout
+        rmax = -1e6
         running_avg_reward = 0
-        data = []
         iterations = 0
+        data = []
 
-        # Start training loop
-        start_time = time.time()
+        while step < params.n_total_steps:
 
-        while total_steps < params.n_total_steps:
+            rollout_episodes = 0
 
-            iterations += 1
-
-            done = torch.zeros(env_config.n_envs, dtype=torch.bool)
-            cum_rewards = torch.zeros(env_config.n_envs, dtype=torch.float32)
-            rewards_per_episode = [[] for _ in range(env_config.n_envs)]
+            episode_len = torch.zeros(
+                env_config.n_envs, dtype=torch.int32, device=params.device
+            )
+            cum_rewards = torch.zeros(
+                env_config.n_envs, dtype=torch.float32, device=params.device
+            )
 
             state = env.reset()
 
             for _ in range(0, params.n_steps):
-                total_steps += env_config.n_envs
 
-                action = torch.clamp(
+                actions_per_env = torch.clamp(
                     learner.select_action(
                         self.process_state(
-                            env_config.n_envs, state, env_config.state_representation
+                            state,
+                            env_config.state_representation,
                         )
                     ),
                     min=-1.0,
                     max=1.0,
                 )
 
-                action = action.reshape(
+                # Permute action tensor of shape (n_envs, n_agents*action_dim) to (agents, n_env, action_dim)
+                action_tensor = actions_per_env.reshape(
+                    n_envs,
                     params.n_agents,
-                    env_config.n_envs,
                     params.action_dim,
-                )
+                ).transpose(1, 0)
 
-                action_tensor_list = [agent for agent in action]
+                # Turn action tensor into list of tensors with shape (n_env, action_dim)
+                action_tensor_list = torch.unbind(action_tensor)
 
                 state, reward, done, _ = env.step(action_tensor_list)
 
@@ -136,64 +145,64 @@ class PPO_Trainer:
 
                 cum_rewards += reward[0]
 
-                # Reset environments
-                if torch.any(done):
-                    indices = torch.nonzero(done, as_tuple=True)[0]
+                step += env_config.n_envs
+                episode_len += torch.ones(
+                    env_config.n_envs, dtype=torch.int32, device=params.device
+                )
+
+                # Create timeout boolean mask
+                timeout = episode_len == max_steps_per_episode
+
+                if torch.any(done) or torch.any(timeout):
+
+                    # Get done and timeout indices
+                    done_indices = torch.nonzero(done).flatten().tolist()
+                    timeout_indices = torch.nonzero(timeout).flatten().tolist()
+
+                    # Merge indices and remove duplicates
+                    indices = list(set(done_indices + timeout_indices))
+
                     for idx in indices:
-                        state = env.reset_at(index=idx.item())
-                        rewards_per_episode[idx.item()].append(
-                            cum_rewards[idx.item()].item()
+                        # Log data when episode is done
+                        r = cum_rewards[idx].item()
+
+                        data.append(r)
+
+                        print(f"Step {step}, Reward: {r}")
+
+                        running_avg_reward = (
+                            0.99 * running_avg_reward + 0.01 * r
+                            if total_episodes > 0
+                            else r
                         )
-                        cum_rewards[idx.item()] = 0
 
-            means = [
-                sum(sublist) / len(sublist)
-                for sublist in rewards_per_episode
-                if sublist
-            ]
+                        # Reset vars, and increase counters
+                        state = env.reset_at(index=idx)
+                        cum_rewards[idx], episode_len[idx] = 0, 0
 
-            if means == []:
-                mean_rew = float(torch.mean(cum_rewards / params.n_steps))
-            else:
-                mean_rew = mean(means)
+                        total_episodes += 1
+                        rollout_episodes += 1
 
-            # Append episode summary instead of per-step data
-            data.append(mean_rew)
-
-            print(
-                f"Steps {total_steps}, Reward {"{:.2f}".format(mean_rew)}, Minutes {"{:.2f}".format((time.time() - start_time) / 60)}"
-            )
-
-            running_avg_reward = (
-                0.99 * running_avg_reward + 0.01 * mean_rew
-                if total_steps > 0
-                else mean_rew
-            )
+                if rollout_episodes == max_episodes_per_rollout:
+                    break
 
             if running_avg_reward > rmax:
-                print(
-                    f"New best reward: {"{:.2f}".format(running_avg_reward)} at step {total_steps}"
-                )
+                print(f"New best reward: {running_avg_reward} at step {step}")
                 rmax = running_avg_reward
-                # learner.save(self.models_dir / "best_model")
+                learner.save(self.models_dir / "best_model")
 
-            # Save checkpoint
-            # if total_steps % 100000 == 0:
-            #     learner.save(self.models_dir / f"checkpoint_{total_steps}")
+            # if step % 10000 == 0:
+            #     learner.save(self.models_dir / f"checkpoint_{step}")
 
-            if iterations % 10 == 0:
-                with open(self.models_dir / "data.dat", "wb") as f:
-                    pkl.dump(data, f)
-                    print(f"Saved model at step {total_steps}")
-                    learner.save(self.models_dir / "best_model")
+            with open(self.models_dir / "data.dat", "wb") as f:
+                pkl.dump(data, f)
 
             learner.update()
 
+            iterations += 1
+
     def view(self, exp_config: Experiment, env_config: EnvironmentParams):
 
-        self.device = "cpu"
-
-        # Set params
         params = Params(**exp_config.params)
 
         env = create_env(
@@ -205,14 +214,11 @@ class PPO_Trainer:
         )
 
         params.device = self.device
-        params.action_dim = env.action_space.spaces[0].shape[0]
-        params.state_dim = (
-            env.observation_space.spaces[0].shape[0] * env_config.n_agents
-        )
         params.n_agents = env_config.n_agents
-        params.log_data = False
+        params.action_dim = env.action_space.spaces[0].shape[0]
+        params.state_dim = env.observation_space.spaces[0].shape[0] * params.n_agents
 
-        learner = PPO(params)
+        learner = PPO(params=params)
         learner.load(self.models_dir / "best_model")
 
         frame_list = []
@@ -222,24 +228,26 @@ class PPO_Trainer:
         for i in range(n_rollouts):
             done = False
             state = env.reset()
-            R = torch.zeros(1, device=self.device)
-
+            R = 0
             r = []
-            while not done:
+            for t in range(0, params.n_steps):
 
                 action = torch.clamp(
                     learner.deterministic_action(
-                        self.process_state(1, state, env_config.state_representation)
+                        torch.stack(state).transpose(1, 0).flatten(start_dim=1),
                     ),
                     min=-1.0,
                     max=1.0,
                 )
-                action = action.reshape(
-                    env_config.n_agents,
+
+                action_tensor = action.reshape(
                     1,
+                    params.n_agents,
                     params.action_dim,
-                )
-                action_tensor_list = [agent for agent in action]
+                ).transpose(1, 0)
+
+                # Turn action tensor into list of tensors with shape (n_env, action_dim)
+                action_tensor_list = torch.unbind(action_tensor)
 
                 state, reward, done, _ = env.step(action_tensor_list)
 
@@ -254,8 +262,12 @@ class PPO_Trainer:
 
                 frame_list.append(frame)
 
+                if torch.any(done):
+                    print("DONE")
+                    break
+
             print(f"TOTAL RETURN: {R}")
-            print(f"MAX {max(r)}")
-            print(f"MIN {min(r)}")
+            # print(f"MAX {max(r)}")
+            # print(f"MIN {min(r)}")
 
         save_video(self.video_name, frame_list, fps=1 / env.scenario.world.dt)

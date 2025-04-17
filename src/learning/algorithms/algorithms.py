@@ -6,9 +6,7 @@ from pathlib import Path
 from learning.algorithms.ccea.train import CCEA_Trainer
 from learning.algorithms.ccea.types import Experiment as CCEA_Experiment
 
-# from learning.algorithms.ppo.train import PPO_Trainer
-
-from learning.algorithms.ppo.train_old import PPO_Trainer
+from learning.algorithms.ppo.train import PPO_Trainer
 from learning.algorithms.td3.train import TD3_Trainer
 
 from learning.algorithms.ippo.train import IPPO_Trainer
