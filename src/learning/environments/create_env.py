@@ -89,7 +89,6 @@ def create_env(
                 "state_representation": env_config["state_representation"],
                 # POIs data
                 "n_targets": len(env_config["targets"]["start_coordinates"]),
-                "targets_start_positions": env_config["targets"]["start_coordinates"],
             }
 
     # Set up the environment

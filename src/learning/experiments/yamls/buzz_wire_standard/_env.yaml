@@ -1,8 +1,8 @@
 map_size: [2.0, 2.0]
-n_envs: 8
+n_envs: 3
 n_agents: 2
 
-state_representation: None
+state_representation: global
 
 agents:
   - observation_radius: 1

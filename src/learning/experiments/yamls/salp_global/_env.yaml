@@ -1,9 +1,8 @@
 
 map_size: [0.8, 0.8]
 state_representation: global
-shuffle_agents_positions: False
 n_envs: 8
-n_agents: 3
+n_agents: 8
 
 agents:
   observation_radius: 4.0

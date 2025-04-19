@@ -218,7 +218,14 @@ class PPO_Trainer:
         params.device = self.device
         params.n_agents = env_config.n_agents
         params.action_dim = env.action_space.spaces[0].shape[0]
-        params.state_dim = env.observation_space.spaces[0].shape[0] * params.n_agents
+        # Check state representation
+        match (env_config.state_representation):
+            case "global":
+                params.state_dim = env.observation_space.spaces[0].shape[0]
+            case _:
+                params.state_dim = (
+                    env.observation_space.spaces[0].shape[0] * params.n_agents
+                )
 
         learner = PPO(params=params)
         learner.load(self.models_dir / "best_model")
@@ -236,7 +243,10 @@ class PPO_Trainer:
 
                 action = torch.clamp(
                     learner.deterministic_action(
-                        torch.stack(state).transpose(1, 0).flatten(start_dim=1),
+                        self.process_state(
+                            state,
+                            env_config.state_representation,
+                        )
                     ),
                     min=-1.0,
                     max=1.0,

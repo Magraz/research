@@ -29,7 +29,6 @@ class SalpEnvironmentParams(EnvironmentParams):
     agents: list[Agent] = None
     targets: list[Target] = None
     state_representation: str = None
-    shuffle_agents_positions: bool = False
 
 
 class Chain:

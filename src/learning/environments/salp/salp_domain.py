@@ -182,6 +182,12 @@ class SalpDomain(BaseScenario):
                 (joint_delta_x, joint_delta_y), device=self.device
             ).repeat(self.world.batch_dim, 1)
 
+            for i, joint in enumerate(self.joints):
+                joint.landmark.set_pos(
+                    self.agents[i].state.pos + joint_delta,
+                    batch_index=env_index,
+                )
+
         else:
             self.agent_chains[env_index] = self.create_new_chain(
                 offset=0.0, scale=0.1, theta_min=0.0, theta_max=0.0
@@ -205,11 +211,11 @@ class SalpDomain(BaseScenario):
                 (joint_delta_x, joint_delta_y), device=self.device
             )
 
-        for i, joint in enumerate(self.joints):
-            joint.landmark.set_pos(
-                self.agents[i].state.pos + joint_delta,
-                batch_index=env_index,
-            )
+            for i, joint in enumerate(self.joints):
+                joint.landmark.set_pos(
+                    self.agents[i].state.pos[env_index] + joint_delta,
+                    batch_index=env_index,
+                )
 
         self.frechet_shaping = self.calculate_frechet_reward()
         self.centroid_shaping = self.calculate_centroid_reward()
@@ -532,7 +538,7 @@ class SalpDomain(BaseScenario):
                         # agent.state.ang_vel,
                     ],
                     dim=-1,
-                )
+                ).float()
             case "global_plus_local":
                 observation = torch.cat(
                     [
