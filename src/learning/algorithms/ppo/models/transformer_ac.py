@@ -3,7 +3,6 @@ import torch
 import torch.nn as nn
 from enum import Enum
 from torch.distributions.normal import Normal
-from itertools import chain
 
 
 class SpecialTokens(Enum):
@@ -54,11 +53,11 @@ class ActorCritic(nn.Module):
         self,
         d_action: int,
         d_state: int,
+        n_agents: int,
         d_model: int = 256,
-        n_heads: int = 8,
-        n_encoder_layers: int = 6,
-        n_decoder_layers: int = 6,
-        n_agents: int = 5,
+        n_heads: int = 6,
+        n_encoder_layers: int = 2,
+        n_decoder_layers: int = 2,
     ):
         super(ActorCritic, self).__init__()
 
@@ -121,11 +120,13 @@ class ActorCritic(nn.Module):
 
         encoder_out = self.enc(embedded_state)
 
-        actions_buffer = kwargs.get("actions_buffer")
+        actions_buffer = kwargs.get("actions_buffer", [])
+
         if actions_buffer == []:
             tgt = encoder_out
         else:
             tgt = self.action_embedding(actions_buffer[-1])
+
         decoder_out = self.dec(tgt, memory=encoder_out)
 
         action_mean = self.out(decoder_out)
@@ -138,7 +139,7 @@ class ActorCritic(nn.Module):
         dist = Normal(action_mean, action_std)
 
         action = dist.sample()
-        action_logprob = dist.log_prob(action)
+        action_logprob = torch.sum(dist.log_prob(action), dim=-1, keepdim=True)
 
         flattened_emb_state = torch.flatten(embedded_state, start_dim=1)
         state_val = self.critic(flattened_emb_state)
@@ -164,8 +165,8 @@ class ActorCritic(nn.Module):
 
         dist = Normal(action_mean, action_std)
 
-        dist_entropy = dist.entropy()
-        action_logprobs = dist.log_prob(action.squeeze(1))
+        dist_entropy = torch.sum(dist.entropy(), dim=-1, keepdim=True)
+        action_logprobs = torch.sum(dist.log_prob(action), dim=-1, keepdim=True)
 
         flattened_emb_state = torch.flatten(embedded_state, start_dim=1)
         state_values = self.critic(flattened_emb_state)

@@ -2,6 +2,7 @@ from vmas.simulator.utils import Color
 import random
 import numpy as np
 import torch
+import math
 
 COLOR_MAP = {
     "GREEN": Color.GREEN,
@@ -39,7 +40,9 @@ def sample_filtered_normal(mean, std_dev, threshold):
             return value
 
 
-def generate_target_points(x, y, n_points, theta_range, d_max):
+def generate_target_points(
+    x: float, y: float, n_points: int, theta_range: list, d_max: float
+):
     """
     Generate n_points points starting from (x, y), where each point is positioned
     at a fixed distance (d_max) from the previous point at a random angle within theta_range.
@@ -68,6 +71,34 @@ def generate_target_points(x, y, n_points, theta_range, d_max):
         points.append(torch.tensor((x_new, y_new)))
 
     return points
+
+
+def rotate_points(points, angle_rad):
+    """
+    Rotate a list of (x, y) tensors around the first point.
+
+    Args
+    ----
+    points      : list[Tensor]  length N, each shape (2,)
+    angle_rad   : float         rotation angle in **radians**
+
+    Returns
+    -------
+    rotated     : Tensor shape (N, 2)  (same device / dtype as input)
+    """
+    xy = torch.stack(points)  # (N, 2)
+    pivot = xy[0]  # shape (2,)
+
+    # 1) translate so pivot → origin
+    rel = xy - pivot  # (N, 2)
+
+    # 2) rotation matrix
+    c, s = math.cos(angle_rad), math.sin(angle_rad)
+    R = torch.tensor([[c, -s], [s, c]], dtype=xy.dtype, device=xy.device)  # (2, 2)
+
+    # 3) rotate & translate back
+    rotated = rel @ R.T + pivot  # (N, 2)
+    return rotated
 
 
 def batch_discrete_frechet_distance(batch_P, batch_Q):

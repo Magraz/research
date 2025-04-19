@@ -64,6 +64,10 @@ class ActorCritic(nn.Module):
     def forward(self):
         raise NotImplementedError
 
+    def get_action_dist(self, action_mean):
+        action_std = torch.exp(self.log_action_std)
+        return Normal(action_mean, action_std)
+
     def act(self, state, deterministic=False):
 
         action_mean = self.actor(state)
@@ -71,9 +75,7 @@ class ActorCritic(nn.Module):
         if deterministic:
             return action_mean.detach()
 
-        action_std = torch.exp(self.log_action_std)
-
-        dist = Normal(action_mean, action_std)
+        dist = self.get_action_dist(action_mean)
 
         action = dist.sample()
         action_logprob = torch.sum(dist.log_prob(action), dim=-1, keepdim=True)
@@ -90,9 +92,7 @@ class ActorCritic(nn.Module):
 
         action_mean = self.actor(state)
 
-        action_std = torch.exp(self.log_action_std)
-
-        dist = Normal(action_mean, action_std)
+        dist = self.get_action_dist(action_mean)
 
         action_logprobs = torch.sum(dist.log_prob(action), dim=-1, keepdim=True)
         dist_entropy = torch.sum(dist.entropy(), dim=-1, keepdim=True)

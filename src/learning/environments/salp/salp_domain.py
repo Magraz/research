@@ -23,6 +23,7 @@ from learning.environments.salp.utils import (
     batch_discrete_frechet_distance,
     angular_velocity,
     generate_random_coordinate_outside_box,
+    rotate_points,
 )
 from learning.environments.salp.types import Chain
 import random
@@ -76,7 +77,7 @@ class SalpDomain(BaseScenario):
             y_semidim=self.y_semidim,
             device=device,
             substeps=15,
-            collision_force=1500,
+            collision_force=3000,
             joint_force=900,
         )
 
@@ -143,22 +144,28 @@ class SalpDomain(BaseScenario):
     def reset_world_at(self, env_index: int = None):
         joint_delta_x = self.agent_joint_length / 2
         joint_delta_y = 0.0
+        agent_scale = 0.1
+        agent_offset = 0.0
+
+        target_offset = self.x_semidim - abs(self.agent_joint_length * self.n_agents)
+        target_scale = self.x_semidim / 100
 
         if env_index is None:
             # Create new agent and target chains
             self.agent_chains = [
                 self.create_new_chain(
-                    offset=0.0, scale=0.1, theta_min=0.0, theta_max=0.0
+                    offset=agent_offset, scale=agent_scale, theta_min=0.0, theta_max=0.0
                 )
                 for _ in range(self.world.batch_dim)
             ]
 
             self.target_chains = [
                 self.create_new_chain(
-                    offset=0.2,
-                    scale=0.6,
+                    offset=target_offset,
+                    scale=target_scale,
                     theta_min=self.agent_min_angle,
                     theta_max=self.agent_max_angle,
+                    rotation_angle=math.radians(random.uniform(0, 359)),
                 )
                 for _ in range(self.world.batch_dim)
             ]
@@ -190,13 +197,14 @@ class SalpDomain(BaseScenario):
 
         else:
             self.agent_chains[env_index] = self.create_new_chain(
-                offset=0.0, scale=0.1, theta_min=0.0, theta_max=0.0
+                offset=agent_offset, scale=agent_scale, theta_min=0.0, theta_max=0.0
             )
             self.target_chains[env_index] = self.create_new_chain(
-                offset=0.2,
-                scale=0.6,
+                offset=target_offset,
+                scale=target_scale,
                 theta_min=self.agent_min_angle,
                 theta_max=self.agent_max_angle,
+                rotation_angle=math.radians(random.uniform(0, 359)),
             )
 
             for n_agent, agent in enumerate(self.world.agents):
@@ -234,7 +242,9 @@ class SalpDomain(BaseScenario):
 
         return out_of_bounds
 
-    def create_new_chain(self, offset, scale, theta_min, theta_max):
+    def create_new_chain(
+        self, offset, scale, theta_min, theta_max, rotation_angle: float = 0.0
+    ):
         x_coord, y_coord = generate_random_coordinate_outside_box(
             offset,
             scale,
@@ -242,8 +252,8 @@ class SalpDomain(BaseScenario):
             self.y_semidim,
         )
         chain = Chain(
-            path=torch.stack(
-                generate_target_points(
+            path=rotate_points(
+                points=generate_target_points(
                     x=x_coord,
                     y=y_coord,
                     n_points=self.n_agents,
@@ -252,7 +262,8 @@ class SalpDomain(BaseScenario):
                         theta_min,
                         theta_max,
                     ],
-                )
+                ),
+                angle_rad=rotation_angle,
             ),
         )
         return chain
