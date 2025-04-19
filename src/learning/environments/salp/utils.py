@@ -54,7 +54,7 @@ def generate_target_points(x, y, n_points, theta_range, d_max):
     Returns:
         list: List of tuples containing the generated (x, y) coordinates.
     """
-    points = [(x, y)]  # Initialize with the starting point
+    points = [torch.tensor((x, y))]  # Initialize with the starting point
 
     for _ in range(n_points - 1):
         # Generate a random angle within the theta_range
@@ -65,7 +65,7 @@ def generate_target_points(x, y, n_points, theta_range, d_max):
         y_new = points[-1][1] + d_max * np.sin(theta)
 
         # Append the new point to the list
-        points.append((x_new, y_new))
+        points.append(torch.tensor((x_new, y_new)))
 
     return points
 
@@ -224,3 +224,26 @@ def angular_velocity(R, V):
     omega = cross_product / r_norm_sq
 
     return omega
+
+
+def generate_random_coordinate_outside_box(
+    offset: float, scale: float, x_boundary: float, y_boundary: float
+):
+    x_scaled = x_boundary * scale
+    y_scaled = y_boundary * scale
+
+    x_coord = random.uniform(-x_scaled, x_scaled)
+
+    y_coord = random.uniform(-y_scaled, y_scaled)
+
+    if x_coord > 0:
+        x_coord += offset
+    else:
+        x_coord -= offset
+
+    if y_coord > 0:
+        y_coord += offset
+    else:
+        y_coord -= offset
+
+    return np.float64(x_coord), np.float64(y_coord)

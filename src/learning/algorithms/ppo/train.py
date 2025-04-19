@@ -9,6 +9,7 @@ from learning.algorithms.ppo.ppo import PPO
 
 import pickle as pkl
 from pathlib import Path
+import random
 
 from vmas.simulator.utils import save_video
 
@@ -64,6 +65,7 @@ class PPO_Trainer:
 
         # Set seeds
         np.random.seed(params.random_seed)
+        random.seed(params.random_seed)
         torch.manual_seed(params.random_seed)
         torch.cuda.manual_seed(params.random_seed)
 

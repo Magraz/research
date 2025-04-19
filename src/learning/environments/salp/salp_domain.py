@@ -10,22 +10,19 @@ from torch import Tensor
 from typing import ValuesView
 from vmas import render_interactively
 from vmas.simulator.joints import Joint
-from vmas.simulator.core import Agent, Landmark, Box, Sphere
+from vmas.simulator.core import Agent, Landmark, Box, Sphere, World, Line
 from vmas.simulator.scenario import BaseScenario
 from vmas.simulator.utils import ScenarioUtils
 
 from learning.environments.salp.world import SalpWorld
 from learning.environments.salp.dynamics import SalpDynamics
-from learning.environments.salp.controller import SalpController
-from learning.environments.salp.sensors import SectorDensity
 from learning.environments.salp.utils import (
     COLOR_LIST,
+    COLOR_MAP,
     generate_target_points,
     batch_discrete_frechet_distance,
-    angle_between_vectors,
-    is_within_any_range,
-    closest_number,
     angular_velocity,
+    generate_random_coordinate_outside_box,
 )
 from learning.environments.salp.types import Chain
 import random
@@ -40,7 +37,7 @@ class SalpDomain(BaseScenario):
     def make_world(self, batch_dim: int, device: torch.device, **kwargs):
         # CONSTANTS
         self.agent_radius = 0.02
-        self.agent_joint_length = 0.043
+        self.agent_joint_length = 0.052
         self.agent_max_angle = 45
         self.agent_min_angle = -45
         self.u_multiplier = 1.0
@@ -53,68 +50,12 @@ class SalpDomain(BaseScenario):
 
         # Agents
         self.n_agents = kwargs.pop("n_agents", 2)
-        self.starting_position = kwargs.pop("starting_position", [0.0, 0.0])
         self.state_representation = kwargs.pop("state_representation", "global")
-        self.agents_colors = []
-        self.agents_positions = []
-        self.agents_idx = []
-        self.agent_chains = []
-
-        for idx in range(self.n_agents):
-            self.agents_idx.append(idx)
-            self.agents_colors.append(COLOR_LIST[idx])
-
-        self.agent_starting_chains = [
-            Chain(
-                0,
-                path=torch.tensor(
-                    generate_target_points(
-                        x=self.starting_position[0],
-                        y=self.starting_position[1],
-                        n_points=self.n_agents,
-                        d_max=self.agent_joint_length,
-                        theta_range=[0, 0],
-                    ),
-                    dtype=torch.float32,
-                    device=device,
-                )
-                .unsqueeze(0)
-                .repeat(batch_dim, 1, 1),
-                entities=[],
-            )
-        ]
-
-        self.agent_chains = deepcopy(self.agent_starting_chains)
+        self.agent_chains = [None for _ in range(batch_dim)]
 
         # Targets
         self.n_targets = kwargs.pop("n_targets", 1)
-        self.targets_start_positions = kwargs.pop(
-            "targets_start_positions", [[0.0, 0.0]]
-        )
-        self.targets_colors = []
-        self.target_chains = []
-
-        for idx in range(self.n_targets):
-            self.targets_colors.append(COLOR_LIST[idx])
-            target_x = self.targets_start_positions[idx][0]
-            target_y = self.targets_start_positions[idx][1]
-            target_chain = Chain(
-                idx,
-                torch.tensor(
-                    generate_target_points(
-                        x=target_x,
-                        y=target_y,
-                        n_points=self.n_agents,
-                        d_max=self.agent_joint_length,
-                        theta_range=[self.agent_min_angle, self.agent_max_angle],
-                    ),
-                    dtype=torch.float32,
-                )
-                .unsqueeze(0)
-                .repeat(batch_dim, 1, 1),
-                entities=[],
-            )
-            self.target_chains.append(target_chain)
+        self.target_chains = [None for _ in range(batch_dim)]
 
         if kwargs.pop("shuffle_agents_positions", False):
             random.shuffle(self.agents_idx)
@@ -128,17 +69,6 @@ class SalpDomain(BaseScenario):
         ScenarioUtils.check_kwargs_consumed(kwargs)
 
         self.device = device
-
-        self.covered_targets = torch.zeros((batch_dim, self.n_targets), device=device)
-
-        # self.gravity_x_val = sample_filtered_normal(
-        #     mean=0.0, std_dev=0.3, threshold=0.2
-        # )
-
-        gravity_x_vals = [0.4, -0.4]
-
-        self.gravity_x_val = random.choice(gravity_x_vals)
-        self.gravity_y_val = -0.3
         # Make world
         world = SalpWorld(
             batch_dim=batch_dim,
@@ -148,57 +78,41 @@ class SalpDomain(BaseScenario):
             substeps=15,
             collision_force=1500,
             joint_force=900,
-            torque_constraint_force=0.01,
-            # gravity=(
-            #     self.gravity_x_val,
-            #     self.gravity_y_val,
-            # ),
         )
 
         # Set targets
-        for target_chain in self.target_chains:
-            for idx, _ in enumerate(target_chain.path[0, :, 0]):
-
+        self.targets = []
+        for n_target in range(self.n_targets):
+            for n_agent in range(self.n_agents):
                 target = Landmark(
-                    name=f"chain_{target_chain.idx}_target_{idx}",
+                    name=f"target_{n_agent}_chain_{n_target}",
                     shape=Sphere(radius=self.target_radius),
-                    color=self.targets_colors[target_chain.idx],
+                    color=COLOR_MAP["RED"],
                     collide=False,
                 )
-
-                target.chain_idx = target_chain.idx
-                target.idx = idx
-
                 world.add_landmark(target)
-                target_chain.entities.append(target)
+                self.targets.append(target)
 
         # Add agents
-        for agent_chain in self.agent_chains:
-            for idx, _ in enumerate(agent_chain.path[0, :, 0]):
-
-                agent = Agent(
-                    name=f"chain_{agent_chain.idx}_agent_{idx}",
-                    render_action=True,
-                    shape=Box(
-                        length=self.agent_radius * 2, width=self.agent_radius * 2.5
-                    ),
-                    dynamics=SalpDynamics(),
-                    color=self.agents_colors[idx],
-                    u_multiplier=self.u_multiplier,
-                )
-
-                agent.chain_idx = agent_chain.idx
-                agent.idx = idx
-
-                world.add_agent(agent)
-                agent_chain.entities.append(agent)
+        self.agents = []
+        for n_agent in range(self.n_agents):
+            agent = Agent(
+                name=f"agent_{n_agent}",
+                render_action=True,
+                shape=Box(length=self.agent_radius * 2, width=self.agent_radius * 2.5),
+                dynamics=SalpDynamics(),
+                color=random.choice(COLOR_LIST),
+                u_multiplier=self.u_multiplier,
+            )
+            world.add_agent(agent)
+            self.agents.append(agent)
 
         # Add joints
-        self.joint_list = []
+        self.joints = []
         for i in range(self.n_agents - 1):
             joint = Joint(
-                world.agents[self.agents_idx[i]],
-                world.agents[self.agents_idx[i + 1]],
+                world.agents[i],
+                world.agents[i + 1],
                 anchor_a=(0, 0),
                 anchor_b=(0, 0),
                 dist=self.agent_joint_length,
@@ -208,112 +122,145 @@ class SalpDomain(BaseScenario):
                 width=0,
             )
             world.add_joint(joint)
-            self.joint_list.append(joint)
+            self.joints.append(joint)
 
         # Assign neighbors to agents
-        for agent in world.agents:
-            agent.state.local_neighbors = self.get_local_neighbors(agent, world.joints)
-            agent.state.left_neighbors, agent.state.right_neighbors = (
-                self.get_all_neighbors(agent, world.agents)
-            )
+        # for agent in world.agents:
+        #     agent.state.local_neighbors = self.get_local_neighbors(agent, world.joints)
+        #     agent.state.left_neighbors, agent.state.right_neighbors = (
+        #         self.get_all_neighbors(agent, world.agents)
+        #     )
 
         # Initialize reward tensors
         self.global_rew = torch.zeros(batch_dim, device=device, dtype=torch.float32)
         self.centroid_rew = self.global_rew.clone()
         self.frechet_rew = self.global_rew.clone()
-        self.spinning_penalty = self.global_rew.clone()
 
         world.zero_grad()
 
         return world
 
     def reset_world_at(self, env_index: int = None):
+        joint_delta_x = self.agent_joint_length / 2
+        joint_delta_y = 0.0
 
         if env_index is None:
-            self.all_time_covered_targets = torch.full(
-                (self.world.batch_dim, self.n_targets),
-                False,
-                device=self.world.device,
+            # Create new agent and target chains
+            self.agent_chains = [
+                self.create_new_chain(
+                    offset=0.0, scale=0.1, theta_min=0.0, theta_max=0.0
+                )
+                for _ in range(self.world.batch_dim)
+            ]
+
+            self.target_chains = [
+                self.create_new_chain(
+                    offset=0.2,
+                    scale=0.6,
+                    theta_min=self.agent_min_angle,
+                    theta_max=self.agent_max_angle,
+                )
+                for _ in range(self.world.batch_dim)
+            ]
+
+            # Set positions according to chains
+            agent_chain_tensor = torch.stack(
+                [agent_chain.path for agent_chain in self.agent_chains]
             )
+            for i, agent in enumerate(self.agents):
+                pos = agent_chain_tensor[:, i, :]
+                agent.set_pos(pos, batch_index=env_index)
+
+            target_chain_tensor = torch.stack(
+                [target_chain.path for target_chain in self.target_chains]
+            )
+            for i, target in enumerate(self.targets):
+                pos = target_chain_tensor[:, i, :]
+                target.set_pos(pos, batch_index=env_index)
+
+            joint_delta = torch.tensor(
+                (joint_delta_x, joint_delta_y), device=self.device
+            ).repeat(self.world.batch_dim, 1)
+
         else:
-            self.all_time_covered_targets[env_index] = False
-
-        for agent_chain in self.agent_chains:
-            for idx, agent in enumerate(agent_chain.entities):
-
-                pos = (
-                    torch.ones(
-                        (self.world.batch_dim, self.world.dim_p),
-                        device=self.world.device,
-                    )
-                    * self.agent_starting_chains[0].path[:, idx, :]
-                )
-
-                agent.set_pos(
-                    pos,
-                    batch_index=env_index,
-                )
-
-                # agent.state.rot += -4 * torch.pi + torch.pi / 8
-
-        for target_chain in self.target_chains:
-
-            offset = 0.2
-            scale = 1.5
-
-            target_x = self.targets_start_positions[0][0] + random.uniform(
-                -self.x_semidim / scale, self.x_semidim / scale
+            self.agent_chains[env_index] = self.create_new_chain(
+                offset=0.0, scale=0.1, theta_min=0.0, theta_max=0.0
+            )
+            self.target_chains[env_index] = self.create_new_chain(
+                offset=0.2,
+                scale=0.6,
+                theta_min=self.agent_min_angle,
+                theta_max=self.agent_max_angle,
             )
 
-            target_y = self.targets_start_positions[0][1] + random.uniform(
-                -self.y_semidim / scale, self.y_semidim / scale
+            for n_agent, agent in enumerate(self.world.agents):
+                pos = self.agent_chains[env_index].path[n_agent]
+                agent.set_pos(pos, batch_index=env_index)
+
+            for n_target, target in enumerate(self.targets):
+                pos = self.target_chains[env_index].path[n_target]
+                target.set_pos(pos, batch_index=env_index)
+
+            joint_delta = torch.tensor(
+                (joint_delta_x, joint_delta_y), device=self.device
             )
 
-            if target_x > 0:
-                target_x += offset
-            else:
-                target_x -= offset
-
-            if target_y > 0:
-                target_y += offset
-            else:
-                target_y -= offset
-
-            target_chain.path = (
-                torch.tensor(
-                    generate_target_points(
-                        x=target_x,
-                        y=target_y,
-                        n_points=self.n_agents,
-                        d_max=self.agent_joint_length,
-                        theta_range=[self.agent_min_angle, self.agent_max_angle],
-                    ),
-                    dtype=torch.float32,
-                    device=self.world.device,
-                )
-                .unsqueeze(0)
-                .repeat(self.world.batch_dim, 1, 1)
+        for i, joint in enumerate(self.joints):
+            joint.landmark.set_pos(
+                self.agents[i].state.pos + joint_delta,
+                batch_index=env_index,
             )
-
-            for idx, target in enumerate(target_chain.entities):
-
-                pos = (
-                    torch.ones(
-                        (self.world.batch_dim, self.world.dim_p),
-                        device=self.world.device,
-                    )
-                    * target_chain.path[:, idx, :]
-                )
-
-                target.set_pos(
-                    pos,
-                    batch_index=env_index,
-                )
-
-            target_chain.update()
 
         self.frechet_shaping = self.calculate_frechet_reward()
         self.centroid_shaping = self.calculate_centroid_reward()
+
+    def is_out_of_bounds(self):
+        """Boolean mask of shape (n_envs,) – True if agent is out of bounds."""
+        out_of_bounds = []
+
+        for agent in self.agents:
+            pos = agent.state.pos  # (n_envs, 2)
+            x_ok = pos[..., 0].abs() <= self.world.x_semidim - 1e-4
+            y_ok = pos[..., 1].abs() <= self.world.y_semidim - 1e-4
+            out_of_bounds.append(~(x_ok & y_ok))
+
+        out_of_bounds = torch.stack(out_of_bounds).transpose(1, 0).any(dim=-1)
+
+        return out_of_bounds
+
+    def create_new_chain(self, offset, scale, theta_min, theta_max):
+        x_coord, y_coord = generate_random_coordinate_outside_box(
+            offset,
+            scale,
+            self.x_semidim,
+            self.y_semidim,
+        )
+        chain = Chain(
+            path=torch.stack(
+                generate_target_points(
+                    x=x_coord,
+                    y=y_coord,
+                    n_points=self.n_agents,
+                    d_max=self.agent_joint_length,
+                    theta_range=[
+                        theta_min,
+                        theta_max,
+                    ],
+                )
+            ),
+        )
+        return chain
+
+    def create_chain_from_agents(self, n_env):
+        agents_pos = [agent.state.pos[n_env] for agent in self.world.agents]
+        chain = Chain(path=torch.stack(agents_pos))
+        return chain
+
+    def update_agent_chains(self):
+        self.agent_chains = [
+            self.create_chain_from_agents(n_env)
+            for n_env in range(self.world.batch_dim)
+        ]
 
     def interpolate(
         self,
@@ -329,12 +276,12 @@ class SalpDomain(BaseScenario):
         )
 
     def process_action(self, agent: Agent):
-        magnitude_pos = (
-            self.interpolate(agent.action.u[:, 0], target_min=0, target_max=1) * 0.8
+        magnitude_pos = self.interpolate(
+            agent.action.u[:, 0], target_min=0, target_max=1
         )
 
-        magnitude_neg = (
-            self.interpolate(agent.action.u[:, 1], target_min=0, target_max=1) * 0.8
+        magnitude_neg = self.interpolate(
+            agent.action.u[:, 1], target_min=0, target_max=1
         )
 
         magnitude = magnitude_pos - magnitude_neg
@@ -366,38 +313,48 @@ class SalpDomain(BaseScenario):
         # if agent.state.join.any():
         #     self.world.detach_joint(self.joint_list[0])
 
+    def get_targets(self):
+        return [landmark for landmark in self.world.landmarks if not landmark.is_joint]
+
+    def get_position_tensors(self):
+        targets = self.get_targets()
+        agent_pos = []
+        target_pos = []
+
+        for agent, target in zip(self.world.agents, targets):
+            agent_pos.append(agent.state.pos)
+            target_pos.append(target.state.pos)
+
+        agent_pos = torch.stack(agent_pos).transpose(1, 0)
+        agent_centroids = agent_pos.mean(dim=1)
+        target_pos = torch.stack(target_pos).transpose(1, 0)
+        target_centroids = target_pos.mean(dim=1)
+
+        return agent_pos, target_pos, agent_centroids, target_centroids
+
     def calculate_frechet_reward(self) -> torch.Tensor:
 
-        f_dist = batch_discrete_frechet_distance(
-            self.target_chains[0].path, self.agent_chains[0].path
-        )
+        agent_pos, target_pos, _, _ = self.get_position_tensors()
+
+        f_dist = batch_discrete_frechet_distance(agent_pos, target_pos)
         f_rew = 1 / torch.exp(f_dist)
 
         return f_rew
 
     def calculate_centroid_reward(self) -> torch.Tensor:
 
-        c_dist = torch.norm(
-            self.target_chains[0].centroid - self.agent_chains[0].centroid,
-            dim=1,
-        )
+        c_dist = []
+        for n_env in range(self.world.batch_dim):
+            c_dist.append(
+                torch.norm(
+                    self.target_chains[n_env].centroid
+                    - self.agent_chains[n_env].centroid,
+                )
+            )
+        c_dist = torch.stack(c_dist)
         c_rew = 1 / torch.exp(c_dist)
 
         return c_rew
-
-    def calculate_spinning_penalty(self) -> torch.Tensor:
-
-        ang_vels = []
-        for a in self.world.agents:
-            ang_vels.append(torch.abs(a.state.ang_vel))
-
-        ang_vels = torch.stack(ang_vels, dim=1)
-
-        a_chain_centroid_ang_vel = ang_vels.mean(dim=1)
-
-        ang_vel_penalty = torch.abs(torch.tanh(a_chain_centroid_ang_vel))
-
-        return ang_vel_penalty.squeeze(0)
 
     def reward(self, agent: Agent):
         is_first = agent == self.world.agents[0]
@@ -406,11 +363,10 @@ class SalpDomain(BaseScenario):
         if is_first:
 
             # Calculate G
-            self.agent_chains[0].update()
+            self.update_agent_chains()
 
             self.frechet_rew[:] = 0
             self.centroid_rew[:] = 0
-            self.spinning_penalty[:] = 0
 
             f_rew = self.calculate_frechet_reward()
             frechet_shaping = f_rew * self.frechet_shaping_factor
@@ -422,18 +378,9 @@ class SalpDomain(BaseScenario):
             self.centroid_rew += centroid_shaping - self.centroid_shaping
             self.centroid_shaping = centroid_shaping
 
-            # self.spinning_penalty += self.calculate_spinning_penalty()
-
             self.total_rew = f_rew
 
-            self.global_rew = (
-                self.frechet_rew + self.centroid_rew  # - self.spinning_penalty
-            )
-
-        if is_last:
-            self.current_order_per_env = torch.sum(
-                self.all_time_covered_targets, dim=1
-            ).unsqueeze(-1)
+            self.global_rew = self.frechet_rew + self.centroid_rew
 
         rew = torch.cat([self.global_rew * 10])
 
@@ -507,11 +454,13 @@ class SalpDomain(BaseScenario):
 
     def agent_representation(self, agent: Agent, scope: str):
 
-        self.agent_chains[0].update()
+        agent_pos, target_pos, agent_centroids, target_centroids = (
+            self.get_position_tensors()
+        )
 
-        a_chain_centroid_pos = self.agent_chains[0].centroid
+        a_chain_centroid_pos = agent_centroids
 
-        t_chain_centroid = self.target_chains[0].centroid
+        t_chain_centroid = target_centroids
 
         # t_chain_orientation = self.target_chains[0].orientation
 
@@ -519,9 +468,7 @@ class SalpDomain(BaseScenario):
 
         a_pos_rel_2_t_centroid = agent.state.pos - t_chain_centroid
 
-        f_dist = batch_discrete_frechet_distance(
-            self.agent_chains[0].path, self.target_chains[0].path
-        )
+        f_dist = batch_discrete_frechet_distance(agent_pos, target_pos)
 
         c_diff_vect = t_chain_centroid - a_chain_centroid_pos
 
@@ -628,7 +575,9 @@ class SalpDomain(BaseScenario):
         return self.agent_representation(agent, self.state_representation)
 
     def done(self):
-        return self.total_rew > 0.98
+        target_reached = self.total_rew > 0.98
+        out_of_bounds = self.is_out_of_bounds()
+        return torch.logical_or(target_reached, out_of_bounds)
 
     def info(self, agent: Agent) -> Dict[str, Tensor]:
         return {
@@ -640,14 +589,14 @@ class SalpDomain(BaseScenario):
 
         geoms: List[Geom] = []
         # Target ranges
-        for target_chain in self.target_chains:
-            for target in target_chain.entities:
-                range_circle = rendering.make_circle(self.target_radius, filled=False)
-                xform = rendering.Transform()
-                xform.set_translation(*target.state.pos[env_index])
-                range_circle.add_attr(xform)
-                range_circle.set_color(*self.targets_colors[target_chain.idx].value)
-                geoms.append(range_circle)
+        targets = self.get_targets()
+        for target in targets:
+            range_circle = rendering.make_circle(self.target_radius, filled=False)
+            xform = rendering.Transform()
+            xform.set_translation(*target.state.pos[env_index])
+            range_circle.add_attr(xform)
+            range_circle.set_color(*COLOR_MAP["RED"].value)
+            geoms.append(range_circle)
 
         return geoms
 

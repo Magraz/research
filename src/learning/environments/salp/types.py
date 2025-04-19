@@ -33,32 +33,14 @@ class SalpEnvironmentParams(EnvironmentParams):
 
 
 class Chain:
-    def __init__(self, idx: int, path: list, entities: list[Entity]):
-        self.idx = idx
+    def __init__(self, path: list):
         self.path = path
-        self.entities = entities
         self.centroid = self.calculate_centroid()
         # self.orientation = self.calculate_orientation()
 
     def calculate_centroid(self):
-        """
-        Calculate the centroid of a list of (x, y) tuples.
 
-        Parameters:
-            points (list): List of (x, y) tuples.
-
-        Returns:
-            tuple: The centroid as (x_c, y_c).
-        """
-
-        # # Calculate the centroid
-        # n_points = self.path.shape[1]
-        # x_c = torch.sum(self.path[:, :, 0], dim=1) / n_points
-        # y_c = torch.sum(self.path[:, :, 1], dim=1) / n_points
-
-        # centroid = torch.stack((x_c, y_c), dim=1)
-
-        centroid = self.path.mean(dim=1)
+        centroid = self.path.mean(dim=0)
 
         return centroid
 
@@ -89,10 +71,10 @@ class Chain:
 
         return orientation
 
-    def update(self):
-        # Update path
-        for idx, entity in enumerate(self.entities):
-            self.path[:, idx, :] = entity.state.pos
+    # def update(self):
+    #     # Update path
+    #     for idx, entity in enumerate(self.entities):
+    #         self.path[:, idx, :] = entity.state.pos
 
-        self.centroid = self.calculate_centroid()
-        # self.orientation = self.calculate_orientation()
+    #     self.centroid = self.calculate_centroid()
+    # self.orientation = self.calculate_orientation()

@@ -10,7 +10,7 @@ class manual_control:
         self.cmd_vel = [0, 0]
         self.join = [0]
         self.angle = 0.4
-        self.speed = 0.5
+        self.speed = 1.0
 
     def on_press(self, key):
 
