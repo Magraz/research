@@ -41,7 +41,7 @@ class SalpDomain(BaseScenario):
         self.agent_joint_length = 0.052
         self.agent_max_angle = 45
         self.agent_min_angle = -45
-        self.u_multiplier = 1.0
+        self.u_multiplier = 0.6
         self.target_radius = self.agent_radius / 2
 
         # Environment
@@ -77,8 +77,9 @@ class SalpDomain(BaseScenario):
             y_semidim=self.y_semidim,
             device=device,
             substeps=15,
-            collision_force=3000,
+            collision_force=1500,
             joint_force=900,
+            contact_margin=3e-3,
         )
 
         # Set targets
