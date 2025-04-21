@@ -265,7 +265,7 @@ class SalpDomain(BaseScenario):
                     ],
                 ),
                 angle_rad=rotation_angle,
-            ),
+            ).to(self.device),
         )
         return chain
 
