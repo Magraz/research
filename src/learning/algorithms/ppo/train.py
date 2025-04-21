@@ -10,6 +10,7 @@ from learning.algorithms.ppo.ppo import PPO
 import pickle as pkl
 from pathlib import Path
 import random
+import time
 
 from vmas.simulator.utils import save_video
 
@@ -105,6 +106,9 @@ class PPO_Trainer:
         iterations = 0
         data = []
 
+        # Log start time
+        start_time = time.time()
+
         while step < params.n_total_steps:
 
             rollout_episodes = 0
@@ -170,7 +174,9 @@ class PPO_Trainer:
 
                         data.append(r)
 
-                        print(f"Step {step}, Reward: {r}")
+                        print(
+                            f"Step {step}, Reward: {r}, Minutes {"{:.2f}".format((time.time() - start_time) / 60)}"
+                        )
 
                         running_avg_reward = (
                             0.99 * running_avg_reward + 0.01 * r

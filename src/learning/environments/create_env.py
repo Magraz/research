@@ -88,7 +88,7 @@ def create_env(
                 "lidar_range": env_config["agents"]["observation_radius"],
                 "state_representation": env_config["state_representation"],
                 # POIs data
-                "n_targets": len(env_config["targets"]["start_coordinates"]),
+                "n_targets": 1,
             }
 
     # Set up the environment
