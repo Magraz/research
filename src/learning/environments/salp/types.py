@@ -18,6 +18,31 @@ class Agent:
 
 
 @dataclass(frozen=True)
+class GlobalObservation:
+    # New
+    dtheta_diff: torch.Tensor
+    a_chain_sin_dtheta: torch.Tensor
+    a_chain_cos_dtheta: torch.Tensor
+    a_chain_bend_speed: torch.Tensor
+
+    # Raw Global
+    t_chain_all_pos: torch.Tensor
+    a_chain_all_pos: torch.Tensor
+    a_chain_all_vel: torch.Tensor
+    a_chain_all_ang_pos: torch.Tensor
+    a_chain_all_ang_vel: torch.Tensor
+    # Condensed global
+    t_chain_centroid_pos: torch.Tensor
+    a_chain_centroid_pos: torch.Tensor
+    a_chain_centroid_vel: torch.Tensor
+    a_chain_centroid_ang_pos: torch.Tensor
+    a_chain_centroid_ang_vel: torch.Tensor
+    total_force: torch.Tensor
+    total_moment: torch.Tensor
+    frechet_dist: torch.Tensor
+
+
+@dataclass(frozen=True)
 class Target:
     value: float
     observation_radius: float

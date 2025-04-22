@@ -1,13 +1,8 @@
 
 map_size: [1.0, 1.0]
 state_representation: global
-n_envs: 8
+n_envs: 10
 n_agents: 4
 
 agents:
   observation_radius: 4.0
-  starting_position: [0.0, 0.0]
-
-targets:
-  spawn_rule: fixed
-  start_coordinates: [[0.0, 0.0]]

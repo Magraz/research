@@ -23,28 +23,26 @@ def orthogonal_init(m, gain=1.0):
 
 
 class ActorCritic(nn.Module):
-    def __init__(self, params: Params):
+    def __init__(self, n_agents: int, d_state: int, d_action: int, device: str):
         super(ActorCritic, self).__init__()
-
-        self.device = params.device
 
         self.log_action_std = nn.Parameter(
             torch.zeros(
-                params.action_dim * params.n_agents,
+                d_action * n_agents,
                 requires_grad=True,
-                device=params.device,
+                device=device,
             )
-        ).to(self.device)
+        )
 
         # actor
         self.actor = nn.Sequential(
-            nn.Linear(params.state_dim, 64),
+            nn.Linear(d_state, 128),
             nn.LeakyReLU(),
-            nn.Linear(64, 64),
+            nn.Linear(128, 128),
             nn.LeakyReLU(),
-            nn.Linear(64, params.action_dim * params.n_agents),
+            nn.Linear(128, d_action * n_agents),
             nn.Tanh(),
-        ).to(self.device)
+        )
 
         # Apply orthogonal initialization
         self.actor.apply(
@@ -54,12 +52,12 @@ class ActorCritic(nn.Module):
         )
         # critic
         self.critic = nn.Sequential(
-            nn.Linear(params.state_dim, 64),
+            nn.Linear(d_state, 128),
             nn.LeakyReLU(),
-            nn.Linear(64, 64),
+            nn.Linear(128, 128),
             nn.LeakyReLU(),
-            nn.Linear(64, 1),
-        ).to(self.device)
+            nn.Linear(128, 1),
+        )
 
     def forward(self):
         raise NotImplementedError
@@ -100,3 +98,17 @@ class ActorCritic(nn.Module):
         state_values = self.critic(state)
 
         return action_logprobs, state_values, dist_entropy
+
+
+if __name__ == "__main__":
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    model = ActorCritic(
+        n_agents=8,
+        d_state=32,
+        d_action=2 * 8,
+        device=device,
+    ).to(device)
+
+    pytorch_total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(pytorch_total_params)

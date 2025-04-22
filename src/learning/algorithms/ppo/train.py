@@ -245,7 +245,7 @@ class PPO_Trainer:
             state = env.reset()
             R = 0
             r = []
-            for t in range(0, params.n_steps):
+            for t in range(0, 512):
 
                 action = torch.clamp(
                     learner.deterministic_action(

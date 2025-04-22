@@ -8,7 +8,9 @@ from torch.distributions.normal import Normal
 class SpecialTokens(Enum):
     PADDING = 0
     SOS = 2
-    EOS = 3
+    START_OF_STATE = 3
+    START_OF_ACTION = 4
+    EOS = 5
 
 
 class PositionalEncoding(nn.Module):
@@ -51,13 +53,15 @@ class ActorCritic(nn.Module):
     # Constructor
     def __init__(
         self,
-        d_action: int,
-        d_state: int,
         n_agents: int,
-        d_model: int = 256,
-        n_heads: int = 6,
-        n_encoder_layers: int = 2,
-        n_decoder_layers: int = 2,
+        d_state: int,
+        d_action: int,
+        device: str,
+        # Model specific
+        d_model: int = 128,
+        n_heads: int = 8,
+        n_encoder_layers: int = 1,
+        n_decoder_layers: int = 1,
     ):
         super(ActorCritic, self).__init__()
 
@@ -65,10 +69,12 @@ class ActorCritic(nn.Module):
         self.d_model = d_model
 
         # LAYERS
-        self.log_action_std = nn.Parameter(torch.zeros(d_action, requires_grad=True))
+        self.log_action_std = nn.Parameter(
+            torch.zeros(d_action, requires_grad=True, device=device)
+        )
 
         self.positional_encoder = PositionalEncoding(
-            d_model=d_model, dropout=0.1, max_len=5000
+            d_model=d_model, dropout=0.1, max_len=1000
         )
 
         self.special_token_embedding = nn.Embedding(
@@ -172,3 +178,17 @@ class ActorCritic(nn.Module):
         state_values = self.critic(flattened_emb_state)
 
         return action_logprobs, state_values, dist_entropy
+
+
+if __name__ == "__main__":
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    model = ActorCritic(
+        n_agents=8,
+        d_state=32,
+        d_action=2 * 8,
+        device=device,
+    ).to(device)
+
+    pytorch_total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(pytorch_total_params)

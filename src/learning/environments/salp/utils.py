@@ -278,3 +278,287 @@ def generate_random_coordinate_outside_box(
         y_coord -= offset
 
     return np.float64(x_coord), np.float64(y_coord)
+
+
+import math
+from typing import List, Tuple
+
+
+def generate_curve(
+    x0: float,
+    y0: float,
+    n_points: int,
+    radius: float,
+    max_dist: float,
+    clockwise: bool = False,
+) -> List[Tuple[float, float]]:
+    """
+    Return `n_points` (x, y) samples lying on an arc of a circle with
+    the given `radius`, starting from (x0, y0).  The chord (straight‑line)
+    distance between successive points is ≤ `max_dist`.
+
+    Parameters
+    ----------
+    x0, y0 : float
+        Coordinates of the starting point (included in the output).
+    n_points : int
+        Total number of points to emit (must be ≥ 2 for a curve).
+    radius : float
+        Radius of curvature.  Positive; units are the same as the coords.
+    max_dist : float
+        Upper bound for the distance between every pair of neighbours.
+    clockwise : bool, optional
+        If True, walk along the arc clockwise; else counter‑clockwise.
+
+    Returns
+    -------
+    List[Tuple[float, float]]
+        Sequence of (x, y) coordinates on the arc.
+
+    Notes
+    -----
+    ‑ The function automatically clips `max_dist` to `[0, 2 r]`.
+    ‑ The centre of the circle is chosen so that (x0, y0) is the
+      “south‑most” point if `clockwise=False` (centre above the start)
+      or the “north‑most” point if `clockwise=True`.
+    ‑ The angular step Δθ is the largest angle that still honours the
+      chord‑length constraint:
+          Δθ_max = 2 asin(max_dist / (2 r))
+      and the algorithm uses that same Δθ for every segment.
+    """
+    if n_points < 1:
+        raise ValueError("n_points must be ≥ 1")
+    if n_points == 1:
+        return [(x0, y0)]
+    if radius <= 0:
+        raise ValueError("radius must be positive")
+
+    # Clip max_dist to a feasible range
+    max_dist = max(0.0, min(max_dist, 2 * radius))
+
+    # Largest permissible angular step
+    max_delta_theta = 2.0 * math.asin(max_dist / (2.0 * radius))
+
+    # Use that same Δθ for every segment
+    delta_theta = max_delta_theta
+    if clockwise:
+        delta_theta = -delta_theta  # reverse the sign for CW motion
+
+    # Choose the circle centre so the start point is at angle −π/2 (CW)
+    # or +π/2 (CCW) relative to the centre.  This keeps the first tangent
+    # horizontal, but you can re‑orient easily if you need to.
+    cx, cy = x0, y0 + radius if not clockwise else y0 - radius
+    theta0 = -math.pi / 2.0 if not clockwise else +math.pi / 2.0
+
+    pts = []
+    for k in range(n_points):
+        theta_k = theta0 + k * delta_theta
+        xk = cx + radius * math.cos(theta_k)
+        yk = cy + radius * math.sin(theta_k)
+        pts.append(torch.tensor((xk, yk)))
+
+    return pts
+
+
+import math
+from typing import List, Tuple
+
+
+def generate_bending_curve(
+    x0: float,
+    y0: float,
+    n_points: int,
+    radius: float,
+    max_dist: float,
+    n_bends: int = 2,
+    start_heading: float = 0.0,
+    start_left: bool = True,
+) -> List[Tuple[float, float]]:
+    """
+    Create a poly‑arc composed of `n_bends + 1` circular segments whose
+    signed curvature alternates, e.g.   left→right→left  for n_bends = 2.
+
+    Parameters
+    ----------
+    x0, y0        : float
+        Coordinates of the first point (always included).
+    n_points      : int
+        Total number of samples along the whole curve  (≥ 2).
+    radius        : float
+        Constant radius for every arc segment.
+    max_dist      : float
+        Upper bound on the straight‑line distance between neighbours.
+    n_bends       : int, default 2
+        Number of *direction reversals* in curvature.
+    start_heading : float, default 0.0 (radians)
+        Tangent direction at the very first point (0 ⇒ +x axis).
+    start_left    : bool, default True
+        If True the first bend turns *left* (CCW); otherwise right (CW).
+
+    Returns
+    -------
+    List[(x, y)]
+        `n_points` coordinates tracing the bending curve.
+    """
+    if n_points < 1:
+        raise ValueError("n_points must be ≥ 1")
+    if radius <= 0:
+        raise ValueError("radius must be positive")
+    if max_dist <= 0:
+        raise ValueError("max_dist must be positive")
+
+    # Angular step that honours the chord‑length constraint
+    max_dist = min(max_dist, 2 * radius)  # can’t exceed diameter
+    dtheta = 2.0 * math.asin(max_dist / (2.0 * radius))  # always positive
+
+    # Split the point budget as evenly as possible over all segments
+    n_segments = n_bends + 1
+    base = n_points // n_segments
+    extra = n_points % n_segments  # first ‘extra’ segments get +1
+    seg_lengths = [base + (1 if i < extra else 0) for i in range(n_segments)]
+    seg_lengths[0] -= 1  # first point already accounted for
+
+    # Initial state
+    pts = [torch.tensor((x0, y0))]
+    x, y = x0, y0
+    heading = start_heading  # tangent angle φ
+    sign = 1 if start_left else -1  # +1 ⇒ left/CCW, −1 ⇒ right/CW
+
+    for seg_idx, steps in enumerate(seg_lengths):
+        for _ in range(steps):
+            # Circle centre lies ±radius along the normal to the heading
+            cx = x - sign * radius * math.sin(heading)
+            cy = y + sign * radius * math.cos(heading)
+
+            # Vector from centre to current point
+            rx, ry = x - cx, y - cy
+
+            # Rotate that vector by ±dθ around the centre
+            cosd, sind = math.cos(sign * dtheta), math.sin(sign * dtheta)
+            rx_new = cosd * rx - sind * ry
+            ry_new = sind * rx + cosd * ry
+            x, y = cx + rx_new, cy + ry_new
+
+            # New heading (tangent turns by the same signed dθ)
+            heading += sign * dtheta
+            pts.append(torch.tensor((x, y)))
+
+        # Flip curvature direction for the next segment
+        sign *= -1
+
+    return pts
+
+
+def calculate_moment(position, force):
+    """
+    Calculate the moment generated by a 2D force at a given position using PyTorch.
+
+    Parameters:
+        position (torch.Tensor): Tensor of shape [N, 2], where each row is (x_r, y_r).
+        force (torch.Tensor): Tensor of shape [N, 2], where each row is (x_f, y_f).
+
+    Returns:
+        torch.Tensor: Tensor of shape [N] containing the moment for each pair of position and force.
+    """
+    # Ensure tensors are of the same shape
+    assert (
+        position.shape == force.shape
+    ), "Position and force tensors must have the same shape."
+
+    # Extract components
+    x_r, y_r = position[:, 0], position[:, 1]
+    x_f, y_f = force[:, 0], force[:, 1]
+
+    # Compute the moment
+    moment = x_r * y_f - y_r * x_f
+
+    return moment
+
+
+import numpy as np
+
+
+def wrap_to_pi(angle):
+    """Map any angle array to (-π, π]."""
+    return torch.remainder(angle + torch.pi, 2.0 * torch.pi) - torch.pi
+
+
+import torch
+
+
+def unwrap(p, discont=torch.pi, axis=-1):
+    """
+    Unwraps a phase array by changing absolute differences greater than discont to their 2*pi complement.
+
+    Args:
+        p (torch.Tensor): Input array of phase angles.
+        discont (float or torch.Tensor): Discontinuity threshold.
+        axis (int): Axis along which to unwrap.
+
+    Returns:
+        torch.Tensor: Unwrapped phase array.
+    """
+    p_diff = torch.diff(p, dim=axis)
+
+    # Identify discontinuities
+    mask = torch.abs(p_diff) > discont
+
+    # Calculate cumulative correction factors
+    angles = torch.cumsum(2 * torch.pi * torch.sign(p_diff) * mask, dim=axis)
+
+    # Pad with a zero at the beginning to match original size
+    pad_shape = list(p.shape)
+    pad_shape[axis] = 1
+
+    angles_padded = torch.cat(
+        (torch.zeros(pad_shape, dtype=p.dtype, device=p.device), angles), dim=axis
+    )
+
+    # Apply corrections
+    unwrapped_p = p + angles_padded
+
+    return unwrapped_p
+
+
+def internal_angles_xy(points: torch.Tensor) -> torch.Tensor:
+    """
+    Compute Δθ for a planar chain from **positions**.
+
+    Args
+    ----
+    points : (*, N, 2) tensor
+        (x, y) positions of N robots; * can be a batch dimension.
+
+    Returns
+    -------
+    dtheta : (*, N‑2) tensor
+        Relative heading at each internal joint.
+    """
+    # segment vectors v_i = p_{i+1} - p_i   shape: (*, N‑1, 2)
+    v = points[:, 1:, :] - points[:, :-1, :]
+
+    # headings φ_i = atan2(v_y, v_x)        shape: (*, N‑1)
+    phi = torch.atan2(v[..., 1], v[..., 0])
+
+    # Δθ_j = wrap(φ_j − φ_{j-1})            shape: (*, N‑2)
+    dtheta = wrap_to_pi(phi[..., 1:] - phi[..., :-1])
+    return dtheta
+
+
+def internal_angles_yaw(yaw: torch.Tensor) -> torch.Tensor:
+    """
+    Alternative: compute Δθ directly from robot yaw readings.
+
+    yaw : (*, N) tensor of body yaw angles in radians.
+    Returns the same shape (*, N‑2) as above.
+    """
+    return wrap_to_pi(yaw[..., 1:] - yaw[..., :-1])
+
+
+def bending_speed(
+    dtheta: torch.Tensor, dtheta_prev: torch.Tensor, dt: float
+) -> torch.Tensor:
+    """
+    First‑order time derivative Δθ̇ (bending velocity).
+    """
+    return wrap_to_pi(dtheta - dtheta_prev) / dt
