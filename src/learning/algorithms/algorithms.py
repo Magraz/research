@@ -88,7 +88,7 @@ def run_algorithm(
         case AlgorithmEnum.PPO:
             exp_config = PPO_Experiment(**exp_dict)
             trainer = PPO_Trainer(
-                device="cpu",
+                device=exp_config.device,
                 batch_dir=batch_dir,
                 trials_dir=Path(batch_dir).parents[1]
                 / "results"

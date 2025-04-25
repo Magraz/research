@@ -562,3 +562,36 @@ def bending_speed(
     First‑order time derivative Δθ̇ (bending velocity).
     """
     return wrap_to_pi(dtheta - dtheta_prev) / dt
+
+
+def menger_curvature(p: torch.Tensor) -> torch.Tensor:
+    """
+    p : (B, N, 2) positions in body frame
+    return κ : (B, N-2) curvature of internal joints
+    """
+    p_prev, p_i, p_next = p[:, :-2], p[:, 1:-1], p[:, 2:]
+    a = (p_prev - p_i).norm(dim=-1)
+    b = (p_next - p_i).norm(dim=-1)
+    c = (p_next - p_prev).norm(dim=-1)
+    # twice the signed triangle area  (scalar 2-D cross product)
+    v1 = p_i - p_prev  # (B, N-2, 2)
+    v2 = p_next - p_i
+    area2 = torch.abs(v1[..., 0] * v2[..., 1] - v1[..., 1] * v2[..., 0])
+    # κ = 2*Area / (a b c)
+    return 2.0 * area2 / (a * b * c + 1e-8)
+
+
+def centre_and_rotate(points, goal_points):
+    p_cent = points.mean(dim=1, keepdim=True)
+    g_cent = goal_points.mean(dim=1, keepdim=True)
+    P = points - p_cent
+    G = goal_points - g_cent
+    # # 2-D Umeyama alignment (no scale)
+    # H = P.transpose(2, 1) @ G
+    # U, _, Vt = torch.linalg.svd(H)
+    # R = Vt.transpose(2, 1) @ U.transpose(2, 1)
+    # if torch.det(R) < 0:  # reflection fix
+    #     Vt[-1] *= -1
+    #     R = Vt.transpose(2, 1) @ U.transpose(2, 1)
+    # P_aligned = (R @ P.transpose(2, 1)).transpose(2, 1)
+    return P, G  # curves centred & best-rotated

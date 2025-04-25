@@ -85,7 +85,6 @@ def create_env(
                 "y_semidim": env_config["map_size"][1],
                 # Agent data
                 "n_agents": env_config["n_agents"],
-                "lidar_range": env_config["agents"]["observation_radius"],
                 "state_representation": env_config["state_representation"],
                 # POIs data
                 "n_targets": 1,

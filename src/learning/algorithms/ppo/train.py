@@ -48,6 +48,11 @@ class PPO_Trainer:
         match (representation):
             case "global":
                 return state[0]
+
+            case "local":
+                # Need state to be in the shape (n_env, agent, state_dim)
+                state = torch.stack(state).transpose(1, 0)
+                return state
             case _:
                 # Need state to be in the shape (n_env, agent, state_dim)
                 state = torch.stack(state).transpose(1, 0).flatten(start_dim=1)
@@ -79,22 +84,26 @@ class PPO_Trainer:
             seed=params.random_seed,
         )
 
-        params.device = self.device
-        params.log_filename = self.logs_dir
-        params.n_agents = env_config.n_agents
-        params.action_dim = env.action_space.spaces[0].shape[0]
+        n_agents = env_config.n_agents
+        d_action = env.action_space.spaces[0].shape[0]
 
         # Check state representation
         match (env_config.state_representation):
-            case "global":
-                params.state_dim = env.observation_space.spaces[0].shape[0]
+            case "global" | "local":
+                d_state = env.observation_space.spaces[0].shape[0]
             case _:
-                params.state_dim = (
-                    env.observation_space.spaces[0].shape[0] * params.n_agents
-                )
+                d_state = env.observation_space.spaces[0].shape[0] * n_agents
 
         # Create learner object
-        learner = PPO(params=params, n_envs=n_envs)
+        learner = PPO(
+            self.device,
+            exp_config.model,
+            params,
+            n_agents,
+            n_envs,
+            d_state,
+            d_action,
+        )
 
         # Setup loop variables
         step = 0
@@ -114,16 +123,17 @@ class PPO_Trainer:
             rollout_episodes = 0
 
             episode_len = torch.zeros(
-                env_config.n_envs, dtype=torch.int32, device=params.device
+                env_config.n_envs, dtype=torch.int32, device=self.device
             )
             cum_rewards = torch.zeros(
-                env_config.n_envs, dtype=torch.float32, device=params.device
+                env_config.n_envs, dtype=torch.float32, device=self.device
             )
 
             state = env.reset()
 
             for _ in range(0, params.n_steps):
 
+                # Clamp because actions are stochastic and can lead to them been out of -1 to 1 range
                 actions_per_env = torch.clamp(
                     learner.select_action(
                         self.process_state(
@@ -138,8 +148,8 @@ class PPO_Trainer:
                 # Permute action tensor of shape (n_envs, n_agents*action_dim) to (agents, n_env, action_dim)
                 action_tensor = actions_per_env.reshape(
                     n_envs,
-                    params.n_agents,
-                    params.action_dim,
+                    n_agents,
+                    d_action,
                 ).transpose(1, 0)
 
                 # Turn action tensor into list of tensors with shape (n_env, action_dim)
@@ -153,7 +163,7 @@ class PPO_Trainer:
 
                 step += env_config.n_envs
                 episode_len += torch.ones(
-                    env_config.n_envs, dtype=torch.int32, device=params.device
+                    env_config.n_envs, dtype=torch.int32, device=self.device
                 )
 
                 # Create timeout boolean mask
@@ -191,7 +201,7 @@ class PPO_Trainer:
                         total_episodes += 1
                         rollout_episodes += 1
 
-                if rollout_episodes == max_episodes_per_rollout:
+                if rollout_episodes >= max_episodes_per_rollout:
                     break
 
             if running_avg_reward > rmax:
@@ -221,24 +231,29 @@ class PPO_Trainer:
             seed=params.random_seed,
         )
 
-        params.device = self.device
-        params.n_agents = env_config.n_agents
-        params.action_dim = env.action_space.spaces[0].shape[0]
+        n_agents = env_config.n_agents
+        d_action = env.action_space.spaces[0].shape[0]
         # Check state representation
         match (env_config.state_representation):
-            case "global":
-                params.state_dim = env.observation_space.spaces[0].shape[0]
+            case "global" | "local":
+                d_state = env.observation_space.spaces[0].shape[0]
             case _:
-                params.state_dim = (
-                    env.observation_space.spaces[0].shape[0] * params.n_agents
-                )
+                d_state = env.observation_space.spaces[0].shape[0] * n_agents
 
-        learner = PPO(params=params)
+        learner = PPO(
+            self.device,
+            exp_config.model,
+            params,
+            n_agents,
+            1,
+            d_state,
+            d_action,
+        )
         learner.load(self.models_dir / "best_model")
 
         frame_list = []
 
-        n_rollouts = 3
+        n_rollouts = 10
 
         for i in range(n_rollouts):
             done = False
@@ -247,21 +262,17 @@ class PPO_Trainer:
             r = []
             for t in range(0, 512):
 
-                action = torch.clamp(
-                    learner.deterministic_action(
-                        self.process_state(
-                            state,
-                            env_config.state_representation,
-                        )
-                    ),
-                    min=-1.0,
-                    max=1.0,
+                action = learner.deterministic_action(
+                    self.process_state(
+                        state,
+                        env_config.state_representation,
+                    )
                 )
 
                 action_tensor = action.reshape(
                     1,
-                    params.n_agents,
-                    params.action_dim,
+                    n_agents,
+                    d_action,
                 ).transpose(1, 0)
 
                 # Turn action tensor into list of tensors with shape (n_env, action_dim)

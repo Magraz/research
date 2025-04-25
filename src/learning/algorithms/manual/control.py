@@ -31,7 +31,7 @@ class ManualControl:
 
     def view(self, exp_config, env_config: EnvironmentParams):
 
-        max_steps = 2048
+        max_steps = 1000000
         n_agents = env_config.n_agents
         n_envs = 1
 
@@ -80,6 +80,11 @@ class ManualControl:
                 G_list.append(rews[0][0])
 
                 G_total += rews[0]
+
+                # print("\n")
+                # print(f"sin_dtheta {obs[0][:,:6]}")
+                # print(f"cos_dtheta {obs[0][:,6:12]}")
+                # print(f"bend_speed {obs[0][:,12:18]}")
 
                 print(G_total)
 

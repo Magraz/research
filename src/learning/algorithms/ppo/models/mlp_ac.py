@@ -44,6 +44,8 @@ class ActorCritic(nn.Module):
             nn.Tanh(),
         )
 
+        self.actor_params = list(self.actor.parameters())
+
         # Apply orthogonal initialization
         self.actor.apply(
             lambda m: orthogonal_init(

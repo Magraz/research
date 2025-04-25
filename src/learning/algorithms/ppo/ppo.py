@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 
-from learning.algorithms.ppo.models.mlp_ac import ActorCritic
 from learning.algorithms.ppo.types import Params
 
 
@@ -55,15 +54,22 @@ class RolloutData(Dataset):
 class PPO:
     def __init__(
         self,
+        device: str,
+        model: str,
         params: Params,
-        n_envs: int = 1,
+        n_agents: int,
+        n_envs: int,
+        d_state: int,
+        d_action: int,
     ):
 
-        self.device = params.device
+        self.device = device
+        self.n_envs = n_envs
+        self.buffer = RolloutBuffer()
+
+        # Algorithm parameters
         self.n_epochs = params.n_epochs
         self.minibatch_size = params.minibatch_size
-
-        self.n_envs = n_envs
         self.gamma = params.gamma
         self.lmbda = params.lmbda
         self.eps_clip = params.eps_clip
@@ -72,17 +78,33 @@ class PPO:
         self.std_coef = params.std_coef
         self.n_epochs = params.n_epochs
 
-        self.buffer = RolloutBuffer()
+        # Select model
+        match (model):
+            case "mlp":
+                from learning.algorithms.ppo.models.mlp_ac import ActorCritic
+            case "transformer":
+                from learning.algorithms.ppo.models.transformer_ac import ActorCritic
 
+        # Create models
         self.policy = ActorCritic(
-            n_agents=params.n_agents,
-            d_state=params.state_dim,
-            d_action=params.action_dim,
-            device=params.device,
+            n_agents,
+            d_state,
+            d_action,
+            self.device,
         ).to(self.device)
 
+        self.policy_old = ActorCritic(
+            n_agents,
+            d_state,
+            d_action,
+            self.device,
+        ).to(self.device)
+
+        self.policy_old.load_state_dict(self.policy.state_dict())
+
+        # Create optimizers
         self.opt_actor = torch.optim.Adam(
-            [p for p in self.policy.actor.parameters()] + [self.policy.log_action_std],
+            self.policy.actor_params + [self.policy.log_action_std],
             lr=params.lr_actor,
         )
 
@@ -90,14 +112,7 @@ class PPO:
             self.policy.critic.parameters(), lr=params.lr_critic
         )
 
-        self.policy_old = ActorCritic(
-            n_agents=params.n_agents,
-            d_state=params.state_dim,
-            d_action=params.action_dim,
-            device=params.device,
-        ).to(self.device)
-        self.policy_old.load_state_dict(self.policy.state_dict())
-
+        # Create loss function
         self.loss_fn = nn.MSELoss()
 
     def select_action(self, state: torch.Tensor):
@@ -130,7 +145,7 @@ class PPO:
         is_terminals = torch.stack(self.buffer.is_terminals)
 
         advantages = torch.zeros_like(rewards)
-        gae = torch.zeros(self.n_envs)
+        gae = torch.zeros(self.n_envs, device=self.device)
 
         timesteps, _ = rewards.shape
 
@@ -154,7 +169,7 @@ class PPO:
         # Bootstrap episodes by calculating the value of the final state if not terminated
         with torch.no_grad():
             final_values = self.policy_old.critic(
-                self.buffer.states[-1]
+                self.buffer.states[-1].flatten(start_dim=1)
             ) * ~self.buffer.is_terminals[-1].unsqueeze(-1)
 
         bootstrapped_values = self.buffer.state_values.copy()
@@ -271,9 +286,7 @@ class PPO:
                 # Take actor gradient step
                 self.opt_actor.zero_grad()
                 actor_loss.backward()
-                torch.nn.utils.clip_grad_norm_(
-                    self.policy.actor.parameters(), self.grad_clip
-                )
+                torch.nn.utils.clip_grad_norm_(self.policy.actor_params, self.grad_clip)
                 self.opt_actor.step()
 
                 # Take critic gradient step

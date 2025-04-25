@@ -29,6 +29,8 @@ from learning.environments.salp.utils import (
     internal_angles_xy,
     bending_speed,
     wrap_to_pi,
+    menger_curvature,
+    centre_and_rotate,
 )
 from learning.environments.salp.types import Chain, GlobalObservation
 import random
@@ -37,6 +39,8 @@ from copy import deepcopy
 
 if typing.TYPE_CHECKING:
     from vmas.simulator.rendering import Geom
+
+torch.set_printoptions(precision=2)
 
 
 class SalpDomain(BaseScenario):
@@ -48,6 +52,7 @@ class SalpDomain(BaseScenario):
         self.agent_min_angle = -45
         self.u_multiplier = 1.0
         self.target_radius = self.agent_radius / 2
+        self.frechet_thresh = 0.98
 
         # Environment
         self.x_semidim = kwargs.pop("x_semidim", 1)
@@ -66,11 +71,10 @@ class SalpDomain(BaseScenario):
         if kwargs.pop("shuffle_agents_positions", False):
             random.shuffle(self.agents_idx)
 
-        self._lidar_range = kwargs.pop("lidar_range", 10.0)
-
         # Reward Shaping
         self.frechet_shaping_factor = 1.0
         self.centroid_shaping_factor = 1.0
+        self.curvature_shaping_factor = 0.1
 
         ScenarioUtils.check_kwargs_consumed(kwargs)
 
@@ -78,13 +82,14 @@ class SalpDomain(BaseScenario):
         # Make world
         world = SalpWorld(
             batch_dim=batch_dim,
-            x_semidim=self.x_semidim,
-            y_semidim=self.y_semidim,
+            x_semidim=self.x_semidim * 1.2,
+            y_semidim=self.y_semidim * 1.2,
             device=device,
             substeps=15,
             collision_force=1500,
             joint_force=900,
             contact_margin=1e-3,
+            torque_constraint_force=0.1,
         )
 
         # Set targets
@@ -142,6 +147,7 @@ class SalpDomain(BaseScenario):
         self.global_rew = torch.zeros(batch_dim, device=device, dtype=torch.float32)
         self.centroid_rew = self.global_rew.clone()
         self.frechet_rew = self.global_rew.clone()
+        self.curvature_rew = self.global_rew.clone()
 
         # Initialize memory
         self.dtheta_prev = torch.zeros(
@@ -207,6 +213,21 @@ class SalpDomain(BaseScenario):
             a_pos = self.get_agent_chain_position()
             self.dtheta_prev = internal_angles_xy(a_pos)
 
+            t_pos = self.get_target_chain_position()
+
+            self.frechet_shaping = (
+                self.calculate_frechet_reward(a_pos, t_pos)
+                * self.frechet_shaping_factor
+            )
+            self.centroid_shaping = (
+                self.calculate_centroid_reward(a_pos.mean(dim=1), t_pos.mean(dim=1))
+                * self.centroid_shaping_factor
+            )
+            self.curvature_shaping = (
+                self.calculate_curvature_reward(a_pos, t_pos)
+                * self.curvature_shaping_factor
+            )
+
         else:
             self.agent_chains[env_index] = self.create_agent_chain(
                 offset=agent_offset, scale=agent_scale, theta_min=0.0, theta_max=0.0
@@ -240,8 +261,22 @@ class SalpDomain(BaseScenario):
                 a_pos[env_index].unsqueeze(0)
             )
 
-        self.frechet_shaping = self.calculate_frechet_reward()
-        self.centroid_shaping = self.calculate_centroid_reward()
+            t_pos = self.get_target_chain_position()
+
+            self.frechet_shaping[env_index] = (
+                self.calculate_frechet_reward(a_pos, t_pos)[env_index]
+                * self.frechet_shaping_factor
+            )
+            self.centroid_shaping[env_index] = (
+                self.calculate_centroid_reward(a_pos.mean(dim=1), t_pos.mean(dim=1))[
+                    env_index
+                ]
+                * self.centroid_shaping_factor
+            )
+            self.curvature_shaping[env_index] = (
+                self.calculate_curvature_reward(a_pos, t_pos)[env_index]
+                * self.curvature_shaping_factor
+            )
 
     def is_out_of_bounds(self):
         """Boolean mask of shape (n_envs,) – True if agent is out of bounds."""
@@ -386,30 +421,36 @@ class SalpDomain(BaseScenario):
         target_pos = [t.state.pos for t in targets]
         return torch.stack(target_pos).transpose(1, 0)
 
-    def calculate_frechet_reward(self) -> torch.Tensor:
+    def calculate_frechet_reward(
+        self, a_pos: torch.Tensor, t_pos: torch.Tensor, aligned: bool = False
+    ) -> torch.Tensor:
 
-        agent_pos = self.get_agent_chain_position()
-        target_pos = self.get_target_chain_position()
-
-        f_dist = batch_discrete_frechet_distance(agent_pos, target_pos)
+        if aligned:
+            a_pos, t_pos = centre_and_rotate(a_pos, t_pos)
+        f_dist = batch_discrete_frechet_distance(a_pos, t_pos)
         f_rew = 1 / torch.exp(f_dist)
 
         return f_rew
 
-    def calculate_centroid_reward(self) -> torch.Tensor:
+    def calculate_centroid_reward(
+        self, a_centroid: torch.Tensor, t_centroid: torch.Tensor
+    ) -> torch.Tensor:
 
-        c_dist = []
-        for n_env in range(self.world.batch_dim):
-            c_dist.append(
-                torch.norm(
-                    self.target_chains[n_env].centroid
-                    - self.agent_chains[n_env].centroid,
-                )
-            )
-        c_dist = torch.stack(c_dist)
+        c_dist = torch.norm(a_centroid - t_centroid, dim=1)
         c_rew = 1 / torch.exp(c_dist)
 
         return c_rew
+
+    def calculate_curvature_reward(
+        self, a_pos: torch.Tensor, t_pos: torch.Tensor, lambda_k: float = 0.5
+    ) -> torch.Tensor:
+
+        k = menger_curvature(a_pos)
+        k_star = menger_curvature(t_pos)
+
+        rew = -torch.sum(torch.abs(k - k_star), dim=-1)
+
+        return rew
 
     def reward(self, agent: Agent):
         is_first = agent == self.world.agents[0]
@@ -417,26 +458,47 @@ class SalpDomain(BaseScenario):
         if is_first:
 
             # Calculate G
-            self.update_agent_chains()
+            agent_pos = self.get_agent_chain_position()
+            target_pos = self.get_target_chain_position()
+
+            agent_centroid = agent_pos.mean(dim=1)
+            target_centroid = target_pos.mean(dim=1)
 
             self.frechet_rew[:] = 0
             self.centroid_rew[:] = 0
+            self.curvature_rew[:] = 0
 
-            f_rew = self.calculate_frechet_reward()
+            # Calculate shaping terms
+            f_rew = self.calculate_frechet_reward(agent_pos, target_pos)
             frechet_shaping = f_rew * self.frechet_shaping_factor
             self.frechet_rew += frechet_shaping - self.frechet_shaping
             self.frechet_shaping = frechet_shaping
 
-            cent_rew = self.calculate_centroid_reward()
-            centroid_shaping = cent_rew * self.centroid_shaping_factor
-            self.centroid_rew += centroid_shaping - self.centroid_shaping
-            self.centroid_shaping = centroid_shaping
+            # cent_rew = self.calculate_centroid_reward(agent_centroid, target_centroid)
+            # centroid_shaping = cent_rew * self.centroid_shaping_factor
+            # self.centroid_rew += centroid_shaping - self.centroid_shaping
+            # self.centroid_shaping = centroid_shaping
+
+            # curvature_rew = self.calculate_curvature_reward(agent_pos, target_pos)
+            # curvature_shaping = curvature_rew * self.curvature_shaping_factor
+            # self.curvature_rew += curvature_shaping - self.curvature_shaping
+            # self.curvature_shaping = curvature_shaping
 
             self.total_rew = f_rew
 
-            self.global_rew = self.frechet_rew + self.centroid_rew
+            # Get reward for reaching the goal
+            goal_reached_rew = torch.zeros(
+                self.world.batch_dim, device=self.device, dtype=torch.float32
+            )
+            goal_reached_mask = self.total_rew > self.frechet_thresh
+            goal_reached_rew += 10 * goal_reached_mask.int()
 
-        rew = torch.cat([self.global_rew * 10])
+            # Mix all rewards
+            self.global_rew = (
+                self.frechet_rew * 10 + goal_reached_rew  # + self.centroid_rew
+            )  # + self.curvature_rew
+
+        rew = torch.cat([self.global_rew])
 
         return rew
 
@@ -492,6 +554,10 @@ class SalpDomain(BaseScenario):
             agent.state.pos - self.global_observation.t_chain_centroid_pos
         )
 
+        a_vel_rel_2_centroid = (
+            agent.state.vel - self.global_observation.a_chain_centroid_vel
+        )
+
         a_pos_rel_2_centroid = (
             agent.state.pos - self.global_observation.a_chain_centroid_pos
         )
@@ -511,11 +577,12 @@ class SalpDomain(BaseScenario):
                         # Whole body motion
                         self.global_observation.a_chain_centroid_pos,
                         self.global_observation.a_chain_centroid_vel,
-                        wrap_to_pi(self.global_observation.a_chain_centroid_ang_pos),
+                        self.global_observation.a_chain_centroid_ang_pos,
                         self.global_observation.a_chain_centroid_ang_vel,
+                        self.global_observation.total_force,
+                        self.global_observation.total_moment,
                         # Target features
-                        self.global_observation.dtheta_diff,
-                        self.global_observation.frechet_dist.unsqueeze(-1),
+                        self.global_observation.frechet_dist,
                         self.global_observation.t_chain_centroid_pos
                         - self.global_observation.a_chain_centroid_pos,
                         # Condensed state
@@ -541,21 +608,27 @@ class SalpDomain(BaseScenario):
             case "global_plus_local":
                 observation = torch.cat(
                     [
-                        # Global state
+                        # Shape features
+                        self.global_observation.a_chain_sin_dtheta,
+                        self.global_observation.a_chain_cos_dtheta,
+                        self.global_observation.a_chain_bend_speed,
+                        # Whole body motion
                         self.global_observation.a_chain_centroid_pos,
                         self.global_observation.a_chain_centroid_vel,
-                        self.global_observation.a_chain_centroid_ang_pos
-                        / (2 * torch.pi),
+                        self.global_observation.a_chain_centroid_ang_pos,
                         self.global_observation.a_chain_centroid_ang_vel,
                         self.global_observation.total_force,
-                        self.global_observation.total_moment.unsqueeze(-1),
-                        self.global_observation.frechet_dist.unsqueeze(-1),
+                        self.global_observation.total_moment,
+                        # Target features
+                        self.global_observation.frechet_dist,
+                        self.global_observation.t_chain_centroid_pos
+                        - self.global_observation.a_chain_centroid_pos,
                         # For IPPO actor
                         a_pos_rel_2_centroid,
-                        a_pos_rel_2_t_centroid,
+                        a_vel_rel_2_centroid,
                         agent.state.pos,
                         agent.state.vel,
-                        agent.state.rot % (2 * torch.pi) / (2 * torch.pi),
+                        wrap_to_pi(agent.state.rot),
                         agent.state.ang_vel,
                     ],
                     dim=-1,
@@ -568,11 +641,11 @@ class SalpDomain(BaseScenario):
                         a_pos_rel_2_t_centroid,
                         agent.state.pos,
                         agent.state.vel,
-                        agent.state.rot % (2 * torch.pi) / (2 * torch.pi),
+                        wrap_to_pi(agent.state.rot),
                         agent.state.ang_vel,
                     ],
                     dim=-1,
-                )
+                ).float()
 
         return observation
 
@@ -584,6 +657,9 @@ class SalpDomain(BaseScenario):
             target_pos = self.get_target_chain_position()
             a_chain_centroid_pos = agent_pos.mean(dim=1)
             t_chain_centroid_pos = target_pos.mean(dim=1)
+
+            aligned_agent_pos = agent_pos - agent_pos.mean(dim=1, keepdim=True)
+            aligned_target_pos = target_pos - target_pos.mean(dim=1, keepdim=True)
 
             total_moment = 0
             total_force = 0
@@ -605,13 +681,15 @@ class SalpDomain(BaseScenario):
             ang_vels = torch.stack(ang_vels).transpose(1, 0)
             ang_pos = torch.stack(ang_pos).transpose(1, 0)
 
-            target_dtheta = internal_angles_xy(target_pos)
             dtheta = internal_angles_xy(agent_pos)
             bend_speed = bending_speed(dtheta, self.dtheta_prev, dt=self.world.dt)
 
+            # Store previous dtheta
+            self.dtheta_prev = dtheta.clone()
+
+            # Build global observation
             self.global_observation = GlobalObservation(
                 # New obs
-                dtheta - target_dtheta,
                 torch.sin(dtheta),
                 torch.cos(dtheta),
                 bend_speed,
@@ -625,23 +703,61 @@ class SalpDomain(BaseScenario):
                 t_chain_centroid_pos,
                 a_chain_centroid_pos,
                 vels.mean(dim=1),
-                ang_pos.mean(dim=1),
+                wrap_to_pi(ang_pos.mean(dim=1)),
                 ang_vels.mean(dim=1),
                 total_force,
-                total_moment,
-                batch_discrete_frechet_distance(agent_pos, target_pos),
+                total_moment.unsqueeze(-1),
+                batch_discrete_frechet_distance(
+                    aligned_agent_pos, aligned_target_pos
+                ).unsqueeze(-1),
             )
+
+            # print("\n")
+
+            # print(f"dtheta {dtheta[0]}")
+            # print(f"sin_dtheta {self.global_observation.a_chain_sin_dtheta[0]}")
+            # print(f"cos_dtheta {self.global_observation.a_chain_cos_dtheta[0]}")
+            # print(f"bend_speed {self.global_observation.a_chain_bend_speed[0]}")
+
+            # print(
+            #     f"centroid_ang_pos {self.global_observation.a_chain_centroid_ang_pos}"
+            # )
+            # print(
+            #     f"centroid_ang_vel {self.global_observation.a_chain_centroid_ang_vel}"
+            # )
+            # print(f"total_force {self.global_observation.total_force}")
+            # print(f"total_moment {self.global_observation.total_moment}")
 
         return self.agent_representation(agent, self.state_representation)
 
     def done(self):
-        target_reached = self.total_rew > 0.98
+        target_reached = self.total_rew > self.frechet_thresh
         out_of_bounds = self.is_out_of_bounds()
         return torch.logical_or(target_reached, out_of_bounds)
 
     def info(self, agent: Agent) -> Dict[str, Tensor]:
         return {
             "global_reward": (self.global_rew),
+            "global_state": torch.cat(
+                [
+                    # Shape features
+                    self.global_observation.a_chain_sin_dtheta,
+                    self.global_observation.a_chain_cos_dtheta,
+                    self.global_observation.a_chain_bend_speed,
+                    # Whole body motion
+                    self.global_observation.a_chain_centroid_pos,
+                    self.global_observation.a_chain_centroid_vel,
+                    self.global_observation.a_chain_centroid_ang_pos,
+                    self.global_observation.a_chain_centroid_ang_vel,
+                    self.global_observation.total_force,
+                    self.global_observation.total_moment,
+                    # Target features
+                    self.global_observation.frechet_dist,
+                    self.global_observation.t_chain_centroid_pos
+                    - self.global_observation.a_chain_centroid_pos,
+                ],
+                dim=-1,
+            ).float(),
         }
 
     def extra_render(self, env_index: int = 0) -> "List[Geom]":

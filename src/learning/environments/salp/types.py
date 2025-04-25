@@ -20,7 +20,6 @@ class Agent:
 @dataclass(frozen=True)
 class GlobalObservation:
     # New
-    dtheta_diff: torch.Tensor
     a_chain_sin_dtheta: torch.Tensor
     a_chain_cos_dtheta: torch.Tensor
     a_chain_bend_speed: torch.Tensor

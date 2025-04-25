@@ -1,2 +1,2 @@
 #Experiment config
-moving_avg_window_size: 50
+moving_avg_window_size: 20

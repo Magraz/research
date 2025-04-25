@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-import torch.nn as nn
 
 
 @dataclass
@@ -22,15 +21,9 @@ class Params:
     lmbda: float
     log_data: bool
 
-    # Default params
-    device: str = ""
-    n_agents: int = 0
-
-    log_filename: str = ""
-    action_dim: int = 0
-    state_dim: int = 0
-
 
 @dataclass
 class Experiment:
+    device: str = ""
+    model: str = ""
     params: Params = None

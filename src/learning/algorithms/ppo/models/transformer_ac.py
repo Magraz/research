@@ -28,7 +28,7 @@ class PositionalEncoding(nn.Module):
             -1, 1
         )  # 0, 1, 2, 3, 4, 5
         division_term = torch.exp(
-            torch.arange(0, d_model, 2).float() * (-math.log(10000.0)) / d_model
+            torch.arange(0, d_model, 2).float() * (-math.log(1e5)) / d_model
         )  # 1000^(2i/d_model)
 
         # PE(pos, 2i) = sin(pos/1000^(2i/d_model))
@@ -58,7 +58,7 @@ class ActorCritic(nn.Module):
         d_action: int,
         device: str,
         # Model specific
-        d_model: int = 128,
+        d_model: int = 64,
         n_heads: int = 8,
         n_encoder_layers: int = 1,
         n_decoder_layers: int = 1,
@@ -74,7 +74,7 @@ class ActorCritic(nn.Module):
         )
 
         self.positional_encoder = PositionalEncoding(
-            d_model=d_model, dropout=0.1, max_len=1000
+            d_model=d_model, dropout=0.1, max_len=500
         )
 
         self.special_token_embedding = nn.Embedding(
@@ -88,7 +88,9 @@ class ActorCritic(nn.Module):
         encoder_layer = nn.TransformerEncoderLayer(
             d_model, n_heads, batch_first=True, norm_first=True
         )
-        self.enc = nn.TransformerEncoder(encoder_layer, n_encoder_layers)
+        self.enc = nn.TransformerEncoder(
+            encoder_layer, n_encoder_layers, enable_nested_tensor=False
+        )
 
         # Decoder Params
         decoder_layer = nn.TransformerDecoderLayer(
@@ -96,10 +98,13 @@ class ActorCritic(nn.Module):
         )
         self.dec = nn.TransformerDecoder(decoder_layer, n_decoder_layers)
 
-        self.out = nn.Linear(d_model, d_action)
+        self.out = nn.Sequential(
+            nn.Linear(d_model, d_action),
+            nn.Tanh(),
+        )
 
         # Actor
-        self.actor = (
+        self.actor_params = (
             list(self.special_token_embedding.parameters())
             + list(self.state_embedding.parameters())
             + list(self.action_embedding.parameters())
@@ -111,7 +116,11 @@ class ActorCritic(nn.Module):
 
         # Critic
         self.critic = nn.Sequential(
-            nn.Linear(d_model * n_agents, 64), nn.ReLU(), nn.Linear(64, 1)
+            nn.Linear(d_state * n_agents, 128),
+            nn.LeakyReLU(),
+            nn.Linear(128, 128),
+            nn.LeakyReLU(),
+            nn.Linear(128, 1),
         )
 
     def forward(self):
@@ -129,11 +138,11 @@ class ActorCritic(nn.Module):
         actions_buffer = kwargs.get("actions_buffer", [])
 
         if actions_buffer == []:
-            tgt = encoder_out
+            tgt = encoder_out.clone().detach()
         else:
             tgt = self.action_embedding(actions_buffer[-1])
 
-        decoder_out = self.dec(tgt, memory=encoder_out)
+        decoder_out = self.dec(encoder_out.clone().detach(), memory=encoder_out)
 
         action_mean = self.out(decoder_out)
 
@@ -145,9 +154,11 @@ class ActorCritic(nn.Module):
         dist = Normal(action_mean, action_std)
 
         action = dist.sample()
-        action_logprob = torch.sum(dist.log_prob(action), dim=-1, keepdim=True)
+        action_logprob = torch.sum(
+            torch.sum(dist.log_prob(action), dim=-1), dim=-1, keepdim=True
+        )
 
-        flattened_emb_state = torch.flatten(embedded_state, start_dim=1)
+        flattened_emb_state = torch.flatten(state, start_dim=1)
         state_val = self.critic(flattened_emb_state)
 
         return (
@@ -158,12 +169,12 @@ class ActorCritic(nn.Module):
 
     def evaluate(self, state, action):
 
-        embedded_state = self.state_embedding(state.squeeze(1))
+        embedded_state = self.state_embedding(state)
         embedded_state = self.positional_encoder(embedded_state)
 
         encoder_out = self.enc(embedded_state)
 
-        decoder_out = self.dec(encoder_out, memory=encoder_out)
+        decoder_out = self.dec(encoder_out.clone().detach(), memory=encoder_out)
 
         action_mean = self.out(decoder_out)
 
@@ -171,22 +182,26 @@ class ActorCritic(nn.Module):
 
         dist = Normal(action_mean, action_std)
 
-        dist_entropy = torch.sum(dist.entropy(), dim=-1, keepdim=True)
-        action_logprobs = torch.sum(dist.log_prob(action), dim=-1, keepdim=True)
+        dist_entropy = torch.sum(
+            torch.sum(dist.entropy(), dim=-1), dim=-1, keepdim=True
+        )
+        action_logprob = torch.sum(
+            torch.sum(dist.log_prob(action), dim=-1), dim=-1, keepdim=True
+        )
 
-        flattened_emb_state = torch.flatten(embedded_state, start_dim=1)
+        flattened_emb_state = torch.flatten(state, start_dim=1)
         state_values = self.critic(flattened_emb_state)
 
-        return action_logprobs, state_values, dist_entropy
+        return action_logprob, state_values, dist_entropy
 
 
 if __name__ == "__main__":
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     model = ActorCritic(
-        n_agents=8,
-        d_state=32,
-        d_action=2 * 8,
+        n_agents=4,
+        d_state=10,
+        d_action=2 * 4,
         device=device,
     ).to(device)
 
