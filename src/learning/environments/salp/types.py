@@ -19,10 +19,17 @@ class Agent:
 
 @dataclass(frozen=True)
 class GlobalObservation:
-    # New
-    a_chain_sin_dtheta: torch.Tensor
-    a_chain_cos_dtheta: torch.Tensor
-    a_chain_bend_speed: torch.Tensor
+    # Internal angles
+    a_chain_internal_angles: torch.Tensor
+    a_chain_internal_angles_speed: torch.Tensor
+
+    # Link angles
+    a_chain_link_angles: torch.Tensor
+    a_chain_link_angles_speed: torch.Tensor
+
+    # Relative angles
+    a_chain_relative_angles: torch.Tensor
+    a_chain_relative_angles_speed: torch.Tensor
 
     # Raw Global
     t_chain_all_pos: torch.Tensor
@@ -30,6 +37,8 @@ class GlobalObservation:
     a_chain_all_vel: torch.Tensor
     a_chain_all_ang_pos: torch.Tensor
     a_chain_all_ang_vel: torch.Tensor
+    a_chain_all_forces: torch.Tensor
+
     # Condensed global
     t_chain_centroid_pos: torch.Tensor
     a_chain_centroid_pos: torch.Tensor

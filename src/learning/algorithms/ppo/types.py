@@ -6,7 +6,7 @@ class Params:
 
     n_epochs: int
     n_total_steps: int
-    n_steps: int
+    batch_size: int
     minibatch_size: int
 
     eps_clip: float

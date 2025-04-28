@@ -64,6 +64,10 @@ class ActorCritic(nn.Module):
     def forward(self):
         raise NotImplementedError
 
+    def get_value(self, state: torch.Tensor):
+        with torch.no_grad():
+            return self.critic(state)
+
     def get_action_dist(self, action_mean):
         action_std = torch.exp(self.log_action_std)
         return Normal(action_mean, action_std)

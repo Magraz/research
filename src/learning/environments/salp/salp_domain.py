@@ -27,10 +27,10 @@ from learning.environments.salp.utils import (
     rotate_points,
     calculate_moment,
     internal_angles_xy,
-    bending_speed,
     wrap_to_pi,
     menger_curvature,
     centre_and_rotate,
+    get_neighbor_angles,
 )
 from learning.environments.salp.types import Chain, GlobalObservation
 import random
@@ -150,9 +150,15 @@ class SalpDomain(BaseScenario):
         self.curvature_rew = self.global_rew.clone()
 
         # Initialize memory
-        self.dtheta_prev = torch.zeros(
+        self.internal_angles_prev = torch.zeros(
             (batch_dim, self.n_agents - 2), device=device, dtype=torch.float32
-        )  # n_agents-2 links
+        )  # n_agents-2 internal angles
+        self.link_angles_prev = torch.zeros(
+            (batch_dim, self.n_agents - 2), device=device, dtype=torch.float32
+        )  # n_agents-1 link angles
+        self.relative_angles_prev = torch.zeros(
+            (batch_dim, self.n_agents, 2), device=device, dtype=torch.float32
+        )  # n_agents-1 link angles
 
         world.zero_grad()
 
@@ -211,7 +217,14 @@ class SalpDomain(BaseScenario):
                 )
 
             a_pos = self.get_agent_chain_position()
-            self.dtheta_prev = internal_angles_xy(a_pos)
+            self.internal_angles_prev, self.link_angles_prev = internal_angles_xy(a_pos)
+
+            relative_angles = [
+                get_neighbor_angles(a_pos, self.world.agents.index(a), self.n_agents)
+                for a in self.world.agents
+            ]
+
+            self.relative_angles_prev = torch.stack(relative_angles).transpose(1, 0)
 
             t_pos = self.get_target_chain_position()
 
@@ -257,9 +270,18 @@ class SalpDomain(BaseScenario):
                 )
 
             a_pos = self.get_agent_chain_position()
-            self.dtheta_prev[env_index] = internal_angles_xy(
-                a_pos[env_index].unsqueeze(0)
+            self.internal_angles_prev[env_index], self.link_angles_prev[env_index] = (
+                internal_angles_xy(a_pos[env_index].unsqueeze(0))
             )
+
+            relative_angles = [
+                get_neighbor_angles(a_pos, self.world.agents.index(a), self.n_agents)
+                for a in self.world.agents
+            ]
+
+            self.relative_angles_prev[env_index] = torch.stack(
+                relative_angles
+            ).transpose(1, 0)[env_index]
 
             t_pos = self.get_target_chain_position()
 
@@ -571,9 +593,9 @@ class SalpDomain(BaseScenario):
                 observation = torch.cat(
                     [
                         # Shape features
-                        self.global_observation.a_chain_sin_dtheta,
-                        self.global_observation.a_chain_cos_dtheta,
-                        self.global_observation.a_chain_bend_speed,
+                        torch.sin(self.global_observation.a_chain_internal_angles),
+                        torch.cos(self.global_observation.a_chain_internal_angles),
+                        self.global_observation.a_chain_internal_angles_speed,
                         # Whole body motion
                         self.global_observation.a_chain_centroid_pos,
                         self.global_observation.a_chain_centroid_vel,
@@ -609,9 +631,9 @@ class SalpDomain(BaseScenario):
                 observation = torch.cat(
                     [
                         # Shape features
-                        self.global_observation.a_chain_sin_dtheta,
-                        self.global_observation.a_chain_cos_dtheta,
-                        self.global_observation.a_chain_bend_speed,
+                        torch.sin(self.global_observation.a_chain_internal_angles),
+                        torch.cos(self.global_observation.a_chain_internal_angles),
+                        self.global_observation.a_chain_internal_angles_speed,
                         # Whole body motion
                         self.global_observation.a_chain_centroid_pos,
                         self.global_observation.a_chain_centroid_vel,
@@ -635,10 +657,39 @@ class SalpDomain(BaseScenario):
                 )
 
             case "local":
+                is_first = agent == self.world.agents[0]
+                is_last = agent == self.world.agents[-1]
+
+                idx = self.world.agents.index(agent)
+
+                neighbor_forces = torch.zeros(
+                    (self.world.batch_dim, 4), dtype=torch.float32, device=self.device
+                )
+                if is_first:
+                    neighbor_forces[:, 2:] = self.global_observation.a_chain_all_forces[
+                        :, 1, :
+                    ]
+                elif is_last:
+                    neighbor_forces[:, :2] = self.global_observation.a_chain_all_forces[
+                        :, -2, :
+                    ]
+
+                else:
+                    neighbor_forces = self.global_observation.a_chain_all_forces[
+                        :, idx - 1 : idx + 2 : 2, :
+                    ].flatten(start_dim=1)
+
                 observation = torch.cat(
                     [
                         a_pos_rel_2_centroid,
                         a_pos_rel_2_t_centroid,
+                        neighbor_forces,
+                        torch.sin(
+                            self.global_observation.a_chain_relative_angles[:, idx, :]
+                        ),
+                        torch.cos(
+                            self.global_observation.a_chain_relative_angles[:, idx, :]
+                        ),
                         agent.state.pos,
                         agent.state.vel,
                         wrap_to_pi(agent.state.rot),
@@ -662,50 +713,79 @@ class SalpDomain(BaseScenario):
             aligned_target_pos = target_pos - target_pos.mean(dim=1, keepdim=True)
 
             total_moment = 0
-            total_force = 0
 
             vels = []
             ang_vels = []
             ang_pos = []
+            forces = []
+            relative_angles = []
 
             for a in self.world.agents:
+
                 r = a.state.pos - a_chain_centroid_pos
                 total_moment += calculate_moment(r, a.state.force)
-                total_force += a.state.force
 
                 vels.append(a.state.vel)
                 ang_vels.append(a.state.ang_vel)
                 ang_pos.append(a.state.rot)
+                forces.append(a.state.force)
+                relative_angles.append(
+                    get_neighbor_angles(
+                        agent_pos, self.world.agents.index(a), self.n_agents
+                    )
+                )
 
             vels = torch.stack(vels).transpose(1, 0)
             ang_vels = torch.stack(ang_vels).transpose(1, 0)
             ang_pos = torch.stack(ang_pos).transpose(1, 0)
+            forces = torch.stack(forces).transpose(1, 0)
+            relative_angles = torch.stack(relative_angles).transpose(1, 0)
 
-            dtheta = internal_angles_xy(agent_pos)
-            bend_speed = bending_speed(dtheta, self.dtheta_prev, dt=self.world.dt)
+            internal_angles, link_angles = internal_angles_xy(agent_pos)
+
+            # Calculate angle derivatives
+            internal_angles_speed = (
+                wrap_to_pi(internal_angles - self.internal_angles_prev) / self.world.dt
+            )
+
+            link_angles_speed = (
+                wrap_to_pi(link_angles - self.link_angles_prev) / self.world.dt
+            )
+
+            relative_angles_speed = (
+                wrap_to_pi(relative_angles - self.relative_angles_prev) / self.world.dt
+            )
 
             # Store previous dtheta
-            self.dtheta_prev = dtheta.clone()
+            self.internal_angles_prev = internal_angles.clone()
+            self.link_angles_prev = link_angles.clone()
+            self.relative_angles_prev = relative_angles.clone()
 
             # Build global observation
             self.global_observation = GlobalObservation(
-                # New obs
-                torch.sin(dtheta),
-                torch.cos(dtheta),
-                bend_speed,
+                # Internal angle data
+                internal_angles,
+                internal_angles_speed,
+                # Link angles
+                link_angles,
+                link_angles_speed,
+                # Relative angles
+                relative_angles,
+                relative_angles_speed,
                 # Raw obs
                 target_pos.flatten(start_dim=1),
                 agent_pos.flatten(start_dim=1),
                 vels.flatten(start_dim=1),
                 ang_pos.flatten(start_dim=1),
                 ang_vels.flatten(start_dim=1),
+                forces,
                 # Condensed obs
                 t_chain_centroid_pos,
                 a_chain_centroid_pos,
                 vels.mean(dim=1),
                 wrap_to_pi(ang_pos.mean(dim=1)),
                 ang_vels.mean(dim=1),
-                total_force,
+                forces.sum(dim=1, keepdim=True),
                 total_moment.unsqueeze(-1),
                 batch_discrete_frechet_distance(
                     aligned_agent_pos, aligned_target_pos
@@ -738,26 +818,6 @@ class SalpDomain(BaseScenario):
     def info(self, agent: Agent) -> Dict[str, Tensor]:
         return {
             "global_reward": (self.global_rew),
-            "global_state": torch.cat(
-                [
-                    # Shape features
-                    self.global_observation.a_chain_sin_dtheta,
-                    self.global_observation.a_chain_cos_dtheta,
-                    self.global_observation.a_chain_bend_speed,
-                    # Whole body motion
-                    self.global_observation.a_chain_centroid_pos,
-                    self.global_observation.a_chain_centroid_vel,
-                    self.global_observation.a_chain_centroid_ang_pos,
-                    self.global_observation.a_chain_centroid_ang_vel,
-                    self.global_observation.total_force,
-                    self.global_observation.total_moment,
-                    # Target features
-                    self.global_observation.frechet_dist,
-                    self.global_observation.t_chain_centroid_pos
-                    - self.global_observation.a_chain_centroid_pos,
-                ],
-                dim=-1,
-            ).float(),
         }
 
     def extra_render(self, env_index: int = 0) -> "List[Geom]":

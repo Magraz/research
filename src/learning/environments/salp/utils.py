@@ -541,8 +541,29 @@ def internal_angles_xy(points: torch.Tensor) -> torch.Tensor:
     phi = torch.atan2(v[..., 1], v[..., 0])
 
     # Δθ_j = wrap(φ_j − φ_{j-1})            shape: (*, N‑2)
-    dtheta = wrap_to_pi(phi[..., 1:] - phi[..., :-1])
-    return dtheta
+    internal_angles = wrap_to_pi(phi[..., 1:] - phi[..., :-1])
+    return internal_angles, phi
+
+
+def get_neighbor_angles(
+    positions: torch.Tensor, idx: int, n_agents: int
+) -> torch.Tensor:
+
+    if idx == 0:
+        v = torch.zeros_like(positions[:, 0, :])
+        v = torch.stack([v, positions[:, idx + 1, :] - positions[:, idx, :]], dim=1)
+    elif idx == (n_agents - 1):
+        v = positions[:, idx - 1, :] - positions[:, idx, :]
+        v = torch.stack([v, torch.zeros_like(v)], dim=1)
+    else:
+        v = (
+            positions[:, idx - 1 : idx + 2 : 2, :] - positions[:, [idx], :]
+        )  # brackets on idx preserve dimension after index
+
+    # headings φ_i = atan2(v_y, v_x)        shape: (*, N‑1)
+    angles = torch.atan2(v[..., 1], v[..., 0])
+
+    return angles
 
 
 def internal_angles_yaw(yaw: torch.Tensor) -> torch.Tensor:

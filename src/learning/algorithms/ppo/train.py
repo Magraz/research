@@ -44,21 +44,46 @@ class PPO_Trainer:
         self,
         state: list,
         representation: str,
+        model: str,
     ):
-        match (representation):
-            case "global":
-                return state[0]
+        match (model):
+            case "mlp":
+                match (representation):
+                    case "global":
+                        return state[0]
 
-            case "local":
-                # Need state to be in the shape (n_env, agent, state_dim)
-                state = torch.stack(state).transpose(1, 0)
-                return state
-            case _:
-                # Need state to be in the shape (n_env, agent, state_dim)
-                state = torch.stack(state).transpose(1, 0).flatten(start_dim=1)
-                return state
+                    case "local":
+                        # Need state to be in the shape (n_env, agent, state_dim)
+                        state = torch.stack(state).transpose(1, 0).flatten(start_dim=1)
+
+                        return state
+
+            case "transformer":
+                match (representation):
+                    case "local":
+                        # Need state to be in the shape (n_env, agent, state_dim)
+                        state = torch.stack(state).transpose(1, 0)
+                        return state
 
         return state
+
+    def get_state_dim(
+        self, obs_shape, state_representation: str, model: str, n_agents: int
+    ):
+
+        match (model):
+            case "mlp":
+                match (state_representation):
+                    case "global":
+                        return obs_shape
+
+                    case "local":
+                        return obs_shape * n_agents
+
+            case "transformer":
+                match (state_representation):
+                    case "local":
+                        return obs_shape
 
     def train(
         self,
@@ -86,13 +111,12 @@ class PPO_Trainer:
 
         n_agents = env_config.n_agents
         d_action = env.action_space.spaces[0].shape[0]
-
-        # Check state representation
-        match (env_config.state_representation):
-            case "global" | "local":
-                d_state = env.observation_space.spaces[0].shape[0]
-            case _:
-                d_state = env.observation_space.spaces[0].shape[0] * n_agents
+        d_state = self.get_state_dim(
+            env.observation_space.spaces[0].shape[0],
+            env_config.state_representation,
+            exp_config.model,
+            n_agents,
+        )
 
         # Create learner object
         learner = PPO(
@@ -109,7 +133,7 @@ class PPO_Trainer:
         step = 0
         total_episodes = 0
         max_episodes_per_rollout = 10
-        max_steps_per_episode = params.n_steps // max_episodes_per_rollout
+        max_steps_per_episode = params.batch_size // max_episodes_per_rollout
         rmax = -1e6
         running_avg_reward = 0
         iterations = 0
@@ -131,7 +155,7 @@ class PPO_Trainer:
 
             state = env.reset()
 
-            for _ in range(0, params.n_steps):
+            for _ in range(0, params.batch_size):
 
                 # Clamp because actions are stochastic and can lead to them been out of -1 to 1 range
                 actions_per_env = torch.clamp(
@@ -139,6 +163,7 @@ class PPO_Trainer:
                         self.process_state(
                             state,
                             env_config.state_representation,
+                            exp_config.model,
                         )
                     ),
                     min=-1.0,
@@ -266,6 +291,7 @@ class PPO_Trainer:
                     self.process_state(
                         state,
                         env_config.state_representation,
+                        exp_config.model,
                     )
                 )
 

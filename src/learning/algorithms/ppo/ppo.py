@@ -4,6 +4,9 @@ from torch.utils.data import Dataset, DataLoader
 
 from learning.algorithms.ppo.types import Params
 
+# Useful for error tracing
+torch.autograd.set_detect_anomaly(True)
+
 
 class RolloutBuffer:
     def __init__(self):
@@ -65,6 +68,8 @@ class PPO:
 
         self.device = device
         self.n_envs = n_envs
+        self.n_agents = n_agents
+        self.d_action = d_action
         self.buffer = RolloutBuffer()
 
         # Algorithm parameters
@@ -167,10 +172,9 @@ class PPO:
 
     def bootstrap_episodes(self):
         # Bootstrap episodes by calculating the value of the final state if not terminated
-        with torch.no_grad():
-            final_values = self.policy_old.critic(
-                self.buffer.states[-1].flatten(start_dim=1)
-            ) * ~self.buffer.is_terminals[-1].unsqueeze(-1)
+        final_values = self.policy_old.get_value(
+            self.buffer.states[-1]
+        ) * ~self.buffer.is_terminals[-1].unsqueeze(-1)
 
         bootstrapped_values = self.buffer.state_values.copy()
         bootstrapped_values.append(final_values)
@@ -271,7 +275,10 @@ class PPO:
 
                 # Penalize high values of log_std by increasing the loss, thus decreasing exploration
                 log_std_penalty = (
-                    self.std_coef * self.policy.log_action_std.square().mean()
+                    self.std_coef
+                    * self.policy.log_action_std[: self.n_agents * self.d_action]
+                    .square()
+                    .mean()
                 )
 
                 # Promote exploration by reducing the loss if entropy increases
