@@ -63,6 +63,7 @@ class ActorCritic(nn.Module):
         n_encoder_layers: int = 1,
         n_decoder_layers: int = 1,
         train_max_agents: int = 16,
+        autoregress: bool = False,
     ):
         super(ActorCritic, self).__init__()
 
@@ -71,6 +72,7 @@ class ActorCritic(nn.Module):
         self.n_agents = n_agents
         self.device = device
         self.d_action = d_action
+        self.autoregress = autoregress
 
         # LAYERS
         self.log_action_std = nn.Parameter(
@@ -158,14 +160,14 @@ class ActorCritic(nn.Module):
             action_means.append(self.out(decoder_out[:, [-1], :]))
         return torch.cat(action_means, dim=1)
 
-    def act(self, state, deterministic=False, auto_regress=True):
+    def act(self, state, deterministic=False):
 
         embedded_state = self.state_embedding(state)
         embedded_state = self.positional_encoder(embedded_state)
 
         encoder_out = self.enc(embedded_state)
 
-        if auto_regress:
+        if self.autoregress:
             action_mean = self.auto_regress(encoder_out)
         else:
             decoder_out = self.dec(
@@ -195,14 +197,14 @@ class ActorCritic(nn.Module):
             state_val.detach(),
         )
 
-    def evaluate(self, state, action, causal=True):
+    def evaluate(self, state, action):
 
         embedded_state = self.state_embedding(state)
         embedded_state = self.positional_encoder(embedded_state)
 
         encoder_out = self.enc(embedded_state)
 
-        if causal:
+        if self.autoregress:
             embedded_action = self.action_embedding(
                 action.reshape(
                     action.shape[0],
