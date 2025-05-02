@@ -137,7 +137,16 @@ class PPO_Trainer:
 
         # Load checkpoint
         if self.checkpoint:
-            learner.load(self.models_dir / "checkpoint")
+            checkpoint_path = self.models_dir / "checkpoint"
+            if checkpoint_path.is_file():
+                learner.load(checkpoint_path)
+
+            # Load data
+            with open(self.models_dir / "data.dat", "rb") as f:
+                data = pkl.load(data)
+        else:
+            # Start with empty data
+            data = []
 
         # Setup loop variables
         step = 0
@@ -147,7 +156,6 @@ class PPO_Trainer:
         rmax = -1e6
         running_avg_reward = 0
         iterations = 0
-        data = []
         checkpoint_step = 0
 
         # Log start time
