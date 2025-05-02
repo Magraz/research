@@ -135,15 +135,15 @@ class PPO_Trainer:
             d_action,
         )
 
-        # Load checkpoint
+        # Checkpoint loading logic
         if self.checkpoint:
             checkpoint_path = self.models_dir / "checkpoint"
             if checkpoint_path.is_file():
+                # Load checkpoint
                 learner.load(checkpoint_path)
-
-            # Load data
-            with open(self.models_dir / "data.dat", "rb") as f:
-                data = pkl.load(data)
+                # Load data
+                with open(self.models_dir / "data.dat", "rb") as f:
+                    data = pkl.load(data)
         else:
             # Start with empty data
             data = []
