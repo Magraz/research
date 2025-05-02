@@ -487,9 +487,11 @@ class SalpDomain(BaseScenario):
             # Calculate shaping terms
             agent_pos = self.get_agent_chain_position()
             target_pos = self.get_target_chain_position()
-            f_dist, f_rew = self.calculate_frechet_reward(
+
+            f_dist, _ = self.calculate_frechet_reward(
                 agent_pos, target_pos, aligned=True
             )
+            _, f_rew = self.calculate_frechet_reward(agent_pos, target_pos)
             frechet_shaping = f_dist * self.frechet_shaping_factor
             self.frechet_rew += frechet_shaping - self.frechet_shaping
             self.frechet_shaping = frechet_shaping
