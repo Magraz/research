@@ -24,6 +24,7 @@ class PPO_Trainer:
         trial_id: int,
         trial_name: str,
         video_name: str,
+        checkpoint: bool,
     ):
         # Directories
         self.device = device
@@ -39,6 +40,9 @@ class PPO_Trainer:
 
         # Create directories
         self.models_dir.mkdir(parents=True, exist_ok=True)
+
+        # Checkpoint loading
+        self.checkpoint = checkpoint
 
     def process_state(
         self,
@@ -101,15 +105,17 @@ class PPO_Trainer:
         torch.cuda.manual_seed(params.random_seed)
 
         n_envs = env_config.n_envs
+        n_agents = env_config.n_agents
+
         env = create_env(
             self.batch_dir,
             n_envs,
+            n_agents=n_agents,
             device=self.device,
             env_name=env_config.environment,
             seed=params.random_seed,
         )
 
-        n_agents = env_config.n_agents
         d_action = env.action_space.spaces[0].shape[0]
         d_state = self.get_state_dim(
             env.observation_space.spaces[0].shape[0],
@@ -129,6 +135,10 @@ class PPO_Trainer:
             d_action,
         )
 
+        # Load checkpoint
+        if self.checkpoint:
+            learner.load(self.models_dir / "checkpoint")
+
         # Setup loop variables
         step = 0
         total_episodes = 0
@@ -138,6 +148,7 @@ class PPO_Trainer:
         running_avg_reward = 0
         iterations = 0
         data = []
+        checkpoint_step = 0
 
         # Log start time
         start_time = time.time()
@@ -234,8 +245,9 @@ class PPO_Trainer:
                 rmax = running_avg_reward
                 learner.save(self.models_dir / "best_model")
 
-            # if step % 10000 == 0:
-            #     learner.save(self.models_dir / f"checkpoint_{step}")
+            if step - checkpoint_step >= 10000:
+                learner.save(self.models_dir / "checkpoint")
+                checkpoint_step = step
 
             with open(self.models_dir / "data.dat", "wb") as f:
                 pkl.dump(data, f)
@@ -248,22 +260,28 @@ class PPO_Trainer:
 
         params = Params(**exp_config.params)
 
+        # Override training agent count
+        # n_agents = 4
+        # env_config.n_agents = n_agents
+
+        n_agents = env_config.n_agents
+
         env = create_env(
             self.batch_dir,
             1,
             device=self.device,
             env_name=env_config.environment,
+            n_agents=n_agents,
             seed=params.random_seed,
         )
 
-        n_agents = env_config.n_agents
         d_action = env.action_space.spaces[0].shape[0]
-        # Check state representation
-        match (env_config.state_representation):
-            case "global" | "local":
-                d_state = env.observation_space.spaces[0].shape[0]
-            case _:
-                d_state = env.observation_space.spaces[0].shape[0] * n_agents
+        d_state = self.get_state_dim(
+            env.observation_space.spaces[0].shape[0],
+            env_config.state_representation,
+            exp_config.model,
+            n_agents,
+        )
 
         learner = PPO(
             self.device,
@@ -278,7 +296,7 @@ class PPO_Trainer:
 
         frame_list = []
 
-        n_rollouts = 10
+        n_rollouts = 5
 
         for i in range(n_rollouts):
             done = False
@@ -322,7 +340,5 @@ class PPO_Trainer:
                     break
 
             print(f"TOTAL RETURN: {R}")
-            # print(f"MAX {max(r)}")
-            # print(f"MIN {min(r)}")
 
         save_video(self.video_name, frame_list, fps=1 / env.scenario.world.dt)

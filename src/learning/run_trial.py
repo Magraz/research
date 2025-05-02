@@ -39,6 +39,12 @@ if __name__ == "__main__":
         help="Runs view method instead of train",
     )
 
+    parser.add_argument(
+        "--checkpoint",
+        action="store_true",
+        help="Load model checkpointfor training",
+    )
+
     parser.add_argument("--trial_id", default="0", help="Sets trial ID", type=str)
 
     args = vars(parser.parse_args())
@@ -58,4 +64,5 @@ if __name__ == "__main__":
         algorithm=args["algorithm"],
         environment=args["environment"],
         train=not args["view"],
+        checkpoint=args["checkpoint"],
     )

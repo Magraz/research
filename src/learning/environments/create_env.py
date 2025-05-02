@@ -12,7 +12,12 @@ from learning.environments.types import EnvironmentEnum
 
 
 def create_env(
-    batch_dir, n_envs: int, device: str, env_name: str, seed: int, **kwargs
+    batch_dir,
+    n_envs: int,
+    device: str,
+    env_name: str,
+    seed: int,
+    **kwargs,
 ) -> Environment:
 
     env_file = os.path.join(batch_dir, "_env.yaml")
@@ -84,7 +89,7 @@ def create_env(
                 "x_semidim": env_config["map_size"][0],
                 "y_semidim": env_config["map_size"][1],
                 # Agent data
-                "n_agents": env_config["n_agents"],
+                "n_agents": kwargs.get("n_agents", 1),
                 "state_representation": env_config["state_representation"],
                 # POIs data
                 "n_targets": 1,

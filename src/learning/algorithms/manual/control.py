@@ -40,7 +40,8 @@ class ManualControl:
             n_envs,
             device=self.device,
             env_name=env_config.environment,
-            seed=118,
+            seed=118 + 1,
+            n_agents=n_agents,
         )
 
         mc = manual_control(n_agents)

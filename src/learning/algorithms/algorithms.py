@@ -29,6 +29,7 @@ def run_algorithm(
     environment: str,
     trial_id: str,
     train: bool,
+    checkpoint: bool,
 ):
 
     env_file = batch_dir / "_env.yaml"
@@ -97,6 +98,7 @@ def run_algorithm(
                 trial_id=trial_id,
                 trial_name=Path(exp_file).stem,
                 video_name=f"{experiment_name}_{trial_id}",
+                checkpoint=checkpoint,
             )
 
         case AlgorithmEnum.TD3:

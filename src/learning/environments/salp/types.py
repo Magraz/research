@@ -19,6 +19,9 @@ class Agent:
 
 @dataclass(frozen=True)
 class GlobalObservation:
+    # Menger_curvature
+    curvature: torch.Tensor
+
     # Internal angles
     a_chain_internal_angles: torch.Tensor
     a_chain_internal_angles_speed: torch.Tensor

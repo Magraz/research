@@ -142,12 +142,23 @@ class ActorCritic(nn.Module):
         tgt = self.special_token_embedding(
             torch.tensor(SpecialTokens.SOS.value, device=self.device)
         )
+        action_means = []
         tgt = tgt.view(1, 1, self.d_model).repeat(batch_dim, 1, 1)
         for idx in range(self.n_agents):
-            decoder_out = self.dec(tgt, memory=encoder_out)
-            tgt = torch.cat([tgt, decoder_out], dim=1)
+            decoder_out = self.dec(
+                tgt,
+                memory=encoder_out,
+                tgt_mask=nn.Transformer.generate_square_subsequent_mask(
+                    encoder_out.shape[1], device=self.device
+                ),
+                tgt_is_causal=True,
+            )
+            tgt = torch.cat([tgt, decoder_out[:, [-1], :]], dim=1)
+            tgt = self.positional_encoder(tgt)
+            action_means.append(self.out(decoder_out[:, [-1], :]))
+        return torch.cat(action_means, dim=1)
 
-    def act(self, state, deterministic=False, auto_regress=False):
+    def act(self, state, deterministic=False, auto_regress=True):
 
         embedded_state = self.state_embedding(state)
         embedded_state = self.positional_encoder(embedded_state)
@@ -155,14 +166,14 @@ class ActorCritic(nn.Module):
         encoder_out = self.enc(embedded_state)
 
         if auto_regress:
-            action_mean = self.auto_regress(self, encoder_out)
+            action_mean = self.auto_regress(encoder_out)
         else:
             decoder_out = self.dec(
                 tgt=encoder_out.clone().detach(),
                 memory=encoder_out,
             )
 
-        action_mean = self.out(decoder_out)
+            action_mean = self.out(decoder_out)
 
         if deterministic:
             return action_mean.flatten(start_dim=1).detach()
@@ -184,7 +195,7 @@ class ActorCritic(nn.Module):
             state_val.detach(),
         )
 
-    def evaluate(self, state, action, causal=False):
+    def evaluate(self, state, action, causal=True):
 
         embedded_state = self.state_embedding(state)
         embedded_state = self.positional_encoder(embedded_state)
@@ -192,8 +203,16 @@ class ActorCritic(nn.Module):
         encoder_out = self.enc(embedded_state)
 
         if causal:
+            embedded_action = self.action_embedding(
+                action.reshape(
+                    action.shape[0],
+                    self.n_agents,
+                    self.d_action,
+                )
+            )
+            embedded_action = self.positional_encoder(embedded_action)
             decoder_out = self.dec(
-                tgt=encoder_out.clone().detach(),
+                tgt=embedded_action,
                 memory=encoder_out,
                 tgt_mask=nn.Transformer.generate_square_subsequent_mask(
                     encoder_out.shape[1], device=self.device
@@ -226,7 +245,7 @@ if __name__ == "__main__":
 
     model = ActorCritic(
         n_agents=4,
-        d_state=10,
+        d_state=18,
         d_action=2 * 4,
         device=device,
     ).to(device)
