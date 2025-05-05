@@ -5,9 +5,9 @@ from dataclasses import asdict
 
 # EXPERIMENT SETTINGS
 ENVIRONMENT = EnvironmentEnum.VMAS_SALP
-BATCH_NAME = f"{ENVIRONMENT}_global_8a"
-EXPERIMENT_NAME = f"mlp"
-DEVICE = "cpu"
+BATCH_NAME = f"{ENVIRONMENT}_local_4a"
+EXPERIMENT_NAME = f"transformer"
+DEVICE = "cuda"
 
 # EXPERIMENTS
 experiment = Experiment(
@@ -15,7 +15,7 @@ experiment = Experiment(
     model=EXPERIMENT_NAME,
     params=Params(
         n_epochs=10,
-        n_total_steps=1e8,
+        n_total_steps=1e12,
         batch_size=5120,
         minibatch_size=128,
         eps_clip=0.2,

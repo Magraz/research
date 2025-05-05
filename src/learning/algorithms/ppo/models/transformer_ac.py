@@ -58,11 +58,11 @@ class ActorCritic(nn.Module):
         d_action: int,
         device: str,
         # Model specific
-        d_model: int = 64,
-        n_heads: int = 1,
+        d_model: int = 32,
+        n_heads: int = 2,
         n_encoder_layers: int = 1,
         n_decoder_layers: int = 1,
-        train_max_agents: int = 16,
+        train_max_agents: int = 24,
         autoregress: bool = False,
     ):
         super(ActorCritic, self).__init__()
@@ -73,6 +73,8 @@ class ActorCritic(nn.Module):
         self.device = device
         self.d_action = d_action
         self.autoregress = autoregress
+
+        train_max_agents = n_agents  # comment if training with varying number of agents
 
         # LAYERS
         self.log_action_std = nn.Parameter(
@@ -222,7 +224,7 @@ class ActorCritic(nn.Module):
                 tgt_is_causal=True,
             )
         else:
-            decoder_out = self.dec(encoder_out.clone().detach(), memory=encoder_out)
+            decoder_out = self.dec(encoder_out, memory=encoder_out)
 
         action_mean = self.out(decoder_out)
 
@@ -246,9 +248,9 @@ if __name__ == "__main__":
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     model = ActorCritic(
-        n_agents=4,
+        n_agents=8,
         d_state=18,
-        d_action=2 * 4,
+        d_action=2,
         device=device,
     ).to(device)
 
