@@ -40,7 +40,7 @@ class ManualControl:
             n_envs,
             device=self.device,
             env_name=env_config.environment,
-            seed=118 + 1,
+            seed=118,
             n_agents=n_agents,
         )
 
