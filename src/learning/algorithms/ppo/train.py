@@ -21,7 +21,7 @@ class PPO_Trainer:
         device: str,
         batch_dir: Path,
         trials_dir: Path,
-        trial_id: int,
+        trial_id: str,
         trial_name: str,
         video_name: str,
         checkpoint: bool,
@@ -29,12 +29,9 @@ class PPO_Trainer:
         # Directories
         self.device = device
         self.batch_dir = batch_dir
-        self.trials_dir = trials_dir
         self.trial_name = trial_name
-        self.trial_id = trial_id
         self.video_name = video_name
-        self.trial_folder_name = "_".join(("trial", str(self.trial_id)))
-        self.trial_dir = self.trials_dir / self.trial_folder_name
+        self.trial_dir = trials_dir / trial_id
         self.logs_dir = self.trial_dir / "logs"
         self.models_dir = self.trial_dir / "models"
 
