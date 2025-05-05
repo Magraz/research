@@ -94,7 +94,7 @@ class ActorCritic(nn.Module):
 
         # Encoder Params
         encoder_layer = nn.TransformerEncoderLayer(
-            d_model, n_heads, batch_first=True, norm_first=True
+            d_model, n_heads, batch_first=True, norm_first=True, dim_feedforward=1024
         )
         self.enc = nn.TransformerEncoder(
             encoder_layer, n_encoder_layers, enable_nested_tensor=False
@@ -102,7 +102,7 @@ class ActorCritic(nn.Module):
 
         # Decoder Params
         decoder_layer = nn.TransformerDecoderLayer(
-            d_model, n_heads, batch_first=True, norm_first=True
+            d_model, n_heads, batch_first=True, norm_first=True, dim_feedforward=1024
         )
         self.dec = nn.TransformerDecoder(decoder_layer, n_decoder_layers)
 
