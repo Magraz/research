@@ -96,7 +96,6 @@ def run_algorithm(
                 / batch_name
                 / experiment_name,
                 trial_id=trial_id,
-                trial_name=Path(exp_file).stem,
                 video_name=f"{experiment_name}_{trial_id}",
                 checkpoint=checkpoint,
             )

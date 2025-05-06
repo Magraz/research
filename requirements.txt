@@ -1,10 +1,11 @@
 torch
 numpy
 matplotlib
+tensorboard
+notebook
 deap
 pynput
 opencv-python
 PyYAML
 nbconvert
 PyAV
-torchvision

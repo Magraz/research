@@ -1,6 +1,7 @@
 import os
 import torch
 import numpy as np
+from torch.utils.tensorboard import SummaryWriter
 
 from learning.environments.types import EnvironmentParams
 from learning.environments.create_env import create_env
@@ -22,14 +23,12 @@ class PPO_Trainer:
         batch_dir: Path,
         trials_dir: Path,
         trial_id: str,
-        trial_name: str,
         video_name: str,
         checkpoint: bool,
     ):
         # Directories
         self.device = device
         self.batch_dir = batch_dir
-        self.trial_name = trial_name
         self.video_name = video_name
         self.trial_dir = trials_dir / trial_id
         self.logs_dir = self.trial_dir / "logs"
@@ -37,6 +36,7 @@ class PPO_Trainer:
 
         # Create directories
         self.models_dir.mkdir(parents=True, exist_ok=True)
+        self.logs_dir.mkdir(parents=True, exist_ok=True)
 
         # Checkpoint loading
         self.checkpoint = checkpoint
@@ -91,6 +91,8 @@ class PPO_Trainer:
         exp_config: Experiment,
         env_config: EnvironmentParams,
     ):
+        # Set logger
+        self.writer = SummaryWriter(self.logs_dir)
 
         # Set params
         params = Params(**exp_config.params)
@@ -101,9 +103,9 @@ class PPO_Trainer:
         torch.manual_seed(params.random_seed)
         torch.cuda.manual_seed(params.random_seed)
 
+        # Create environment
         n_envs = env_config.n_envs
         n_agents = env_config.n_agents
-
         env = create_env(
             self.batch_dir,
             n_envs,
@@ -113,6 +115,7 @@ class PPO_Trainer:
             seed=params.random_seed,
         )
 
+        # Set state and action dimensions
         d_action = env.action_space.spaces[0].shape[0]
         d_state = self.get_state_dim(
             env.observation_space.spaces[0].shape[0],
@@ -126,6 +129,7 @@ class PPO_Trainer:
             self.device,
             exp_config.model,
             params,
+            self.writer,
             n_agents,
             n_envs,
             d_state,
@@ -250,16 +254,27 @@ class PPO_Trainer:
                 rmax = running_avg_reward
                 learner.save(self.models_dir / "best_model")
 
+            # Store checkpoint
             if step - checkpoint_step >= 10000:
                 learner.save(self.models_dir / "checkpoint")
                 checkpoint_step = step
 
+            # Store reward per episode data
             with open(self.models_dir / "data.dat", "wb") as f:
                 pkl.dump(data, f)
 
             learner.update()
 
+            # Log reward data with tensorboard
+            if self.writer is not None:
+                for reward in data:
+                    self.writer.add_scalar(
+                        "Agent/rewards_per_episode", reward, total_episodes
+                    )
+
             iterations += 1
+
+        self.writer.close()
 
     def view(self, exp_config: Experiment, env_config: EnvironmentParams):
 
@@ -292,6 +307,7 @@ class PPO_Trainer:
             self.device,
             exp_config.model,
             params,
+            None,
             n_agents,
             1,
             d_state,

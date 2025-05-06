@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
+from torch.utils.tensorboard import SummaryWriter
 
 from learning.algorithms.ppo.types import Params
 
@@ -60,13 +61,14 @@ class PPO:
         device: str,
         model: str,
         params: Params,
+        writer: SummaryWriter,
         n_agents: int,
         n_envs: int,
         d_state: int,
         d_action: int,
     ):
-
         self.device = device
+        self.writer = writer
         self.n_envs = n_envs
         self.n_agents = n_agents
         self.d_action = d_action
@@ -119,6 +121,9 @@ class PPO:
 
         # Create loss function
         self.loss_fn = nn.MSELoss()
+
+        # Logging params
+        self.total_epochs = 0
 
     def select_action(self, state: torch.Tensor):
         with torch.no_grad():
@@ -304,10 +309,33 @@ class PPO:
                 )
                 self.opt_critic.step()
 
+                # Store data
+                if self.writer is not None:
+                    self.writer.add_scalar(
+                        "Agent/actor_loss", actor_loss.item(), self.total_epochs
+                    )
+                    self.writer.add_scalar(
+                        "Agent/critic_loss", critic_loss.item(), self.total_epochs
+                    )
+                    self.writer.add_scalar(
+                        "Agent/entropy", dist_entropy.mean().item(), self.total_epochs
+                    )
+                    self.writer.add_scalar(
+                        "Agent/log_prob", logprobs.mean().item(), self.total_epochs
+                    )
+                    self.writer.add_scalar(
+                        "Agent/log_action_std",
+                        self.policy.log_action_std[: self.n_agents * self.d_action]
+                        .mean()
+                        .item(),
+                        self.total_epochs,
+                    )
+                    self.total_epochs += 1
+
         # Copy new weights into old policy
         self.policy_old.load_state_dict(self.policy.state_dict())
 
-        # clear buffer
+        # Clear buffer
         self.buffer.clear()
 
     def save(self, checkpoint_path):
