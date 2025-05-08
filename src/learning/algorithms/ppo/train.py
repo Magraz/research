@@ -129,6 +129,7 @@ class PPO_Trainer:
             exp_config.model,
             params,
             self.writer,
+            self.checkpoint,
             n_agents,
             n_envs,
             d_state,

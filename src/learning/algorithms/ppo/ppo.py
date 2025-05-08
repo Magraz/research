@@ -5,6 +5,8 @@ from torch.utils.tensorboard import SummaryWriter
 import torch.nn.functional as F
 from learning.algorithms.ppo.types import Params
 
+import dill
+
 # Useful for error tracing
 torch.autograd.set_detect_anomaly(True)
 
@@ -65,6 +67,7 @@ class PPO:
         model: str,
         params: Params,
         writer: SummaryWriter,
+        checkpoint: bool,
         n_agents: int,
         n_envs: int,
         d_state: int,
@@ -72,6 +75,7 @@ class PPO:
     ):
         self.device = device
         self.writer = writer
+        self.checkpoint = checkpoint
         self.n_envs = n_envs
         self.n_agents = n_agents
         self.d_action = d_action
@@ -120,7 +124,14 @@ class PPO:
         )
 
         # Logging params
+        self.tensorboard_log_path = self.writer.log_dir / "tensorboard.dat"
         self.total_epochs = 0
+
+        if self.checkpoint:
+            # Load epoch count
+            if self.tensorboard_log_path.is_file():
+                with open(self.tensorboard_log_path, "rb") as file:
+                    self.total_epochs = dill.load(file)["total_epochs"]
 
     def calc_value_loss(self, values, value_preds_batch, return_batch):
         """
@@ -372,7 +383,13 @@ class PPO:
                         .item(),
                         self.total_epochs,
                     )
+
                     self.total_epochs += 1
+
+                    # Store epoch count
+                    with open(self.tensorboard_log_path, "wb") as f:
+                        log_data_dict = {"total_epochs": self.total_epochs}
+                        dill.dump(log_data_dict, f)
 
         # Load model back to cpu to collect rollouts
         self.policy.to("cpu")
