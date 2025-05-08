@@ -9,6 +9,7 @@ from learning.algorithms.ppo.types import Experiment, Params
 from learning.algorithms.ppo.ppo import PPO
 
 import pickle as pkl
+import dill
 from pathlib import Path
 import random
 import time
@@ -54,7 +55,6 @@ class PPO_Trainer:
                         return state[0]
 
                     case "local":
-                        # Need state to be in the shape (n_env, agent, state_dim)
                         state = torch.stack(state).transpose(1, 0).flatten(start_dim=1)
 
                         return state
@@ -62,7 +62,6 @@ class PPO_Trainer:
             case "transformer":
                 match (representation):
                     case "local":
-                        # Need state to be in the shape (n_env, agent, state_dim)
                         state = torch.stack(state).transpose(1, 0)
                         return state
 
@@ -145,9 +144,14 @@ class PPO_Trainer:
             if checkpoint_path.is_file():
                 # Load checkpoint
                 learner.load(checkpoint_path)
+
                 # Load data
-                with open(self.models_dir / "data.dat", "rb") as f:
-                    data = pkl.load(data)
+                with open(self.logs_dir / "data.dat", "rb") as data_file:
+                    data = dill.load(data_file)
+
+                # Load env up to checkpoint
+                with open(self.models_dir / "env.dat", "rb") as env_file:
+                    env = dill.load(env_file)
 
         # Setup loop variables
         step = 0
@@ -256,13 +260,22 @@ class PPO_Trainer:
 
             # Store checkpoint
             if step - checkpoint_step >= 10000:
+                # Save model
                 learner.save(self.models_dir / "checkpoint")
+
+                # Store reward per episode data
+                with open(self.logs_dir / "data.dat", "wb") as f:
+                    dill.dump(data, f)
+
+                # Store environment
+                with open(self.models_dir / "env.dat", "wb") as f:
+                    dill.dump(env, f)
+
                 checkpoint_step = step
 
-            # Store reward per episode data
-            with open(self.models_dir / "data.dat", "wb") as f:
-                pkl.dump(data, f)
+                print("CHECKPOINT SAVED")
 
+            # Do training step
             learner.update()
 
             # Log reward data with tensorboard

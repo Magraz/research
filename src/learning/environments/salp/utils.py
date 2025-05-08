@@ -618,3 +618,19 @@ def centre_and_rotate(points, goal_points):
     #     R = Vt.transpose(2, 1) @ U.transpose(2, 1)
     # P_aligned = (R @ P.transpose(2, 1)).transpose(2, 1)
     return P, G  # curves centred & best-rotated
+
+
+def one_hot_encode(id: int, num_classes: int) -> torch.Tensor:
+    """
+    Returns a one-hot encoded tensor for a given ID.
+
+    Args:
+        id (int): The class index to encode.
+        num_classes (int): The total number of classes.
+
+    Returns:
+        torch.Tensor: A one-hot encoded 1D tensor of shape (num_classes,)
+    """
+    one_hot = torch.zeros(num_classes)
+    one_hot[id] = 1.0
+    return one_hot

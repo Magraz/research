@@ -58,7 +58,7 @@ class ActorCritic(nn.Module):
         d_action: int,
         device: str,
         # Model specific
-        d_model: int = 32,
+        d_model: int = 64,
         n_heads: int = 2,
         n_encoder_layers: int = 1,
         n_decoder_layers: int = 1,
@@ -78,7 +78,7 @@ class ActorCritic(nn.Module):
 
         # LAYERS
         self.log_action_std = nn.Parameter(
-            torch.zeros(d_action * train_max_agents, requires_grad=True, device=device)
+            torch.ones(d_action * train_max_agents, requires_grad=True, device=device)
         )
 
         self.positional_encoder = PositionalEncoding(
@@ -89,8 +89,15 @@ class ActorCritic(nn.Module):
             len(SpecialTokens), d_model, padding_idx=0
         )
 
-        self.state_embedding = nn.Linear(d_state, d_model, bias=False)
-        self.action_embedding = nn.Linear(d_action, d_model, bias=False)
+        self.layer_norm = nn.LayerNorm(d_model)
+
+        self.state_embedding = nn.Sequential(
+            nn.LayerNorm(d_state), nn.Linear(d_state, d_model), nn.GELU()
+        )
+
+        self.action_embedding = nn.Sequential(
+            nn.LayerNorm(d_action), nn.Linear(d_action, d_model), nn.GELU()
+        )
 
         # Encoder Params
         encoder_layer = nn.TransformerEncoderLayer(
@@ -111,23 +118,11 @@ class ActorCritic(nn.Module):
             nn.Tanh(),
         )
 
-        # Actor
-        self.actor_params = (
-            list(self.special_token_embedding.parameters())
-            + list(self.state_embedding.parameters())
-            + list(self.action_embedding.parameters())
-            + list(self.positional_encoder.parameters())
-            + list(self.enc.parameters())
-            + list(self.dec.parameters())
-            + list(self.out.parameters())
-        )
-
         # Critic
         self.critic = nn.Sequential(
             nn.Linear(d_model, 128),
-            nn.LeakyReLU(),
-            nn.Linear(128, 128),
-            nn.LeakyReLU(),
+            nn.GELU(),
+            nn.LayerNorm(128),
             nn.Linear(128, 1),
         )
 
@@ -137,7 +132,7 @@ class ActorCritic(nn.Module):
     def get_value(self, state: torch.Tensor):
         with torch.no_grad():
             embedded_state = self.state_embedding(state)
-            embedded_state = self.positional_encoder(embedded_state)
+            # embedded_state = self.positional_encoder(embedded_state)
             encoder_out = self.enc(embedded_state)
             return self.critic(encoder_out[:, 0])
 
@@ -165,7 +160,7 @@ class ActorCritic(nn.Module):
     def act(self, state, deterministic=False):
 
         embedded_state = self.state_embedding(state)
-        embedded_state = self.positional_encoder(embedded_state)
+        # embedded_state = self.positional_encoder(embedded_state)
 
         encoder_out = self.enc(embedded_state)
 
@@ -202,7 +197,7 @@ class ActorCritic(nn.Module):
     def evaluate(self, state, action):
 
         embedded_state = self.state_embedding(state)
-        embedded_state = self.positional_encoder(embedded_state)
+        # embedded_state = self.positional_encoder(embedded_state)
 
         encoder_out = self.enc(embedded_state)
 
@@ -237,9 +232,7 @@ class ActorCritic(nn.Module):
         dist_entropy = torch.sum(dist.entropy(), dim=-1, keepdim=True)
         action_logprob = torch.sum(dist.log_prob(action), dim=-1, keepdim=True)
 
-        state_values = self.critic(
-            encoder_out[:, 0].detach()
-        )  # Detach is important otherwise i get backprop error
+        state_values = self.critic(encoder_out[:, 0])
 
         return action_logprob, state_values, dist_entropy
 

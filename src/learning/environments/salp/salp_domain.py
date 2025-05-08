@@ -31,6 +31,7 @@ from learning.environments.salp.utils import (
     menger_curvature,
     centre_and_rotate,
     get_neighbor_angles,
+    one_hot_encode,
 )
 from learning.environments.salp.types import Chain, GlobalObservation
 import random
@@ -53,6 +54,7 @@ class SalpDomain(BaseScenario):
         self.u_multiplier = 1.0
         self.target_radius = self.agent_radius / 2
         self.frechet_thresh = 0.95
+        self.max_n_agents = 24
 
         # Environment
         self.x_semidim = kwargs.pop("x_semidim", 1)
@@ -621,6 +623,12 @@ class SalpDomain(BaseScenario):
 
                 idx = self.world.agents.index(agent)
 
+                one_hot_encoded_idx = torch.zeros(
+                    (self.world.batch_dim, self.max_n_agents),
+                    dtype=torch.float32,
+                    device=self.device,
+                ) + one_hot_encode(idx, self.max_n_agents)
+
                 neighbor_forces = torch.zeros(
                     (self.world.batch_dim, 4), dtype=torch.float32, device=self.device
                 )
@@ -640,6 +648,7 @@ class SalpDomain(BaseScenario):
 
                 observation = torch.cat(
                     [
+                        one_hot_encoded_idx,
                         # Neighbor data
                         torch.sin(
                             self.global_observation.a_chain_relative_angles[:, idx, :]

@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 from torch.utils.tensorboard import SummaryWriter
-
+import torch.nn.functional as F
 from learning.algorithms.ppo.types import Params
 
 # Useful for error tracing
@@ -15,7 +15,7 @@ class RolloutBuffer:
         self.states = []
         self.logprobs = []
         self.rewards = []
-        self.state_values = []
+        self.values = []
         self.is_terminals = []
 
     def clear(self):
@@ -23,7 +23,7 @@ class RolloutBuffer:
         del self.states[:]
         del self.logprobs[:]
         del self.rewards[:]
-        del self.state_values[:]
+        del self.values[:]
         del self.is_terminals[:]
 
 
@@ -32,12 +32,14 @@ class RolloutData(Dataset):
         self,
         states: torch.Tensor,
         actions: torch.Tensor,
+        values: torch.Tensor,
         logprobs: torch.Tensor,
         advantages: torch.Tensor,
         rewards: torch.Tensor,
     ):
         self.states = states
         self.actions = actions
+        self.values = values
         self.logprobs = logprobs
         self.advantages = advantages
         self.rewards = rewards
@@ -49,6 +51,7 @@ class RolloutData(Dataset):
         return (
             self.states[idx],
             self.actions[idx],
+            self.values[idx],
             self.logprobs[idx],
             self.advantages[idx],
             self.rewards[idx],
@@ -84,6 +87,7 @@ class PPO:
         self.ent_coef = params.ent_coef
         self.std_coef = params.std_coef
         self.n_epochs = params.n_epochs
+        self.use_clipped_value_loss = True
 
         # Select model
         match (model):
@@ -110,20 +114,45 @@ class PPO:
         self.policy_old.load_state_dict(self.policy.state_dict())
 
         # Create optimizers
-        self.opt_actor = torch.optim.Adam(
-            self.policy.actor_params + [self.policy.log_action_std],
+        self.optimizer = torch.optim.Adam(
+            self.policy.parameters(),
             lr=params.lr_actor,
         )
 
-        self.opt_critic = torch.optim.Adam(
-            self.policy.critic.parameters(), lr=params.lr_critic
-        )
-
-        # Create loss function
-        self.loss_fn = nn.MSELoss()
-
         # Logging params
         self.total_epochs = 0
+
+    def calc_value_loss(self, values, value_preds_batch, return_batch):
+        """
+        Calculate value function loss.
+        :param values: (torch.Tensor) value function predictions.
+        :param value_preds_batch: (torch.Tensor) "old" value  predictions from data batch (used for value clip loss)
+        :param return_batch: (torch.Tensor) reward to go returns.
+        :param active_masks_batch: (torch.Tensor) denotes if agent is active or dead at a given timesep.
+
+        :return value_loss: (torch.Tensor) value function loss.
+        """
+
+        clip_param = 0.05
+        huber_delta = 10
+
+        value_pred_clipped = value_preds_batch + (values - value_preds_batch).clamp(
+            -clip_param, clip_param
+        )
+
+        value_loss_clipped = F.huber_loss(
+            return_batch, value_pred_clipped, delta=huber_delta
+        )
+        value_loss_original = F.huber_loss(return_batch, values, delta=huber_delta)
+
+        if self.use_clipped_value_loss:
+            value_loss = torch.max(value_loss_original, value_loss_clipped)
+        else:
+            value_loss = value_loss_original
+
+        value_loss = value_loss.mean()
+
+        return value_loss
 
     def select_action(self, state: torch.Tensor):
         with torch.no_grad():
@@ -132,7 +161,7 @@ class PPO:
         self.buffer.states.append(state)
         self.buffer.actions.append(action)
         self.buffer.logprobs.append(action_logprob)
-        self.buffer.state_values.append(state_val)
+        self.buffer.values.append(state_val)
 
         return action.detach()
 
@@ -181,7 +210,7 @@ class PPO:
             self.buffer.states[-1]
         ) * ~self.buffer.is_terminals[-1].unsqueeze(-1)
 
-        bootstrapped_values = self.buffer.state_values.copy()
+        bootstrapped_values = self.buffer.values.copy()
         bootstrapped_values.append(final_values)
 
         # bootstrapped_rewards = self.buffer.rewards.copy()
@@ -200,6 +229,7 @@ class PPO:
         # Monte Carlo estimate of returns
         discounted_rewards = []
         discounted_reward = torch.zeros(self.n_envs, device=self.device)
+
         for reward, is_terminal in zip(
             reversed(bootstrapped_rewards),
             reversed(bootstrapped_is_terminals),
@@ -239,6 +269,9 @@ class PPO:
         old_actions = (
             torch.stack(self.buffer.actions).transpose(1, 0).flatten(end_dim=1).detach()
         )
+        old_values = (
+            torch.stack(self.buffer.values).transpose(1, 0).flatten(end_dim=1).detach()
+        )
         old_logprobs = (
             torch.stack(self.buffer.logprobs)
             .transpose(1, 0)
@@ -248,9 +281,14 @@ class PPO:
 
         # Create dataset from rollout
         dataset = RolloutData(
-            old_states, old_actions, old_logprobs, advantages, returns
+            old_states, old_actions, old_values, old_logprobs, advantages, returns
         )
         loader = DataLoader(dataset, batch_size=self.minibatch_size, shuffle=True)
+
+        # Load model into GPU for training
+        train_device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        if torch.cuda.is_available():
+            self.policy.to(train_device)
 
         # Optimize policy for n epochs
         for _ in range(self.n_epochs):
@@ -258,13 +296,23 @@ class PPO:
             for (
                 b_old_states,
                 b_old_actions,
+                b_old_values,
                 b_old_logprobs,
                 b_advantages,
                 b_returns,
             ) in loader:
 
+                # Load batch into GPU for training
+                if torch.cuda.is_available():
+                    b_old_states = b_old_states.to(train_device)
+                    b_old_actions = b_old_actions.to(train_device)
+                    b_old_values = b_old_values.to(train_device)
+                    b_old_logprobs = b_old_logprobs.to(train_device)
+                    b_advantages = b_advantages.to(train_device)
+                    b_returns = b_returns.to(train_device)
+
                 # Evaluating old actions and values
-                logprobs, state_values, dist_entropy = self.policy.evaluate(
+                logprobs, values, dist_entropy = self.policy.evaluate(
                     b_old_states, b_old_actions
                 )
 
@@ -293,21 +341,15 @@ class PPO:
 
                 # Calculate actor and critic losses
                 actor_loss = ppo_loss + log_std_penalty - entropy_bonus
-                critic_loss = self.loss_fn(state_values, b_returns)
+                value_loss = self.calc_value_loss(values, b_old_values, b_returns)
 
-                # Take actor gradient step
-                self.opt_actor.zero_grad()
-                actor_loss.backward()
-                torch.nn.utils.clip_grad_norm_(self.policy.actor_params, self.grad_clip)
-                self.opt_actor.step()
+                loss = actor_loss + value_loss
 
-                # Take critic gradient step
-                self.opt_critic.zero_grad()
-                critic_loss.backward()
-                torch.nn.utils.clip_grad_norm_(
-                    self.policy.critic.parameters(), self.grad_clip
-                )
-                self.opt_critic.step()
+                # Take gradient step
+                self.optimizer.zero_grad()
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(self.policy.parameters(), self.grad_clip)
+                self.optimizer.step()
 
                 # Store data
                 if self.writer is not None:
@@ -315,7 +357,7 @@ class PPO:
                         "Agent/actor_loss", actor_loss.item(), self.total_epochs
                     )
                     self.writer.add_scalar(
-                        "Agent/critic_loss", critic_loss.item(), self.total_epochs
+                        "Agent/critic_loss", value_loss.item(), self.total_epochs
                     )
                     self.writer.add_scalar(
                         "Agent/entropy", dist_entropy.mean().item(), self.total_epochs
@@ -332,6 +374,9 @@ class PPO:
                     )
                     self.total_epochs += 1
 
+        # Load model back to cpu to collect rollouts
+        self.policy.to("cpu")
+
         # Copy new weights into old policy
         self.policy_old.load_state_dict(self.policy.state_dict())
 
@@ -343,8 +388,16 @@ class PPO:
 
     def load(self, checkpoint_path):
         self.policy_old.load_state_dict(
-            torch.load(checkpoint_path, map_location=lambda storage, loc: storage)
+            torch.load(
+                checkpoint_path,
+                map_location=lambda storage, loc: storage,
+                weights_only=True,
+            )
         )
         self.policy.load_state_dict(
-            torch.load(checkpoint_path, map_location=lambda storage, loc: storage)
+            torch.load(
+                checkpoint_path,
+                map_location=lambda storage, loc: storage,
+                weights_only=True,
+            )
         )
