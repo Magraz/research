@@ -8,26 +8,6 @@ from typing import List
 from torch_geometric.nn import global_mean_pool
 
 
-def create_chain_graph_batch(x_tensor):
-    """Convert a batched tensor into a list of chain graphs."""
-    graphs = []
-    x_tensor = torch.stack(x_tensor).transpose(1, 0)
-
-    for g in range(x_tensor.size(0)):
-
-        x = x_tensor[g]  # (n_nodes, feat_dim)
-        n_nodes = x.size(0)
-
-        # Chain edges: i <-> i+1
-        edges = [[i, i + 1] for i in range(n_nodes - 1)]
-        edges += [[i + 1, i] for i in range(n_nodes - 1)]
-        edge_index = torch.tensor(edges, dtype=torch.long).t().contiguous()  # (2, E)
-
-        graphs.append(Data(x=x, edge_index=edge_index))
-
-    return graphs
-
-
 class ActorCritic(torch.nn.Module):
     def __init__(
         self,
@@ -41,6 +21,7 @@ class ActorCritic(torch.nn.Module):
 
         self.n_agents = n_agents
         self.d_action = d_action
+        self.device = device
 
         self.log_action_std = nn.Parameter(
             torch.ones(
@@ -70,9 +51,31 @@ class ActorCritic(torch.nn.Module):
             nn.Linear(128, 1),
         )
 
+    def create_chain_graph_batch(self, x_tensor):
+        """Convert a batched tensor into a list of chain graphs."""
+        graphs = []
+
+        for g in range(x_tensor.size(0)):
+
+            x = x_tensor[g]  # (n_nodes, feat_dim)
+            n_nodes = x.size(0)
+
+            # Chain edges: i <-> i+1
+            edges = [[i, i + 1] for i in range(n_nodes - 1)]
+            edges += [[i + 1, i] for i in range(n_nodes - 1)]
+            edge_index = (
+                torch.tensor(edges, dtype=torch.long, device=self.device)
+                .t()
+                .contiguous()
+            )  # (2, E)
+
+            graphs.append(Data(x=x, edge_index=edge_index))
+
+        return graphs
+
     def get_action_and_value(self, state):
 
-        graph_list = create_chain_graph_batch(state)
+        graph_list = self.create_chain_graph_batch(state)
 
         batched_graph = Batch.from_data_list(graph_list)
 
@@ -83,7 +86,7 @@ class ActorCritic(torch.nn.Module):
 
         mean = (
             self.actor_head(x)
-            .reshape((state[0].shape[0], self.n_agents, self.d_action))
+            .reshape((state.shape[0], self.n_agents, self.d_action))
             .flatten(start_dim=1)
         )
 
@@ -98,7 +101,8 @@ class ActorCritic(torch.nn.Module):
 
     def get_value(self, state: torch.Tensor):
         with torch.no_grad():
-            return self.value_head(state)
+            _, value = self.get_action_and_value(state)
+            return value
 
     def get_action_dist(self, action_mean):
         action_std = torch.exp(self.log_action_std)

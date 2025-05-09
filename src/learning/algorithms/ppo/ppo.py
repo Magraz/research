@@ -302,6 +302,7 @@ class PPO:
         train_device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         if torch.cuda.is_available():
             self.policy.to(train_device)
+            self.policy.device = train_device
 
         # Optimize policy for n epochs
         for _ in range(self.n_epochs):
@@ -394,7 +395,8 @@ class PPO:
                         dill.dump(log_data_dict, f)
 
         # Load model back to cpu to collect rollouts
-        self.policy.to("cpu")
+        self.policy.to(self.device)
+        self.policy.device = self.device
 
         # Copy new weights into old policy
         self.policy_old.load_state_dict(self.policy.state_dict())
