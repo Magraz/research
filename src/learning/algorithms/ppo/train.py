@@ -59,7 +59,7 @@ class PPO_Trainer:
 
                         return state
 
-            case "transformer":
+            case "transformer" | "gat":
                 match (representation):
                     case "local":
                         state = torch.stack(state).transpose(1, 0)

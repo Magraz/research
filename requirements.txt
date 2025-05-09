@@ -1,4 +1,5 @@
 torch
+torch_geometric
 numpy
 matplotlib
 tensorboard
@@ -9,3 +10,4 @@ opencv-python
 PyYAML
 nbconvert
 PyAV
+dill
