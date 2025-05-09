@@ -155,21 +155,17 @@ class PPO_Trainer:
                     env = dill.load(env_file)
 
         # Setup loop variables
-        step = 0
+        global_step = 0
+        checkpoint_step = 0
         total_episodes = 0
-        max_episodes_per_rollout = 10
-        max_steps_per_episode = params.batch_size // max_episodes_per_rollout
+        max_steps_per_episode = 512
         rmax = -1e6
         running_avg_reward = 0
-        iterations = 0
-        checkpoint_step = 0
 
         # Log start time
         start_time = time.time()
 
-        while step < params.n_total_steps:
-
-            rollout_episodes = 0
+        while global_step < params.n_total_steps:
 
             episode_len = torch.zeros(
                 env_config.n_envs, dtype=torch.int32, device=self.device
@@ -180,7 +176,8 @@ class PPO_Trainer:
 
             state = env.reset()
 
-            for _ in range(0, params.batch_size):
+            # Collect batch of data stepping by n_envs
+            for _ in range(0, params.batch_size, env_config.n_envs):
 
                 # Clamp because actions are stochastic and can lead to them been out of -1 to 1 range
                 actions_per_env = torch.clamp(
@@ -195,7 +192,7 @@ class PPO_Trainer:
                     max=1.0,
                 )
 
-                # Permute action tensor of shape (n_envs, n_agents*action_dim) to (agents, n_env, action_dim)
+                # Permute action tensor of shape (n_envs, n_agents * action_dim) to (agents, n_env, action_dim)
                 action_tensor = actions_per_env.reshape(
                     n_envs,
                     n_agents,
@@ -211,13 +208,15 @@ class PPO_Trainer:
 
                 cum_rewards += reward[0]
 
-                step += env_config.n_envs
                 episode_len += torch.ones(
                     env_config.n_envs, dtype=torch.int32, device=self.device
                 )
 
                 # Create timeout boolean mask
                 timeout = episode_len == max_steps_per_episode
+
+                # Increase counters
+                global_step += env_config.n_envs
 
                 if torch.any(done) or torch.any(timeout):
 
@@ -235,7 +234,7 @@ class PPO_Trainer:
                         data.append(r)
 
                         print(
-                            f"Step {step}, Reward: {r}, Minutes {"{:.2f}".format((time.time() - start_time) / 60)}"
+                            f"Step {global_step}, Reward: {r}, Minutes {"{:.2f}".format((time.time() - start_time) / 60)}"
                         )
 
                         running_avg_reward = (
@@ -249,18 +248,15 @@ class PPO_Trainer:
                         cum_rewards[idx], episode_len[idx] = 0, 0
 
                         total_episodes += 1
-                        rollout_episodes += 1
 
-                if rollout_episodes >= max_episodes_per_rollout:
-                    break
-
+            # Store best model if running average reward is higher than previous best
             if running_avg_reward > rmax:
-                print(f"New best reward: {running_avg_reward} at step {step}")
+                print(f"New best reward: {running_avg_reward} at step {global_step}")
                 rmax = running_avg_reward
                 learner.save(self.models_dir / "best_model")
 
             # Store checkpoint
-            if step - checkpoint_step >= 10000:
+            if global_step - checkpoint_step >= 10000:
                 # Save model
                 learner.save(self.models_dir / "checkpoint")
 
@@ -272,7 +268,7 @@ class PPO_Trainer:
                 with open(self.models_dir / "env.dat", "wb") as f:
                     dill.dump(env, f)
 
-                checkpoint_step = step
+                checkpoint_step = global_step
 
                 print("CHECKPOINT SAVED")
 
@@ -285,8 +281,6 @@ class PPO_Trainer:
                     self.writer.add_scalar(
                         "Agent/rewards_per_episode", reward, total_episodes
                     )
-
-            iterations += 1
 
         self.writer.close()
 
@@ -334,10 +328,12 @@ class PPO_Trainer:
         n_rollouts = 5
 
         for i in range(n_rollouts):
+
             done = False
             state = env.reset()
             R = 0
             r = []
+
             for t in range(0, 512):
 
                 action = learner.deterministic_action(
