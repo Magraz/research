@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 
 from torch.distributions import Normal
-from learning.algorithms.ppo.types import Params
 
 
 def orthogonal_init(m, gain=1.0):
@@ -34,7 +33,7 @@ class ActorCritic(nn.Module):
             )
         )
 
-        # actor
+        # Actor
         self.actor = nn.Sequential(
             nn.Linear(d_state, 128),
             nn.LeakyReLU(),
@@ -50,7 +49,8 @@ class ActorCritic(nn.Module):
                 m, gain=torch.nn.init.calculate_gain("leaky_relu")
             )
         )
-        # critic
+
+        # Critic
         self.critic = nn.Sequential(
             nn.Linear(d_state, 128),
             nn.LeakyReLU(),

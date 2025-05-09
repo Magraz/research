@@ -241,7 +241,7 @@ if __name__ == "__main__":
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     model = ActorCritic(
-        n_agents=8,
+        n_agents=4,
         d_state=18,
         d_action=2,
         device=device,

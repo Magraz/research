@@ -80,7 +80,7 @@ class PPO_Trainer:
                     case "local":
                         return obs_shape * n_agents
 
-            case "transformer":
+            case "transformer" | "gat":
                 match (state_representation):
                     case "local":
                         return obs_shape
