@@ -11,6 +11,17 @@ from learning.environments.salp.salp_domain import SalpDomain
 from learning.environments.types import EnvironmentEnum
 
 
+def create_vmas_env(n_envs, device, seed, env_args):
+    env = make_env(
+        num_envs=n_envs,
+        device=device,
+        seed=seed,
+        # Environment specific variables
+        **env_args,
+    )
+    return env
+
+
 def create_env(
     batch_dir,
     n_envs: int,
@@ -32,6 +43,7 @@ def create_env(
                 # Environment data
                 "scenario": "buzz_wire",
             }
+            return create_vmas_env(n_envs, device, seed, env_args)
 
         case EnvironmentEnum.VMAS_BALANCE:
             # Environment arguments
@@ -39,6 +51,7 @@ def create_env(
                 # Environment data
                 "scenario": "balance",
             }
+            return create_vmas_env(n_envs, device, seed, env_args)
 
         case EnvironmentEnum.VMAS_ROVER:
 
@@ -81,6 +94,7 @@ def create_env(
                 "use_order": env_config["use_order"],
                 "viewer_zoom": kwargs.pop("viewer_zoom", 1),
             }
+            return create_vmas_env(n_envs, device, seed, env_args)
 
         case EnvironmentEnum.VMAS_SALP:
             env_args = {
@@ -94,14 +108,19 @@ def create_env(
                 # POIs data
                 "n_targets": 1,
             }
+            return create_vmas_env(n_envs, device, seed, env_args)
 
-    # Set up the environment
-    env = make_env(
-        num_envs=n_envs,
-        device=device,
-        seed=seed,
-        # Environment specific variables
-        **env_args,
-    )
-
-    return env
+        case EnvironmentEnum.MAMUJOCO_SWIMMER:
+            # TODO: add actual mamujoco env code
+            env_args = {
+                # Environment data
+                "scenario": SalpDomain(),
+                "x_semidim": env_config["map_size"][0],
+                "y_semidim": env_config["map_size"][1],
+                # Agent data
+                "n_agents": kwargs.get("n_agents", 1),
+                "state_representation": env_config["state_representation"],
+                # POIs data
+                "n_targets": 1,
+            }
+            return None
