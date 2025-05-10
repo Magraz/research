@@ -344,7 +344,7 @@ class PPO_Trainer:
 
                 action_tensor = action.reshape(
                     1,
-                    n_agents,
+                    n_agents_eval,
                     d_action,
                 ).transpose(1, 0)
 
