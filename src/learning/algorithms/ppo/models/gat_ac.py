@@ -11,7 +11,8 @@ from torch_geometric.nn import global_mean_pool
 class ActorCritic(torch.nn.Module):
     def __init__(
         self,
-        n_agents: int,
+        n_agents_train: int,
+        n_agents_eval: int,
         d_state: int,
         d_action: int,
         device: str,
@@ -19,13 +20,13 @@ class ActorCritic(torch.nn.Module):
     ):
         super(ActorCritic, self).__init__()
 
-        self.n_agents = n_agents
+        self.n_agents_eval = n_agents_eval
         self.d_action = d_action
         self.device = device
 
         self.log_action_std = nn.Parameter(
             torch.ones(
-                d_action * n_agents,
+                d_action * n_agents_train,
                 requires_grad=True,
                 device=device,
             )
@@ -86,7 +87,7 @@ class ActorCritic(torch.nn.Module):
 
         mean = (
             self.actor_head(x)
-            .reshape((state.shape[0], self.n_agents, self.d_action))
+            .reshape((state.shape[0], self.n_agents_eval, self.d_action))
             .flatten(start_dim=1)
         )
 

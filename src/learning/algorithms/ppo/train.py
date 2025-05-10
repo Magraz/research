@@ -128,12 +128,13 @@ class PPO_Trainer:
             self.device,
             exp_config.model,
             params,
-            self.writer,
-            self.checkpoint,
+            n_agents,
             n_agents,
             n_envs,
             d_state,
             d_action,
+            self.writer,
+            self.checkpoint,
         )
 
         # Checkpoint loading logic
@@ -288,18 +289,15 @@ class PPO_Trainer:
 
         params = Params(**exp_config.params)
 
-        # Override training agent count
-        # n_agents = 4
-        # env_config.n_agents = n_agents
-
-        n_agents = env_config.n_agents
+        n_agents_train = env_config.n_agents
+        n_agents_eval = env_config.n_agents
 
         env = create_env(
             self.batch_dir,
             1,
             device=self.device,
             env_name=env_config.environment,
-            n_agents=n_agents,
+            n_agents=n_agents_eval,
             seed=params.random_seed,
         )
 
@@ -308,15 +306,15 @@ class PPO_Trainer:
             env.observation_space.spaces[0].shape[0],
             env_config.state_representation,
             exp_config.model,
-            n_agents,
+            n_agents_train,
         )
 
         learner = PPO(
             self.device,
             exp_config.model,
             params,
-            None,
-            n_agents,
+            n_agents_train,
+            n_agents_eval,
             1,
             d_state,
             d_action,

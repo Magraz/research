@@ -7,10 +7,12 @@ from learning.algorithms.ccea.train import CCEA_Trainer
 from learning.algorithms.ccea.types import Experiment as CCEA_Experiment
 
 from learning.algorithms.ppo.train import PPO_Trainer
+from learning.algorithms.ppo.evaluate import PPO_Evaluator
+from learning.algorithms.ppo.types import Experiment as PPO_Experiment
+
 from learning.algorithms.td3.train import TD3_Trainer
 
 from learning.algorithms.ippo.train import IPPO_Trainer
-from learning.algorithms.ppo.types import Experiment as PPO_Experiment
 
 from learning.algorithms.manual.control import ManualControl
 
@@ -28,8 +30,9 @@ def run_algorithm(
     algorithm: str,
     environment: str,
     trial_id: str,
-    train: bool,
-    checkpoint: bool,
+    view: bool = False,
+    checkpoint: bool = False,
+    evaluate: bool = False,
 ):
 
     env_file = batch_dir / "_env.yaml"
@@ -99,6 +102,16 @@ def run_algorithm(
                 video_name=f"{experiment_name}_{trial_id}",
                 checkpoint=checkpoint,
             )
+            evaluator = PPO_Evaluator(
+                device=exp_config.device,
+                batch_dir=batch_dir,
+                trials_dir=Path(batch_dir).parents[1]
+                / "results"
+                / batch_name
+                / experiment_name,
+                trial_id=trial_id,
+                video_name=f"{experiment_name}_{trial_id}",
+            )
 
         case AlgorithmEnum.TD3:
             exp_config = None
@@ -130,15 +143,18 @@ def run_algorithm(
                 video_name=f"{experiment_name}_{trial_id}",
             )
 
-    if train:
-        trainer.train(  # Environment Data
+    if view:
+        trainer.view(
             env_config=env_config,
-            # Experiment Data
+            exp_config=exp_config,
+        )
+    elif evaluate:
+        evaluator.validate(
+            env_config=env_config,
             exp_config=exp_config,
         )
     else:
-        trainer.view(  # Environment Data
+        trainer.train(
             env_config=env_config,
-            # Experiment Data
             exp_config=exp_config,
         )

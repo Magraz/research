@@ -6,6 +6,7 @@ class Params:
 
     n_epochs: int
     n_total_steps: int
+    n_max_steps_per_episode: int
     batch_size: int
     minibatch_size: int
 

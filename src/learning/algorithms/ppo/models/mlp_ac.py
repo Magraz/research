@@ -22,12 +22,19 @@ def orthogonal_init(m, gain=1.0):
 
 
 class ActorCritic(nn.Module):
-    def __init__(self, n_agents: int, d_state: int, d_action: int, device: str):
+    def __init__(
+        self,
+        n_agents_train: int,
+        n_agents_eval: int,
+        d_state: int,
+        d_action: int,
+        device: str,
+    ):
         super(ActorCritic, self).__init__()
 
         self.log_action_std = nn.Parameter(
             torch.zeros(
-                d_action * n_agents,
+                d_action * n_agents_train,
                 requires_grad=True,
                 device=device,
             )
@@ -39,7 +46,7 @@ class ActorCritic(nn.Module):
             nn.LeakyReLU(),
             nn.Linear(128, 128),
             nn.LeakyReLU(),
-            nn.Linear(128, d_action * n_agents),
+            nn.Linear(128, d_action * n_agents_train),
             nn.Tanh(),
         )
 

@@ -6,7 +6,7 @@ from dataclasses import asdict
 # EXPERIMENT SETTINGS
 ENVIRONMENT = EnvironmentEnum.VMAS_SALP
 BATCH_NAME = f"{ENVIRONMENT}_local_8a"
-EXPERIMENT_NAME = f"transformer"
+EXPERIMENT_NAME = f"gat"
 DEVICE = "cpu"
 
 # EXPERIMENTS
@@ -16,6 +16,7 @@ experiment = Experiment(
     params=Params(
         n_epochs=10,
         n_total_steps=1e12,
+        n_max_steps_per_episode=512,
         batch_size=5120,
         minibatch_size=256,
         eps_clip=0.2,

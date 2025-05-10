@@ -112,15 +112,5 @@ def create_env(
 
         case EnvironmentEnum.MAMUJOCO_SWIMMER:
             # TODO: add actual mamujoco env code
-            env_args = {
-                # Environment data
-                "scenario": SalpDomain(),
-                "x_semidim": env_config["map_size"][0],
-                "y_semidim": env_config["map_size"][1],
-                # Agent data
-                "n_agents": kwargs.get("n_agents", 1),
-                "state_representation": env_config["state_representation"],
-                # POIs data
-                "n_targets": 1,
-            }
+            env_args = {}
             return None

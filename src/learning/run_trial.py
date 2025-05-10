@@ -45,6 +45,12 @@ if __name__ == "__main__":
         help="Load model checkpointfor training",
     )
 
+    parser.add_argument(
+        "--evaluate",
+        action="store_true",
+        help="Run validation script",
+    )
+
     parser.add_argument("--trial_id", default="debug", help="Sets trial ID", type=str)
 
     args = vars(parser.parse_args())
@@ -63,6 +69,7 @@ if __name__ == "__main__":
         trial_id=args["trial_id"],
         algorithm=args["algorithm"],
         environment=args["environment"],
-        train=not args["view"],
+        view=args["view"],
         checkpoint=args["checkpoint"],
+        evaluate=args["evaluate"],
     )

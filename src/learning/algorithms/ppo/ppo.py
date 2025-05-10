@@ -66,18 +66,19 @@ class PPO:
         device: str,
         model: str,
         params: Params,
-        writer: SummaryWriter,
-        checkpoint: bool,
-        n_agents: int,
+        n_agents_train: int,
+        n_agents_eval: int,
         n_envs: int,
         d_state: int,
         d_action: int,
+        writer: SummaryWriter = None,
+        checkpoint: bool = False,
     ):
         self.device = device
         self.writer = writer
         self.checkpoint = checkpoint
         self.n_envs = n_envs
-        self.n_agents = n_agents
+        self.n_agents = n_agents_train
         self.d_action = d_action
         self.buffer = RolloutBuffer()
 
@@ -104,14 +105,16 @@ class PPO:
 
         # Create models
         self.policy = ActorCritic(
-            n_agents,
+            n_agents_train,
+            n_agents_eval,
             d_state,
             d_action,
             self.device,
         ).to(self.device)
 
         self.policy_old = ActorCritic(
-            n_agents,
+            n_agents_train,
+            n_agents_eval,
             d_state,
             d_action,
             self.device,
@@ -126,13 +129,13 @@ class PPO:
         )
 
         # Logging params
-        self.tensorboard_log_path = self.writer.log_dir / "tensorboard.dat"
         self.total_epochs = 0
 
         if self.checkpoint:
             # Load epoch count
-            if self.tensorboard_log_path.is_file():
-                with open(self.tensorboard_log_path, "rb") as file:
+            path = self.writer.log_dir / "tensorboard.dat"
+            if path.is_file():
+                with open(path, "rb") as file:
                     self.total_epochs = dill.load(file)["total_epochs"]
 
     def calc_value_loss(self, values, value_preds_batch, return_batch):
@@ -390,7 +393,7 @@ class PPO:
                     self.total_epochs += 1
 
                     # Store epoch count
-                    with open(self.tensorboard_log_path, "wb") as f:
+                    with open(self.writer.log_dir / "tensorboard.dat", "wb") as f:
                         log_data_dict = {"total_epochs": self.total_epochs}
                         dill.dump(log_data_dict, f)
 

@@ -53,7 +53,8 @@ class ActorCritic(nn.Module):
     # Constructor
     def __init__(
         self,
-        n_agents: int,
+        n_agents_train: int,
+        n_agents_eval: int,
         d_state: int,
         d_action: int,
         device: str,
@@ -69,16 +70,14 @@ class ActorCritic(nn.Module):
 
         # INFO
         self.d_model = d_model
-        self.n_agents = n_agents
+        self.n_agents_eval = n_agents_eval
         self.device = device
         self.d_action = d_action
         self.autoregress = autoregress
 
-        train_max_agents = n_agents  # comment if training with varying number of agents
-
         # LAYERS
         self.log_action_std = nn.Parameter(
-            torch.ones(d_action * train_max_agents, requires_grad=True, device=device)
+            torch.ones(d_action * n_agents_train, requires_grad=True, device=device)
         )
 
         self.positional_encoder = PositionalEncoding(
@@ -143,7 +142,7 @@ class ActorCritic(nn.Module):
         )
         action_means = []
         tgt = tgt.view(1, 1, self.d_model).repeat(batch_dim, 1, 1)
-        for idx in range(self.n_agents):
+        for idx in range(self.n_agents_eval):
             decoder_out = self.dec(
                 tgt,
                 memory=encoder_out,
@@ -205,7 +204,7 @@ class ActorCritic(nn.Module):
             embedded_action = self.action_embedding(
                 action.reshape(
                     action.shape[0],
-                    self.n_agents,
+                    self.n_agents_eval,
                     self.d_action,
                 )
             )
