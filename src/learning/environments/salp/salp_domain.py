@@ -455,12 +455,12 @@ class SalpDomain(BaseScenario):
 
     def get_agent_chain_position(self):
         agent_pos = [a.state.pos for a in self.world.agents]
-        return torch.stack(agent_pos).transpose(1, 0)
+        return torch.stack(agent_pos).transpose(1, 0).float()
 
     def get_target_chain_position(self):
         targets = self.get_targets()
         target_pos = [t.state.pos for t in targets]
-        return torch.stack(target_pos).transpose(1, 0)
+        return torch.stack(target_pos).transpose(1, 0).float()
 
     def calculate_distance_reward(self, a_pos: torch.Tensor, t_pos: torch.Tensor):
         pos_err = t_pos - a_pos  # [B, N, 2]
@@ -561,9 +561,7 @@ class SalpDomain(BaseScenario):
                 goal_reached_rew + self.distance_rew
             )  # + self.frechet_rew + self.centroid_rew + self.curvature_rew
 
-        rew = torch.cat([self.global_rew])
-
-        return rew
+        return self.global_rew
 
     def get_local_neighbors(self, agent: Agent, joints: ValuesView):
         neighbors = []
@@ -647,11 +645,13 @@ class SalpDomain(BaseScenario):
                 ).float()
 
             case "local":
+                # Get agent information
                 is_first = agent == self.world.agents[0]
                 is_last = agent == self.world.agents[-1]
 
                 idx = self.world.agents.index(agent)
 
+                # Encode agent id
                 encoding_len = 6
                 encoded_idx = torch.zeros(
                     (self.world.batch_dim, encoding_len),
