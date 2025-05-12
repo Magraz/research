@@ -177,7 +177,3 @@ class PPO_Evaluator:
         plt.savefig(
             Path(self.logs_dir) / "agents_vs_reward.png", dpi=300, bbox_inches="tight"
         )
-
-        # Show if requested
-        plt.show()
-        plt.close()
