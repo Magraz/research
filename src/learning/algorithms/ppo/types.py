@@ -20,7 +20,6 @@ class Params:
     ent_coef: float
     std_coef: float
     lmbda: float
-    log_data: bool
 
 
 @dataclass

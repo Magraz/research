@@ -28,7 +28,6 @@ experiment = Experiment(
         lr_actor=5e-5,
         lr_critic=5e-3,
         random_seed=118,
-        log_data=True,
     ),
 )
 
