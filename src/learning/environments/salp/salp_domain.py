@@ -73,19 +73,19 @@ class SalpDomain(BaseScenario):
         self.training = kwargs.pop("training", True)
 
         # Environment
-        self.x_semidim = kwargs.pop("x_semidim", self.n_agents / self.min_n_agents)
-        self.y_semidim = kwargs.pop("y_semidim", self.n_agents / self.min_n_agents)
+        self.x_semidim = 1.0
+        self.y_semidim = 1.0
 
         if self.training:
             # Set a smaller world size for training like a fence
-            self.world_x_dim = self.x_semidim * 1.2
-            self.world_y_dim = self.y_semidim * 1.2
+            self.world_x_dim = 2.0
+            self.world_y_dim = 2.0
         else:
             # Increase world size for evaluation, like removing the fence
-            self.world_x_dim = self.x_semidim * 10
-            self.world_y_dim = self.y_semidim * 10
+            self.world_x_dim = 10
+            self.world_y_dim = 10
 
-        self.viewer_zoom = kwargs.pop("viewer_zoom", 1.05)
+        self.viewer_zoom = kwargs.pop("viewer_zoom", 2.0)
 
         # Reward Shaping
         self.frechet_shaping_factor = 1.0
@@ -161,6 +161,7 @@ class SalpDomain(BaseScenario):
         #     )
 
         # Initialize reward tensors
+        self.reached_goal_bonus = 5
         self.global_rew = torch.zeros(batch_dim, device=device, dtype=torch.float32)
         self.centroid_rew = self.global_rew.clone()
         self.frechet_rew = self.global_rew.clone()
@@ -188,8 +189,8 @@ class SalpDomain(BaseScenario):
         agent_scale = 0.1
         agent_offset = 0.0
 
-        target_offset = self.x_semidim - abs(self.agent_joint_length * self.n_agents)
-        target_scale = self.x_semidim / 100
+        target_offset = 0.5
+        target_scale = 0.5
 
         if env_index is None:
             # Create new agent and target chains
@@ -554,7 +555,7 @@ class SalpDomain(BaseScenario):
                 self.world.batch_dim, device=self.device, dtype=torch.float32
             )
             goal_reached_mask = self.total_rew > self.frechet_thresh
-            goal_reached_rew += 10 * goal_reached_mask.int()
+            goal_reached_rew += self.reached_goal_bonus * goal_reached_mask.int()
 
             # Mix all rewards
             self.global_rew = (
