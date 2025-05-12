@@ -7,6 +7,7 @@ from learning.environments.types import EnvironmentParams
 from learning.environments.create_env import create_env
 from learning.algorithms.ppo.types import Experiment, Params
 from learning.algorithms.ppo.ppo import PPO
+from learning.algorithms.ppo.utils import get_state_dim, process_state
 
 import pickle as pkl
 import dill
@@ -42,49 +43,6 @@ class PPO_Trainer:
         # Checkpoint loading
         self.checkpoint = checkpoint
 
-    def process_state(
-        self,
-        state: list,
-        representation: str,
-        model: str,
-    ):
-        match (model):
-            case "mlp":
-                match (representation):
-                    case "global":
-                        return state[0]
-
-                    case "local":
-                        state = torch.stack(state).transpose(1, 0).flatten(start_dim=1)
-
-                        return state
-
-            case "transformer" | "gat":
-                match (representation):
-                    case "local":
-                        state = torch.stack(state).transpose(1, 0)
-                        return state
-
-        return state
-
-    def get_state_dim(
-        self, obs_shape, state_representation: str, model: str, n_agents: int
-    ):
-
-        match (model):
-            case "mlp":
-                match (state_representation):
-                    case "global":
-                        return obs_shape
-
-                    case "local":
-                        return obs_shape * n_agents
-
-            case "transformer" | "gat":
-                match (state_representation):
-                    case "local":
-                        return obs_shape
-
     def train(
         self,
         exp_config: Experiment,
@@ -116,7 +74,7 @@ class PPO_Trainer:
 
         # Set state and action dimensions
         d_action = env.action_space.spaces[0].shape[0]
-        d_state = self.get_state_dim(
+        d_state = get_state_dim(
             env.observation_space.spaces[0].shape[0],
             env_config.state_representation,
             exp_config.model,
@@ -183,7 +141,7 @@ class PPO_Trainer:
                 # Clamp because actions are stochastic and can lead to them been out of -1 to 1 range
                 actions_per_env = torch.clamp(
                     learner.select_action(
-                        self.process_state(
+                        process_state(
                             state,
                             env_config.state_representation,
                             exp_config.model,
@@ -290,7 +248,7 @@ class PPO_Trainer:
         params = Params(**exp_config.params)
 
         n_agents_train = env_config.n_agents
-        n_agents_eval = env_config.n_agents
+        n_agents_eval = 8
 
         env = create_env(
             self.batch_dir,
@@ -298,11 +256,12 @@ class PPO_Trainer:
             device=self.device,
             env_name=env_config.environment,
             n_agents=n_agents_eval,
-            seed=params.random_seed,
+            training=False,
+            seed=params.random_seed + random.randint(1, 100),
         )
 
         d_action = env.action_space.spaces[0].shape[0]
-        d_state = self.get_state_dim(
+        d_state = get_state_dim(
             env.observation_space.spaces[0].shape[0],
             env_config.state_representation,
             exp_config.model,
@@ -334,12 +293,16 @@ class PPO_Trainer:
 
             for t in range(0, 512):
 
-                action = learner.deterministic_action(
-                    self.process_state(
-                        state,
-                        env_config.state_representation,
-                        exp_config.model,
-                    )
+                action = torch.clamp(
+                    learner.deterministic_action(
+                        process_state(
+                            state,
+                            env_config.state_representation,
+                            exp_config.model,
+                        )
+                    ),
+                    min=-1.0,
+                    max=1.0,
                 )
 
                 action_tensor = action.reshape(
