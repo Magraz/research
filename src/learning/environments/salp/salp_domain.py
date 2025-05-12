@@ -22,7 +22,6 @@ from learning.environments.salp.utils import (
     generate_target_points,
     generate_bending_curve,
     batch_discrete_frechet_distance,
-    angular_velocity,
     generate_random_coordinate_outside_box,
     rotate_points,
     calculate_moment,
@@ -31,7 +30,7 @@ from learning.environments.salp.utils import (
     menger_curvature,
     centre_and_rotate,
     get_neighbor_angles,
-    one_hot_encode,
+    binary_encode,
 )
 from learning.environments.salp.types import GlobalObservation
 import random
@@ -609,10 +608,6 @@ class SalpDomain(BaseScenario):
 
     def agent_representation(self, agent: Agent, scope: str):
 
-        # a_chain_orientation_rel_2_target = (
-        #     t_chain_orientation - a_chain_orientation
-        # ).unsqueeze(0)
-
         # Agent specific
         a_pos_rel_2_t_centroid = (
             agent.state.pos - self.global_observation.t_chain_centroid_pos
@@ -625,9 +620,6 @@ class SalpDomain(BaseScenario):
         a_pos_rel_2_centroid = (
             agent.state.pos - self.global_observation.a_chain_centroid_pos
         )
-        a_ang_vel_rel_2_centroid = angular_velocity(
-            a_pos_rel_2_centroid, agent.state.vel
-        ).unsqueeze(0)
 
         # Complete observation
         match (scope):
@@ -660,12 +652,14 @@ class SalpDomain(BaseScenario):
 
                 idx = self.world.agents.index(agent)
 
-                one_hot_encoded_idx = torch.zeros(
-                    (self.world.batch_dim, self.max_n_agents),
+                encoding_len = 6
+                encoded_idx = torch.zeros(
+                    (self.world.batch_dim, encoding_len),
                     dtype=torch.float32,
                     device=self.device,
-                ) + one_hot_encode(idx, self.max_n_agents)
+                ) + binary_encode(idx, encoding_len)
 
+                # Get neighbor forces
                 neighbor_forces = torch.zeros(
                     (self.world.batch_dim, 4), dtype=torch.float32, device=self.device
                 )
@@ -677,15 +671,21 @@ class SalpDomain(BaseScenario):
                     neighbor_forces[:, :2] = self.global_observation.a_chain_all_forces[
                         :, -2, :
                     ]
-
                 else:
                     neighbor_forces = self.global_observation.a_chain_all_forces[
                         :, idx - 1 : idx + 2 : 2, :
                     ].flatten(start_dim=1)
 
+                # Get distance to assigned position
+                a_pos_2_t_pos_err = (
+                    self.global_observation.t_chain_all_pos[:, idx, :]
+                    - self.global_observation.a_chain_all_pos[:, idx, :]
+                )
+
                 observation = torch.cat(
                     [
-                        one_hot_encoded_idx,
+                        # Agent id
+                        encoded_idx,
                         # Neighbor data
                         torch.sin(
                             self.global_observation.a_chain_relative_angles[:, idx, :]
@@ -705,6 +705,8 @@ class SalpDomain(BaseScenario):
                         agent.state.ang_vel,
                         # Target data
                         a_pos_rel_2_t_centroid,
+                        a_vel_rel_2_centroid,
+                        a_pos_2_t_pos_err,
                     ],
                     dim=-1,
                 ).float()
@@ -787,8 +789,8 @@ class SalpDomain(BaseScenario):
                 relative_angles,
                 relative_angles_speed,
                 # Raw obs
-                target_pos.flatten(start_dim=1),
-                agent_pos.flatten(start_dim=1),
+                target_pos,
+                agent_pos,
                 vels.flatten(start_dim=1),
                 ang_pos.flatten(start_dim=1),
                 ang_vels.flatten(start_dim=1),

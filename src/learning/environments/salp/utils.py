@@ -634,3 +634,26 @@ def one_hot_encode(id: int, num_classes: int) -> torch.Tensor:
     one_hot = torch.zeros(num_classes)
     one_hot[id] = 1.0
     return one_hot
+
+
+def binary_encode(number: int, num_bits: int, device=None) -> torch.Tensor:
+    """
+    Encode an integer as a binary tensor of 0s and 1s with specified bit length.
+
+    Args:
+        number: Integer to encode
+        num_bits: Number of bits to use for encoding
+        device: PyTorch device for the tensor
+
+    Returns:
+        Tensor of 0s and 1s representing the binary encoding
+    """
+    if number >= 2**num_bits:
+        raise ValueError(f"Number {number} cannot be encoded with {num_bits} bits")
+
+    binary = []
+    for i in range(num_bits - 1, -1, -1):
+        bit = (number >> i) & 1
+        binary.append(bit)
+
+    return torch.tensor(binary, dtype=torch.float32, device=device)
