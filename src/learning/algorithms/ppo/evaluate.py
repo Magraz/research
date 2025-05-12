@@ -38,7 +38,7 @@ class PPO_Evaluator:
         self,
         exp_config: Experiment,
         env_config: EnvironmentParams,
-        n_rollouts: int = 10,
+        n_rollouts: int = 50,
         extra_agents: int = 16,
     ):
 

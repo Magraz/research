@@ -19,10 +19,9 @@ learning/algorithms/ippo/ippo.py
 learning/algorithms/ippo/train.py
 learning/algorithms/manual/control.py
 learning/algorithms/ppo/ppo.py
-learning/algorithms/ppo/ppo_old.py
 learning/algorithms/ppo/train.py
-learning/algorithms/ppo/train_old.py
 learning/algorithms/ppo/types.py
+learning/algorithms/ppo/models/gat_ac.py
 learning/algorithms/ppo/models/mlp_ac.py
 learning/algorithms/ppo/models/transformer_ac.py
 learning/algorithms/td3/td3.py
@@ -40,7 +39,7 @@ learning/environments/rover/utils.py
 learning/environments/salp/controller.py
 learning/environments/salp/dynamics.py
 learning/environments/salp/salp_domain.py
-learning/environments/salp/sensors.py
+learning/environments/salp/tests.py
 learning/environments/salp/types.py
 learning/environments/salp/utils.py
 learning/environments/salp/world.py
