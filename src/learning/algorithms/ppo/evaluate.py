@@ -11,6 +11,7 @@ from learning.algorithms.ppo.utils import get_state_dim, process_state
 import dill
 from pathlib import Path
 import matplotlib.pyplot as plt
+import random
 
 
 class PPO_Evaluator:
@@ -38,7 +39,7 @@ class PPO_Evaluator:
         self,
         exp_config: Experiment,
         env_config: EnvironmentParams,
-        n_rollouts: int = 50,
+        n_rollouts: int = 10,
         extra_agents: int = 16,
     ):
 
@@ -74,7 +75,7 @@ class PPO_Evaluator:
                 env_name=env_config.environment,
                 training=False,
                 n_agents=n_agents,
-                seed=params.random_seed + n_agents,
+                seed=params.random_seed + random.randint(1, 100),
             )
             learner = PPO(
                 self.device,
