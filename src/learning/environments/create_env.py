@@ -100,8 +100,6 @@ def create_env(
             env_args = {
                 # Environment data
                 "scenario": SalpDomain(),
-                "x_semidim": env_config["map_size"][0],
-                "y_semidim": env_config["map_size"][1],
                 "training": kwargs.get("training", True),
                 # Agent data
                 "n_agents": kwargs.get("n_agents", 1),
