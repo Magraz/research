@@ -188,7 +188,7 @@ class ActorCritic(nn.Module):
                 # Reapply positional encoding to the entire sequence
                 tgt = self.positional_encoder(tgt)
 
-        return torch.cat(action_means, dim=1)
+        return action_means
 
     def act(self, state, deterministic=False):
 
