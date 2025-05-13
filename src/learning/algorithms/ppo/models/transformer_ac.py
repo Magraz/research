@@ -78,6 +78,7 @@ class ActorCritic(nn.Module):
         # LAYERS
         self.log_action_std = nn.Parameter(
             torch.ones(d_action * n_agents_train, requires_grad=True, device=device)
+            * -0.5
         )
 
         self.positional_encoder = PositionalEncoding(
@@ -112,14 +113,20 @@ class ActorCritic(nn.Module):
         )
         self.dec = nn.TransformerDecoder(decoder_layer, n_decoder_layers)
 
-        self.out = nn.Sequential(
-            nn.Linear(d_model, d_action),
-            nn.Tanh(),
+        self.actor_head = nn.Sequential(
+            nn.Linear(d_model, 128),
+            nn.GELU(),
+            nn.Linear(128, 128),
+            nn.GELU(),
+            nn.LayerNorm(128),
+            nn.Linear(128, d_action),
         )
 
         # Critic
-        self.critic = nn.Sequential(
+        self.value_head = nn.Sequential(
             nn.Linear(d_model, 128),
+            nn.GELU(),
+            nn.Linear(128, 128),
             nn.GELU(),
             nn.LayerNorm(128),
             nn.Linear(128, 1),
@@ -131,47 +138,76 @@ class ActorCritic(nn.Module):
     def get_value(self, state: torch.Tensor):
         with torch.no_grad():
             embedded_state = self.state_embedding(state)
-            # embedded_state = self.positional_encoder(embedded_state)
+            embedded_state = self.positional_encoder(embedded_state)
             encoder_out = self.enc(embedded_state)
-            return self.critic(encoder_out[:, 0])
+            return self.value_head(encoder_out[:, 0])
 
     def auto_regress(self, encoder_out):
         batch_dim = encoder_out.shape[0]
-        tgt = self.special_token_embedding(
-            torch.tensor(SpecialTokens.SOS.value, device=self.device)
+        # Pre-allocate action tensor
+        action_means = torch.zeros(
+            batch_dim, self.n_agents_eval, self.d_action, device=self.device
         )
-        action_means = []
-        tgt = tgt.view(1, 1, self.d_model).repeat(batch_dim, 1, 1)
+        # Start with SOS token
+        tgt = (
+            self.special_token_embedding(
+                torch.tensor(SpecialTokens.SOS.value, device=self.device)
+            )
+            .view(1, 1, self.d_model)
+            .repeat(batch_dim, 1, 1)
+        )
+
+        # Apply positional encoding to initial token
+        tgt = self.positional_encoder(tgt)
+
         for idx in range(self.n_agents_eval):
+            # Create mask for current target length
+            tgt_mask = nn.Transformer.generate_square_subsequent_mask(
+                tgt.shape[1], device=self.device
+            )
             decoder_out = self.dec(
                 tgt,
                 memory=encoder_out,
-                tgt_mask=nn.Transformer.generate_square_subsequent_mask(
-                    encoder_out.shape[1], device=self.device
-                ),
+                tgt_mask=tgt_mask,
                 tgt_is_causal=True,
             )
-            tgt = torch.cat([tgt, decoder_out[:, [-1], :]], dim=1)
-            tgt = self.positional_encoder(tgt)
-            action_means.append(self.out(decoder_out[:, [-1], :]))
+
+            # Generate action for current position
+            action_means[:, idx] = self.actor_head(decoder_out[:, -1]).squeeze(1)
+
+            # If not the last iteration, prepare next token
+            if idx < self.n_agents_eval - 1:
+                # Extract newly generated embedding
+                next_token_embedding = decoder_out[:, -1:, :]
+
+                # Concatenate with existing sequence
+                tgt = torch.cat([tgt, next_token_embedding], dim=1)
+
+                tgt = self.layer_norm(tgt)
+
+                # Reapply positional encoding to the entire sequence
+                tgt = self.positional_encoder(tgt)
+
         return torch.cat(action_means, dim=1)
 
     def act(self, state, deterministic=False):
 
         embedded_state = self.state_embedding(state)
-        # embedded_state = self.positional_encoder(embedded_state)
+        embedded_state = self.positional_encoder(embedded_state)
 
         encoder_out = self.enc(embedded_state)
 
         if self.autoregress:
             action_mean = self.auto_regress(encoder_out)
         else:
+            decoder_input = encoder_out.clone().detach()
+            decoder_input = self.positional_encoder(decoder_input)
             decoder_out = self.dec(
-                tgt=encoder_out.clone().detach(),
+                tgt=decoder_input,
                 memory=encoder_out,
             )
 
-            action_mean = self.out(decoder_out)
+            action_mean = self.actor_head(decoder_out)
 
         if deterministic:
             return action_mean.flatten(start_dim=1).detach()
@@ -185,18 +221,18 @@ class ActorCritic(nn.Module):
         action = dist.sample()
         action_logprob = torch.sum(dist.log_prob(action), dim=-1, keepdim=True)
 
-        state_val = self.critic(encoder_out[:, 0])
+        value = self.value_head(encoder_out[:, 0])
 
         return (
             action.detach(),
             action_logprob.detach(),
-            state_val.detach(),
+            value.detach(),
         )
 
     def evaluate(self, state, action):
 
         embedded_state = self.state_embedding(state)
-        # embedded_state = self.positional_encoder(embedded_state)
+        embedded_state = self.positional_encoder(embedded_state)
 
         encoder_out = self.enc(embedded_state)
 
@@ -209,18 +245,20 @@ class ActorCritic(nn.Module):
                 )
             )
             embedded_action = self.positional_encoder(embedded_action)
+            tgt_mask = nn.Transformer.generate_square_subsequent_mask(
+                embedded_action.shape[1], device=self.device
+            )
             decoder_out = self.dec(
                 tgt=embedded_action,
                 memory=encoder_out,
-                tgt_mask=nn.Transformer.generate_square_subsequent_mask(
-                    encoder_out.shape[1], device=self.device
-                ),
+                tgt_mask=tgt_mask,
                 tgt_is_causal=True,
             )
         else:
-            decoder_out = self.dec(encoder_out, memory=encoder_out)
+            decoder_input = self.positional_encoder(encoder_out)
+            decoder_out = self.dec(tgt=decoder_input, memory=encoder_out)
 
-        action_mean = self.out(decoder_out)
+        action_mean = self.actor_head(decoder_out)
 
         action_std = torch.exp(
             self.log_action_std[: encoder_out.shape[1] * self.d_action]
@@ -231,9 +269,9 @@ class ActorCritic(nn.Module):
         dist_entropy = torch.sum(dist.entropy(), dim=-1, keepdim=True)
         action_logprob = torch.sum(dist.log_prob(action), dim=-1, keepdim=True)
 
-        state_values = self.critic(encoder_out[:, 0])
+        value = self.value_head(encoder_out[:, 0])
 
-        return action_logprob, state_values, dist_entropy
+        return action_logprob, value, dist_entropy
 
 
 if __name__ == "__main__":
