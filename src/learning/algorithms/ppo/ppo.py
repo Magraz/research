@@ -299,7 +299,13 @@ class PPO:
         dataset = RolloutData(
             old_states, old_actions, old_values, old_logprobs, advantages, returns
         )
-        loader = DataLoader(dataset, batch_size=self.minibatch_size, shuffle=True)
+        loader = DataLoader(
+            dataset,
+            batch_size=self.minibatch_size,
+            shuffle=True,
+            num_workers=4,
+            pin_memory=True,
+        )
 
         # Load model into GPU for training
         train_device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
