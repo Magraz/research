@@ -12,6 +12,7 @@ import dill
 from pathlib import Path
 import matplotlib.pyplot as plt
 import random
+from statistics import mean
 
 
 class PPO_Evaluator:
@@ -39,7 +40,7 @@ class PPO_Evaluator:
         self,
         exp_config: Experiment,
         env_config: EnvironmentParams,
-        n_rollouts: int = 10,
+        n_rollouts: int = 50,
         extra_agents: int = 16,
     ):
 
@@ -70,7 +71,7 @@ class PPO_Evaluator:
             # Load environment and policy
             env = create_env(
                 self.batch_dir,
-                1,
+                n_rollouts,
                 device=self.device,
                 env_name=env_config.environment,
                 training=False,
@@ -83,56 +84,81 @@ class PPO_Evaluator:
                 params,
                 env_config.n_agents,
                 n_agents,
-                1,
+                n_rollouts,
                 d_state,
                 d_action,
             )
             learner.load(self.models_dir / "best_model")
 
-            for i in range(n_rollouts):
+            rewards = []
+            episode_count = 0
+            state = env.reset()
+            cumulative_rewards = torch.zeros(
+                n_rollouts, dtype=torch.float32, device=self.device
+            )
+            episode_len = torch.zeros(n_rollouts, dtype=torch.int32, device=self.device)
 
-                state = env.reset()
-                cumulative_reward = 0
-                rewards = []
+            for step in range(0, params.n_max_steps_per_episode):
 
-                for _ in range(0, params.n_max_steps_per_episode):
+                action = torch.clamp(
+                    learner.deterministic_action(
+                        process_state(
+                            state,
+                            env_config.state_representation,
+                            exp_config.model,
+                        )
+                    ),
+                    min=-1.0,
+                    max=1.0,
+                )
 
-                    action = torch.clamp(
-                        learner.deterministic_action(
-                            process_state(
-                                state,
-                                env_config.state_representation,
-                                exp_config.model,
-                            )
-                        ),
-                        min=-1.0,
-                        max=1.0,
-                    )
+                action_tensor = action.reshape(
+                    n_rollouts,
+                    n_agents,
+                    d_action,
+                ).transpose(1, 0)
 
-                    action_tensor = action.reshape(
-                        1,
-                        n_agents,
-                        d_action,
-                    ).transpose(1, 0)
+                # Turn action tensor into list of tensors with shape (n_env, action_dim)
+                action_tensor_list = torch.unbind(action_tensor)
 
-                    # Turn action tensor into list of tensors with shape (n_env, action_dim)
-                    action_tensor_list = torch.unbind(action_tensor)
+                state, reward, done, _ = env.step(action_tensor_list)
 
-                    state, reward, done, _ = env.step(action_tensor_list)
+                cumulative_rewards += reward[0]
 
-                    cumulative_reward += reward[0]
+                episode_len += torch.ones(
+                    n_rollouts, dtype=torch.int32, device=self.device
+                )
 
-                    if torch.any(done):
-                        print("DONE")
-                        break
+                # Create timeout boolean mask
+                timeout = episode_len == params.n_max_steps_per_episode
 
-                print(f"n_agents: {n_agents}, reward: {cumulative_reward}")
-                rewards.append(cumulative_reward)
+                if torch.any(done) or torch.any(timeout):
 
-            mean_rew = torch.stack(rewards).mean().item()
+                    # Get done and timeout indices
+                    done_indices = torch.nonzero(done).flatten().tolist()
+                    timeout_indices = torch.nonzero(timeout).flatten().tolist()
+
+                    # Merge indices and remove duplicates
+                    indices = list(set(done_indices + timeout_indices))
+
+                    for idx in indices:
+                        # Log data when episode is done
+                        rewards.append(cumulative_rewards[idx].item())
+
+                        # Reset vars, and increase counters
+                        state = env.reset_at(index=idx)
+                        cumulative_rewards[idx] = 0
+
+                        episode_count += 1
+
+                if episode_count >= n_rollouts:
+                    break
+
+            mean_rew = mean(rewards)
             data[n_agents].append(mean_rew)
 
-        print(data)
+            print(data)
+
         # Store environment
         with open(self.logs_dir / "evaluation.dat", "wb") as f:
             dill.dump(data, f)
