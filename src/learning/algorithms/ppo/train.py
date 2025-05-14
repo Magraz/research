@@ -248,7 +248,8 @@ class PPO_Trainer:
         params = Params(**exp_config.params)
 
         n_agents_train = env_config.n_agents
-        n_agents_eval = 8
+        n_agents_eval = 12
+        n_rollouts = 3
 
         env = create_env(
             self.batch_dir,
@@ -281,8 +282,6 @@ class PPO_Trainer:
         learner.load(self.models_dir / "best_model")
 
         frame_list = []
-
-        n_rollouts = 5
 
         for i in range(n_rollouts):
 

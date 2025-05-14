@@ -63,8 +63,8 @@ class ActorCritic(nn.Module):
         n_heads: int = 2,
         n_encoder_layers: int = 1,
         n_decoder_layers: int = 1,
-        train_max_agents: int = 24,
-        autoregress: bool = False,
+        use_autoregress: bool = False,
+        use_pos_encoding: bool = False,
     ):
         super(ActorCritic, self).__init__()
 
@@ -73,7 +73,8 @@ class ActorCritic(nn.Module):
         self.n_agents_eval = n_agents_eval
         self.device = device
         self.d_action = d_action
-        self.autoregress = autoregress
+        self.use_autoregress = use_autoregress
+        self.use_pos_encoding = use_pos_encoding
 
         # LAYERS
         self.log_action_std = nn.Parameter(
@@ -138,8 +139,12 @@ class ActorCritic(nn.Module):
     def get_value(self, state: torch.Tensor):
         with torch.no_grad():
             embedded_state = self.state_embedding(state)
-            embedded_state = self.positional_encoder(embedded_state)
+
+            if self.use_pos_encoding:
+                embedded_state = self.positional_encoder(embedded_state)
+
             encoder_out = self.enc(embedded_state)
+
             return self.value_head(encoder_out[:, 0])
 
     def auto_regress(self, encoder_out):
@@ -157,8 +162,9 @@ class ActorCritic(nn.Module):
             .repeat(batch_dim, 1, 1)
         )
 
-        # Apply positional encoding to initial token
-        tgt = self.positional_encoder(tgt)
+        if self.use_pos_encoding:
+            # Apply positional encoding to initial token
+            tgt = self.positional_encoder(tgt)
 
         for idx in range(self.n_agents_eval):
             # Create mask for current target length
@@ -185,23 +191,30 @@ class ActorCritic(nn.Module):
 
                 tgt = self.layer_norm(tgt)
 
-                # Reapply positional encoding to the entire sequence
-                tgt = self.positional_encoder(tgt)
+                if self.use_pos_encoding:
+                    # Reapply positional encoding to the entire sequence
+                    tgt = self.positional_encoder(tgt)
 
         return action_means
 
     def act(self, state, deterministic=False):
 
         embedded_state = self.state_embedding(state)
-        embedded_state = self.positional_encoder(embedded_state)
+
+        if self.use_pos_encoding:
+            embedded_state = self.positional_encoder(embedded_state)
 
         encoder_out = self.enc(embedded_state)
 
-        if self.autoregress:
+        if self.use_autoregress:
             action_mean = self.auto_regress(encoder_out)
+
         else:
             decoder_input = encoder_out.clone().detach()
-            decoder_input = self.positional_encoder(decoder_input)
+
+            if self.use_pos_encoding:
+                decoder_input = self.positional_encoder(decoder_input)
+
             decoder_out = self.dec(
                 tgt=decoder_input,
                 memory=encoder_out,
@@ -232,11 +245,13 @@ class ActorCritic(nn.Module):
     def evaluate(self, state, action):
 
         embedded_state = self.state_embedding(state)
-        embedded_state = self.positional_encoder(embedded_state)
+
+        if self.use_pos_encoding:
+            embedded_state = self.positional_encoder(embedded_state)
 
         encoder_out = self.enc(embedded_state)
 
-        if self.autoregress:
+        if self.use_autoregress:
             embedded_action = self.action_embedding(
                 action.reshape(
                     action.shape[0],
@@ -244,7 +259,10 @@ class ActorCritic(nn.Module):
                     self.d_action,
                 )
             )
-            embedded_action = self.positional_encoder(embedded_action)
+
+            if self.use_pos_encoding:
+                embedded_action = self.positional_encoder(embedded_action)
+
             tgt_mask = nn.Transformer.generate_square_subsequent_mask(
                 embedded_action.shape[1], device=self.device
             )
@@ -255,7 +273,10 @@ class ActorCritic(nn.Module):
                 tgt_is_causal=True,
             )
         else:
-            decoder_input = self.positional_encoder(encoder_out)
+
+            if self.use_pos_encoding:
+                decoder_input = self.positional_encoder(encoder_out)
+
             decoder_out = self.dec(tgt=decoder_input, memory=encoder_out)
 
         action_mean = self.actor_head(decoder_out)

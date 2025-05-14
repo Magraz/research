@@ -154,8 +154,7 @@ class PPO_Evaluator:
                 if episode_count >= n_rollouts:
                     break
 
-            mean_rew = mean(rewards)
-            data[n_agents].append(mean_rew)
+            data[n_agents] = rewards
 
             print(data)
 
@@ -174,11 +173,22 @@ class PPO_Evaluator:
         # Add error bars if there are multiple rewards per agent count
         errors = [np.std(data[n]) if len(data[n]) > 1 else 0 for n in n_agents]
         if any(errors):
-            plt.fill_between(
+            # plt.fill_between(
+            #     n_agents,
+            #     [r - e for r, e in zip(rewards, errors)],
+            #     [r + e for r, e in zip(rewards, errors)],
+            #     alpha=0.2,
+            # )
+
+            plt.errorbar(
                 n_agents,
-                [r - e for r, e in zip(rewards, errors)],
-                [r + e for r, e in zip(rewards, errors)],
-                alpha=0.2,
+                rewards,
+                yerr=errors,
+                fmt="o-",  # This maintains your original line style
+                linewidth=2,
+                markersize=8,
+                capsize=5,  # Adds caps to the error bars
+                ecolor="gray",  # Optional: set error bar color
             )
 
         # Customize plot
@@ -187,16 +197,6 @@ class PPO_Evaluator:
         plt.xlabel("Number of Agents", fontsize=14)
         plt.ylabel("Mean Reward", fontsize=14)
         plt.xticks(n_agents)  # Ensure x-axis shows exact agent numbers
-
-        # Add value labels above each point
-        # for i, reward in enumerate(rewards):
-        #     plt.annotate(
-        #         f"{reward:.2f}",
-        #         (n_agents[i], rewards[i]),
-        #         textcoords="offset points",
-        #         xytext=(0, 10),
-        #         ha="center",
-        #     )
 
         plt.tight_layout()
 

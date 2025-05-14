@@ -84,7 +84,7 @@ class SalpDomain(BaseScenario):
             self.world_x_dim = 10
             self.world_y_dim = 10
 
-        self.viewer_zoom = kwargs.pop("viewer_zoom", 2.0)
+        self.viewer_zoom = kwargs.pop("viewer_zoom", 1.0)
 
         # Reward Shaping
         self.frechet_shaping_factor = 1.0
@@ -160,7 +160,7 @@ class SalpDomain(BaseScenario):
         #     )
 
         # Initialize reward tensors
-        self.reached_goal_bonus = 5
+        self.reached_goal_bonus = 1
         self.global_rew = torch.zeros(batch_dim, device=device, dtype=torch.float32)
         self.centroid_rew = self.global_rew.clone()
         self.frechet_rew = self.global_rew.clone()
