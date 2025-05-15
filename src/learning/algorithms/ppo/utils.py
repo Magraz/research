@@ -17,7 +17,13 @@ def process_state(
 
                     return state
 
-        case "transformer" | "gat":
+        case (
+            "transformer_encoder"
+            | "transformer_decoder"
+            | "transformer"
+            | "gat"
+            | "gcn"
+        ):
             match (representation):
                 case "local":
                     state = torch.stack(state).transpose(1, 0)
@@ -37,7 +43,13 @@ def get_state_dim(obs_shape, state_representation: str, model: str, n_agents: in
                 case "local":
                     return obs_shape * n_agents
 
-        case "transformer" | "gat":
+        case (
+            "transformer_encoder"
+            | "transformer_decoder"
+            | "transformer"
+            | "gat"
+            | "gcn"
+        ):
             match (state_representation):
                 case "local":
                     return obs_shape

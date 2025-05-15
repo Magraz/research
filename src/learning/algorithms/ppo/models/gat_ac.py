@@ -89,19 +89,21 @@ class ActorCritic(torch.nn.Module):
         graph_emb = self.att_pool(x, batched_graph.batch)
         value = self.value_head(graph_emb)
 
-        mean = (
+        action_mean = (
             self.actor_head(x)
             .reshape((state.shape[0], self.n_agents_eval, self.d_action))
             .flatten(start_dim=1)
         )
 
-        return mean, value
+        return action_mean, value
 
     def forward(self, batch: Batch):
-
-        x = F.gelu(self.gat1(batch.x, batch.edge_index))
-        x = F.layer_norm(x, x.shape[1:])  # Add normalization
-        x = F.gelu(self.gat2(x, batch.edge_index))
+        x = self.gat1(batch.x, batch.edge_index)
+        x = F.gelu(x)
+        # Normalization is important for GAT training stability
+        x = F.layer_norm(x, x.shape[1:])
+        x = self.gat2(x, batch.edge_index)
+        x = F.gelu(x)
 
         return x
 
@@ -151,7 +153,7 @@ if __name__ == "__main__":
         n_agents_train=4,
         n_agents_eval=4,
         d_state=18,
-        d_action=2 * 4,
+        d_action=2,
         device=device,
     ).to(device)
 
