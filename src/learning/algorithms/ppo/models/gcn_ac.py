@@ -1,10 +1,10 @@
 import torch
 from torch_geometric.data import Data, Batch
-from torch_geometric.nn import GATv2Conv
+from torch_geometric.nn import GCNConv
 import torch.nn.functional as F
 from torch import nn
 from torch.distributions import Normal
-from torch_geometric.nn import AttentionalAggregation
+from torch_geometric.nn import global_mean_pool
 
 
 class ActorCritic(torch.nn.Module):
@@ -32,8 +32,13 @@ class ActorCritic(torch.nn.Module):
             * -0.5
         )
 
-        self.gat1 = GATv2Conv(d_state, hidden_dim, heads=2, concat=True)
-        self.gat2 = GATv2Conv(hidden_dim * 2, hidden_dim, heads=1, concat=False)
+        # GCN layers instead of GAT
+        self.gcn1 = GCNConv(d_state, hidden_dim)
+        self.gcn2 = GCNConv(hidden_dim, hidden_dim)
+
+        # Add batch normalization for stable training
+        self.bn1 = nn.BatchNorm1d(hidden_dim)
+        self.bn2 = nn.BatchNorm1d(hidden_dim)
 
         self.actor_head = nn.Sequential(
             nn.Linear(hidden_dim, 128),
@@ -52,8 +57,9 @@ class ActorCritic(torch.nn.Module):
             nn.Linear(128, 1),
         )
 
-        self.att_pool = AttentionalAggregation(
-            nn.Sequential(nn.Linear(hidden_dim, 128), nn.GELU(), nn.Linear(128, 1))
+        # Simple pooling with learnable weights
+        self.pool_weight = nn.Sequential(
+            nn.Linear(hidden_dim, 128), nn.GELU(), nn.Linear(128, 1)
         )
 
     def create_chain_graph_batch(self, x_tensor):
@@ -78,6 +84,12 @@ class ActorCritic(torch.nn.Module):
 
         return graphs
 
+    def weighted_pool(self, x, batch):
+        """Custom pooling with learned weights"""
+        weights = self.pool_weight(x)
+        weights = F.softmax(weights, dim=0)
+        return torch.sum(x * weights, dim=0)
+
     def get_action_and_value(self, state):
 
         graph_list = self.create_chain_graph_batch(state)
@@ -98,10 +110,16 @@ class ActorCritic(torch.nn.Module):
         return mean, value
 
     def forward(self, batch: Batch):
+        # First GCN layer
+        x = self.gcn1(batch.x, batch.edge_index)
+        x = F.gelu(x)
 
-        x = F.gelu(self.gat1(batch.x, batch.edge_index))
-        x = F.layer_norm(x, x.shape[1:])  # Add normalization
-        x = F.gelu(self.gat2(x, batch.edge_index))
+        # Normalization is important for GCN training stability
+        x = F.layer_norm(x, x.shape[1:])
+
+        # Second GCN layer
+        x = self.gcn2(x, batch.edge_index)
+        x = F.gelu(x)
 
         return x
 

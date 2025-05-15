@@ -16,8 +16,7 @@ class ActorCritic(nn.Module):
         # Model specific
         d_model: int = 64,
         n_heads: int = 2,
-        n_encoder_layers: int = 1,
-        n_decoder_layers: int = 1,
+        n_encoder_layers: int = 2,
         n_agents_max: int = 24,
     ):
         super(ActorCritic, self).__init__()
@@ -25,6 +24,7 @@ class ActorCritic(nn.Module):
         # INFO
         self.d_model = d_model
         self.n_agents_eval = n_agents_eval
+        self.n_agents_train = n_agents_train
         self.device = device
         self.d_action = d_action
 
@@ -33,6 +33,8 @@ class ActorCritic(nn.Module):
             torch.ones(d_action * n_agents_train, requires_grad=True, device=device)
             * -0.5
         )
+
+        self.layer_norm = nn.LayerNorm(d_model)
 
         self.state_embedding = nn.Sequential(
             nn.LayerNorm(d_state), nn.Linear(d_state, d_model), nn.GELU()
@@ -45,12 +47,6 @@ class ActorCritic(nn.Module):
         self.enc = nn.TransformerEncoder(
             encoder_layer, n_encoder_layers, enable_nested_tensor=False
         )
-
-        # Decoder Params
-        decoder_layer = nn.TransformerDecoderLayer(
-            d_model, n_heads, batch_first=True, norm_first=True, dim_feedforward=1024
-        )
-        self.dec = nn.TransformerDecoder(decoder_layer, n_decoder_layers)
 
         self.actor_head = nn.Sequential(
             nn.Linear(d_model, 128),
@@ -79,14 +75,8 @@ class ActorCritic(nn.Module):
 
         encoder_out = self.enc(embedded_state)
 
-        decoder_input = encoder_out.clone().detach()
-
-        decoder_out = self.dec(
-            tgt=decoder_input,
-            memory=encoder_out,
-        )
-
-        action_mean = self.actor_head(decoder_out)
+        # Forward actor
+        action_mean = self.actor_head(encoder_out)
 
         # Attention-pooled value function
         attn_weights = self.value_pool(encoder_out)
@@ -96,14 +86,7 @@ class ActorCritic(nn.Module):
 
     def get_value(self, state: torch.Tensor):
         with torch.no_grad():
-            embedded_state = self.state_embedding(state)
-
-            encoder_out = self.enc(embedded_state)
-
-            # Attention-pooled value function
-            attn_weights = self.value_pool(encoder_out)
-            value = self.value_head(torch.sum(encoder_out * attn_weights, dim=1))
-
+            _, value = self.forward(state)
             return value
 
     def act(self, state, deterministic=False):
@@ -113,7 +96,9 @@ class ActorCritic(nn.Module):
         if deterministic:
             return action_mean.flatten(start_dim=1).detach()
 
-        action_std = torch.exp(self.log_action_std[: state.shape[1] * self.d_action])
+        action_std = torch.exp(
+            self.log_action_std[: self.n_agents_train * self.d_action]
+        )
 
         dist = Normal(action_mean.flatten(start_dim=1), action_std)
 
@@ -126,7 +111,7 @@ class ActorCritic(nn.Module):
             value.detach(),
         )
 
-    def evaluate(self, state, action):
+    def evaluate(self, state: torch.Tensor, action: torch.Tensor):
 
         action_mean, value = self.forward(state)
 
@@ -144,7 +129,8 @@ if __name__ == "__main__":
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     model = ActorCritic(
-        n_agents=4,
+        n_agents_train=8,
+        n_agents_eval=8,
         d_state=18,
         d_action=2,
         device=device,

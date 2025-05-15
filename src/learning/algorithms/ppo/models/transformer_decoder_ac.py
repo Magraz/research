@@ -1,5 +1,7 @@
+import math
 import torch
 import torch.nn as nn
+from enum import Enum
 from torch.distributions.normal import Normal
 
 
@@ -16,8 +18,7 @@ class ActorCritic(nn.Module):
         # Model specific
         d_model: int = 64,
         n_heads: int = 2,
-        n_encoder_layers: int = 1,
-        n_decoder_layers: int = 1,
+        n_decoder_layers: int = 2,
         n_agents_max: int = 24,
     ):
         super(ActorCritic, self).__init__()
@@ -36,14 +37,6 @@ class ActorCritic(nn.Module):
 
         self.state_embedding = nn.Sequential(
             nn.LayerNorm(d_state), nn.Linear(d_state, d_model), nn.GELU()
-        )
-
-        # Encoder Params
-        encoder_layer = nn.TransformerEncoderLayer(
-            d_model, n_heads, batch_first=True, norm_first=True, dim_feedforward=1024
-        )
-        self.enc = nn.TransformerEncoder(
-            encoder_layer, n_encoder_layers, enable_nested_tensor=False
         )
 
         # Decoder Params
@@ -77,32 +70,32 @@ class ActorCritic(nn.Module):
     def forward(self, state: torch.Tensor):
         embedded_state = self.state_embedding(state)
 
-        encoder_out = self.enc(embedded_state)
-
-        decoder_input = encoder_out.clone().detach()
-
-        decoder_out = self.dec(
-            tgt=decoder_input,
-            memory=encoder_out,
+        # Generate causal mask
+        mask = nn.Transformer.generate_square_subsequent_mask(
+            embedded_state.shape[1], device=self.device
         )
 
+        # Pass through decoder (with self-attention)
+        # In decoder-only mode, we use the same tensor for target and memory
+        decoder_out = self.dec(
+            tgt=embedded_state,
+            memory=embedded_state,  # Same as target for decoder-only
+            tgt_mask=mask,
+            tgt_is_causal=True,
+        )
+
+        # Get actions from decoder output
         action_mean = self.actor_head(decoder_out)
 
         # Attention-pooled value function
-        attn_weights = self.value_pool(encoder_out)
-        value = self.value_head(torch.sum(encoder_out * attn_weights, dim=1))
+        attn_weights = self.value_pool(decoder_out)
+        value = self.value_head(torch.sum(decoder_out * attn_weights, dim=1))
 
         return action_mean, value
 
     def get_value(self, state: torch.Tensor):
         with torch.no_grad():
-            embedded_state = self.state_embedding(state)
-
-            encoder_out = self.enc(embedded_state)
-
-            # Attention-pooled value function
-            attn_weights = self.value_pool(encoder_out)
-            value = self.value_head(torch.sum(encoder_out * attn_weights, dim=1))
+            _, value = self.forward(state)
 
             return value
 
@@ -144,7 +137,8 @@ if __name__ == "__main__":
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     model = ActorCritic(
-        n_agents=4,
+        n_agents_train=4,
+        n_agents_eval=4,
         d_state=18,
         d_action=2,
         device=device,
