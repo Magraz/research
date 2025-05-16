@@ -63,6 +63,7 @@ class PPO_Trainer:
         # Create environment
         n_envs = env_config.n_envs
         n_agents = env_config.n_agents
+
         env = create_env(
             self.batch_dir,
             n_envs,
@@ -117,7 +118,6 @@ class PPO_Trainer:
         global_step = 0
         checkpoint_step = 0
         total_episodes = 0
-        max_steps_per_episode = 512
         rmax = -1e6
         running_avg_reward = 0
 
@@ -172,7 +172,7 @@ class PPO_Trainer:
                 )
 
                 # Create timeout boolean mask
-                timeout = episode_len == max_steps_per_episode
+                timeout = episode_len == params.n_max_steps_per_episode
 
                 # Increase counters
                 global_step += env_config.n_envs
