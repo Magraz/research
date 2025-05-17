@@ -144,11 +144,45 @@ if __name__ == "__main__":
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     model = ActorCritic(
-        n_agents=4,
+        n_agents_train=8,
+        n_agents_eval=8,
         d_state=18,
         d_action=2,
         device=device,
     ).to(device)
 
+    model.eval()
+
+    # Count params
     pytorch_total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(pytorch_total_params)
+
+    # --- monkey-patch: force MultiheadAttention to return weights ----------
+    for layer in model.enc.layers:
+        old_fwd = layer.self_attn.forward
+
+        def fwd(*args, **kwargs):
+            kwargs["need_weights"] = True  # enable scores
+            kwargs["average_attn_weights"] = False
+            return old_fwd(*args, **kwargs)
+
+        layer.self_attn.forward = fwd
+
+    # --- hook to grab them --------------------------------------------------
+    attn_scores = {}
+
+    def make_hook(name):
+        def hook(_, __, out):  # out = (attn_out, attn_w)
+            attn_scores[name] = out[1].detach()  # (B, H, L, L)
+
+        return hook
+
+    for i, layer in enumerate(model.enc.layers):
+        layer.self_attn.register_forward_hook(make_hook(f"L{i}"))
+
+    # -----------------------------------------------------------------------
+    x = torch.randn(1, 8, 18).to(device)  # (batch, sequence, d_model)
+    x = model.state_embedding(x)
+    _ = model.enc(x)
+
+    print(attn_scores["L0"].shape)

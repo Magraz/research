@@ -9,7 +9,6 @@ from learning.algorithms.ppo.types import Experiment, Params
 from learning.algorithms.ppo.ppo import PPO
 from learning.algorithms.ppo.utils import get_state_dim, process_state
 
-import pickle as pkl
 import dill
 from pathlib import Path
 import random

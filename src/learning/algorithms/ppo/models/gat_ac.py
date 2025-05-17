@@ -5,6 +5,20 @@ import torch.nn.functional as F
 from torch import nn
 from torch.distributions import Normal
 from torch_geometric.nn import AttentionalAggregation
+import matplotlib.pyplot as plt
+import networkx as nx
+import numpy as np
+from learning.plotting.utils import (
+    plot_3d_attention_surface,
+    plot_attention_heatmap,
+    plot_attention_over_time,
+    plot_attention_time_series,
+    plot_gat_attention_as_graph,
+    plot_diagonal_attention_timeline,
+    plot_3d_attention_interactive,
+    plot_3d_attention_scatter,
+    plot_3d_attention_volume,
+)
 
 
 class ActorCritic(torch.nn.Module):
@@ -107,6 +121,16 @@ class ActorCritic(torch.nn.Module):
 
         return x
 
+    def forward_evaluation(self, batch: Batch):
+        x, att1 = self.gat1(batch.x, batch.edge_index, return_attention_weights=True)
+        x = F.gelu(x)
+        # Normalization is important for GAT training stability
+        x = F.layer_norm(x, x.shape[1:])
+        x, att2 = self.gat2(x, batch.edge_index, return_attention_weights=True)
+        x = F.gelu(x)
+
+        return x, (att1, att2)
+
     def get_value(self, state: torch.Tensor):
         with torch.no_grad():
             _, value = self.get_action_and_value(state)
@@ -145,17 +169,102 @@ class ActorCritic(torch.nn.Module):
 
         return action_logprobs, value, dist_entropy
 
+    def get_batched_graph(self, x):
+        graph_list = self.create_chain_graph_batch(x)
+        return Batch.from_data_list(graph_list)
+
 
 if __name__ == "__main__":
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
     model = ActorCritic(
-        n_agents_train=4,
-        n_agents_eval=4,
+        n_agents_train=8,
+        n_agents_eval=8,
         d_state=18,
         d_action=2,
         device=device,
     ).to(device)
 
+    model.eval()
+
     pytorch_total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(pytorch_total_params)
+
+    # toy graph ----------------------------------------------------
+    x = torch.randn(1, 8, 18).to(device)  # 8 nodes, 18-d features
+    graph_list = model.create_chain_graph_batch(x)
+
+    batched_graph = Batch.from_data_list(graph_list)
+
+    x, attention_layers = model.forward_evaluation(batched_graph)
+
+    # Plot first layer attention (ei is edge_index, alpha is attention weights)
+    edge_index, attention_weights = attention_layers[0]
+
+    fig = plot_gat_attention_as_graph(edge_index, attention_weights)
+    plt.savefig("gat_attention_layer1.png", dpi=300, bbox_inches="tight")
+
+    fig = plot_attention_heatmap(edge_index, attention_weights)
+    plt.savefig("attention_heatmap_layer1.png", dpi=300, bbox_inches="tight")
+
+    # Plot second layer attention
+    edge_index, attention_weights = attention_layers[1]
+
+    fig = plot_gat_attention_as_graph(edge_index, attention_weights)
+    plt.savefig("gat_attention_layer2.png", dpi=300, bbox_inches="tight")
+
+    fig = plot_attention_heatmap(edge_index, attention_weights)
+    plt.savefig("attention_heatmap_layer2.png", dpi=300, bbox_inches="tight")
+
+    # Plot through time
+    edge_indices = []
+    attention_weights = []
+
+    # Run model over multiple timesteps
+    for t in range(100):  # For example, 10 timesteps
+        # Your input at this timestep
+        x_t = torch.randn(1, 8, 18).to(device)
+
+        # Forward pass
+        graph_list = model.create_chain_graph_batch(x_t)
+        batched_graph = Batch.from_data_list(graph_list)
+
+        # Get attention weights
+        _, attention_layers = model.forward_evaluation(batched_graph)
+
+        # Store edge indices and weights from first layer
+        edge_index, attn_weight = attention_layers[0]
+
+        edge_indices.append(edge_index)
+        attention_weights.append(attn_weight)
+
+    fig = plot_attention_over_time(edge_indices, attention_weights)
+    plt.savefig("attention_over_time.png", dpi=300)
+
+    fig = plot_attention_time_series(edge_indices, attention_weights, top_k=5)
+    plt.savefig("attention_time_series.png", dpi=300)
+
+    fig = plot_3d_attention_surface(edge_indices, attention_weights)
+    plt.savefig("attention_3D.png", dpi=300)
+
+    ffig = plot_diagonal_attention_timeline(
+        edge_indices, attention_weights, num_samples=5
+    )
+    plt.savefig("attention_timeline.png", dpi=300)
+
+    # For the standard 3D scatter plot
+    fig = plot_3d_attention_scatter(edge_indices, attention_weights, sample_rate=5)
+    plt.savefig("attention_3d_scatter.png", dpi=300, bbox_inches="tight")
+
+    # For an interactive version (requires plotly)
+    # pip install plotly
+    fig_interactive = plot_3d_attention_interactive(
+        edge_indices, attention_weights, sample_rate=5
+    )
+    # This creates an HTML file you can open in a browser
+
+    # For the 3D volume visualization
+    fig_volume = plot_3d_attention_volume(
+        edge_indices, attention_weights, sample_rate=5
+    )
+    plt.savefig("attention_3d_volume.png", dpi=300, bbox_inches="tight")

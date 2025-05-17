@@ -1,5 +1,7 @@
 *.mp4
-*.pyc
+*.mp4
+*.png
+*.html
 *.vscode
 *.venv
 outputs

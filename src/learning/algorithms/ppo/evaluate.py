@@ -7,12 +7,19 @@ from learning.environments.create_env import create_env
 from learning.algorithms.ppo.types import Experiment, Params
 from learning.algorithms.ppo.ppo import PPO
 from learning.algorithms.ppo.utils import get_state_dim, process_state
+from learning.plotting.utils import (
+    plot_attention_heatmap,
+    plot_3d_attention_volume,
+    plot_attention_time_series,
+)
 
 import dill
 from pathlib import Path
 import matplotlib.pyplot as plt
 import random
 from statistics import mean
+
+from vmas.simulator.utils import save_video
 
 
 class PPO_Evaluator:
@@ -30,22 +37,25 @@ class PPO_Evaluator:
         self.video_name = video_name
         self.trial_dir = trials_dir / trial_id
         self.logs_dir = self.trial_dir / "logs"
+        self.plots_dir = self.trial_dir / "plots"
         self.models_dir = self.trial_dir / "models"
+        self.video_dir = self.trial_dir / "video"
 
         # Create directories
         self.models_dir.mkdir(parents=True, exist_ok=True)
         self.logs_dir.mkdir(parents=True, exist_ok=True)
+        self.plots_dir.mkdir(parents=True, exist_ok=True)
+        self.video_dir.mkdir(parents=True, exist_ok=True)
 
     def validate(
         self,
         exp_config: Experiment,
         env_config: EnvironmentParams,
-        n_rollouts: int = 50,
-        extra_agents: int = 16,
     ):
 
         params = Params(**exp_config.params)
 
+        # Create environment to get dimension data
         env = create_env(
             self.batch_dir,
             1,
@@ -62,6 +72,43 @@ class PPO_Evaluator:
             exp_config.model,
             env_config.n_agents,
         )
+
+        # Get attention plots
+        self.get_attention_plots(
+            env,
+            params,
+            env_config.n_agents,
+            d_state,
+            d_action,
+            exp_config,
+            env_config,
+        )
+
+        # Get scalability plots
+        self.get_scalability_plots(
+            env,
+            params,
+            env_config.n_agents,
+            d_state,
+            d_action,
+            exp_config,
+            env_config,
+            n_rollouts=50,
+            extra_agents=16,
+        )
+
+    def get_scalability_plots(
+        self,
+        env,
+        params: Params,
+        n_agents: int,
+        d_state: int,
+        d_action: int,
+        exp_config: Experiment,
+        env_config: EnvironmentParams,
+        n_rollouts: int,
+        extra_agents: int,
+    ):
 
         n_agents_list = [env_config.n_agents + i for i in range(extra_agents)]
         data = {n_agents: [] for n_agents in n_agents_list}
@@ -204,3 +251,120 @@ class PPO_Evaluator:
         plt.savefig(
             Path(self.logs_dir) / "agents_vs_reward.png", dpi=300, bbox_inches="tight"
         )
+
+    def get_attention_plots(
+        self,
+        env,
+        params: Params,
+        n_agents: int,
+        d_state: int,
+        d_action: int,
+        exp_config: Experiment,
+        env_config: EnvironmentParams,
+    ):
+
+        learner = PPO(
+            self.device,
+            exp_config.model,
+            params,
+            env_config.n_agents,
+            n_agents,
+            1,
+            d_state,
+            d_action,
+        )
+        learner.load(self.models_dir / "best_model")
+
+        # Store edges and attention weights
+        edge_indices = []
+        attention_weights = []
+
+        # Frame list for vide
+        frames = []
+
+        # Set policy to evaluation mode
+        learner.policy.eval()
+
+        # Reset environment
+        state = env.reset()
+
+        for step in range(0, params.n_max_steps_per_episode):
+
+            if exp_config.model == "gat":
+                x = learner.policy.get_batched_graph(
+                    process_state(
+                        state,
+                        env_config.state_representation,
+                        exp_config.model,
+                    )
+                )
+                _, attention_layers = learner.policy.forward_evaluation(x)
+
+                # Store edge indices and weights from last layer
+                edge_index, attn_weight = attention_layers[-1]
+
+                edge_indices.append(edge_index)
+                attention_weights.append(attn_weight)
+
+            action = torch.clamp(
+                learner.deterministic_action(
+                    process_state(
+                        state,
+                        env_config.state_representation,
+                        exp_config.model,
+                    )
+                ),
+                min=-1.0,
+                max=1.0,
+            )
+
+            action_tensor = action.reshape(
+                1,
+                n_agents,
+                d_action,
+            ).transpose(1, 0)
+
+            # Turn action tensor into list of tensors with shape (n_env, action_dim)
+            action_tensor_list = torch.unbind(action_tensor)
+
+            state, _, done, _ = env.step(action_tensor_list)
+
+            # Store frames for video
+            frames.append(
+                env.render(
+                    mode="rgb_array",
+                    agent_index_focus=None,  # Can give the camera an agent index to focus on
+                    visualize_when_rgb=False,
+                )
+            )
+
+            if torch.any(done):
+                break
+
+        # Save video
+        save_video(
+            str(self.video_dir / "plots_video"), frames, fps=1 / env.scenario.world.dt
+        )
+
+        # Save plots
+        if exp_config.model == "gat":
+
+            fig = plot_attention_heatmap(edge_indices[-1], attention_weights[-1])
+            plt.savefig(
+                self.plots_dir / f"{exp_config.model}_attention_heatmap_last.png",
+                dpi=300,
+            )
+
+            fig = plot_3d_attention_volume(
+                edge_indices, attention_weights, sample_rate=5
+            )
+            plt.savefig(
+                self.plots_dir / f"{exp_config.model}_attention_3d_volume.png",
+                dpi=300,
+            )
+
+            fig = plot_attention_time_series(edge_indices, attention_weights, top_k=10)
+            plt.savefig(
+                self.plots_dir / f"{exp_config.model}_attention_time_series.png",
+                dpi=300,
+            )
