@@ -21,6 +21,7 @@ def process_state(
             "transformer_encoder"
             | "transformer_decoder"
             | "transformer"
+            | "transformer_full"
             | "gat"
             | "gcn"
         ):
@@ -47,6 +48,7 @@ def get_state_dim(obs_shape, state_representation: str, model: str, n_agents: in
             "transformer_encoder"
             | "transformer_decoder"
             | "transformer"
+            | "transformer_full"
             | "gat"
             | "gcn"
         ):

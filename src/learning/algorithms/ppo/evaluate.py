@@ -281,7 +281,12 @@ class PPO_Evaluator:
         learner.policy.eval()
 
         match (exp_config.model):
-            case "transformer" | "transformer_encoder" | "transformer_decoder":
+            case (
+                "transformer"
+                | "transformer_full"
+                | "transformer_encoder"
+                | "transformer_decoder"
+            ):
                 attention_weights = learner.policy.build_attention_hooks()
                 attention_over_time = {
                     "Enc_L0": [],  # Encoder self-attention
@@ -330,7 +335,12 @@ class PPO_Evaluator:
                     edge_indices.append(edge_index)
                     attention_weights.append(attn_weight)
 
-                case "transformer" | "transformer_encoder" | "transformer_decoder":
+                case (
+                    "transformer"
+                    | "transformer_full"
+                    | "transformer_encoder"
+                    | "transformer_decoder"
+                ):
                     _ = learner.policy.forward(
                         process_state(
                             state,
@@ -390,7 +400,12 @@ class PPO_Evaluator:
                     dpi=300,
                 )
 
-            case "transformer" | "transformer_encoder" | "transformer_decoder":
+            case (
+                "transformer"
+                | "transformer_full"
+                | "transformer_encoder"
+                | "transformer_decoder"
+            ):
                 # Create grid visualizations
                 print("Creating grid visualizations...")
                 for attn_type in ["Enc_L0", "Dec_L0", "Cross_L0"]:

@@ -8,6 +8,7 @@ ENVIRONMENT = EnvironmentEnum.VMAS_SALP
 BATCH_NAME = f"{ENVIRONMENT}_local_8a"
 EXPERIMENTS_LIST = [
     "transformer",
+    "transformer_full",
     "transformer_encoder",
     "transformer_decoder",
     "gat",

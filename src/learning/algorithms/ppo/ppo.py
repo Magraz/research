@@ -100,6 +100,10 @@ class PPO:
                 from learning.algorithms.ppo.models.mlp_ac import ActorCritic
             case "transformer":
                 from learning.algorithms.ppo.models.transformer_ac import ActorCritic
+            case "transformer_full":
+                from learning.algorithms.ppo.models.transformer_full_ac import (
+                    ActorCritic,
+                )
             case "transformer_encoder":
                 from learning.algorithms.ppo.models.transformer_encoder_ac import (
                     ActorCritic,
