@@ -11,6 +11,8 @@ from learning.plotting.utils import (
     plot_attention_heatmap,
     plot_3d_attention_volume,
     plot_attention_time_series,
+    plot_attention_over_time_grid,
+    plot_key_attention_trends,
 )
 
 import dill
@@ -275,36 +277,29 @@ class PPO_Evaluator:
         )
         learner.load(self.models_dir / "best_model")
 
-        # Store edges and attention weights
-        edge_indices = []
-        attention_weights = []
+        # Set policy to evaluation mode
+        learner.policy.eval()
+
+        match (exp_config.model):
+            case "transformer" | "transformer_encoder" | "transformer_decoder":
+                attention_weights = learner.policy.build_attention_hooks()
+                attention_over_time = {
+                    "Enc_L0": [],  # Encoder self-attention
+                    "Dec_L0": [],  # Decoder self-attention
+                    "Cross_L0": [],  # Cross-attention
+                }
+            case "gat":
+                # Store edges and attention weights
+                edge_indices = []
+                attention_weights = []
 
         # Frame list for vide
         frames = []
 
-        # Set policy to evaluation mode
-        learner.policy.eval()
-
         # Reset environment
         state = env.reset()
 
-        for step in range(0, params.n_max_steps_per_episode):
-
-            if exp_config.model == "gat":
-                x = learner.policy.get_batched_graph(
-                    process_state(
-                        state,
-                        env_config.state_representation,
-                        exp_config.model,
-                    )
-                )
-                _, attention_layers = learner.policy.forward_evaluation(x)
-
-                # Store edge indices and weights from last layer
-                edge_index, attn_weight = attention_layers[-1]
-
-                edge_indices.append(edge_index)
-                attention_weights.append(attn_weight)
+        for _ in range(0, params.n_max_steps_per_episode):
 
             action = torch.clamp(
                 learner.deterministic_action(
@@ -317,6 +312,39 @@ class PPO_Evaluator:
                 min=-1.0,
                 max=1.0,
             )
+
+            match (exp_config.model):
+                case "gat":
+                    x = learner.policy.get_batched_graph(
+                        process_state(
+                            state,
+                            env_config.state_representation,
+                            exp_config.model,
+                        )
+                    )
+                    _, attention_layers = learner.policy.forward_evaluation(x)
+
+                    # Store edge indices and weights from last layer
+                    edge_index, attn_weight = attention_layers[-1]
+
+                    edge_indices.append(edge_index)
+                    attention_weights.append(attn_weight)
+
+                case "transformer" | "transformer_encoder" | "transformer_decoder":
+                    _ = learner.policy.forward(
+                        process_state(
+                            state,
+                            env_config.state_representation,
+                            exp_config.model,
+                        )
+                    )
+
+                    # Store attention weights for this timestep
+                    for attn_type in attention_over_time:
+                        if attn_type in attention_weights:
+                            attention_over_time[attn_type].append(
+                                attention_weights[attn_type].clone()
+                            )
 
             action_tensor = action.reshape(
                 1,
@@ -347,24 +375,52 @@ class PPO_Evaluator:
         )
 
         # Save plots
-        if exp_config.model == "gat":
+        match (exp_config.model):
+            case "gat":
 
-            fig = plot_attention_heatmap(edge_indices[-1], attention_weights[-1])
-            plt.savefig(
-                self.plots_dir / f"{exp_config.model}_attention_heatmap_last.png",
-                dpi=300,
-            )
+                plot_attention_heatmap(edge_indices[-1], attention_weights[-1])
+                plt.savefig(
+                    self.plots_dir / f"{exp_config.model}_attention_heatmap_last.png",
+                    dpi=300,
+                )
 
-            fig = plot_3d_attention_volume(
-                edge_indices, attention_weights, sample_rate=5
-            )
-            plt.savefig(
-                self.plots_dir / f"{exp_config.model}_attention_3d_volume.png",
-                dpi=300,
-            )
+                plot_attention_time_series(edge_indices, attention_weights, top_k=10)
+                plt.savefig(
+                    self.plots_dir / f"{exp_config.model}_attention_time_series.png",
+                    dpi=300,
+                )
 
-            fig = plot_attention_time_series(edge_indices, attention_weights, top_k=10)
-            plt.savefig(
-                self.plots_dir / f"{exp_config.model}_attention_time_series.png",
-                dpi=300,
-            )
+            case "transformer" | "transformer_encoder" | "transformer_decoder":
+                # Create grid visualizations
+                print("Creating grid visualizations...")
+                for attn_type in ["Enc_L0", "Dec_L0", "Cross_L0"]:
+                    if attn_type in attention_weights:
+                        for head_idx in range(2):  # Assuming 2 attention heads
+                            plot_attention_over_time_grid(
+                                attention_over_time,
+                                attn_type=attn_type,
+                                head_idx=head_idx,
+                                num_samples=5,
+                            )
+                            plt.savefig(
+                                self.plots_dir
+                                / f"{attn_type}_head{head_idx+1}_over_time.png",
+                                dpi=300,
+                            )
+
+                # Track key attention points
+                print("Creating trend plots...")
+                for attn_type in ["Enc_L0", "Dec_L0", "Cross_L0"]:
+                    if attn_type in attention_weights:
+                        for head_idx in range(2):
+                            plot_key_attention_trends(
+                                attention_over_time,
+                                attn_type=attn_type,
+                                head_idx=head_idx,
+                                top_k=10,  # You can adjust this number
+                            )
+                            plt.savefig(
+                                self.plots_dir
+                                / f"{attn_type}_head{head_idx+1}_trends.png",
+                                dpi=300,
+                            )

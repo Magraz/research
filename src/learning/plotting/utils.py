@@ -7,6 +7,13 @@ import networkx as nx
 from matplotlib.patches import Rectangle
 
 import plotly.graph_objects as go
+import matplotlib.pyplot as plt
+import numpy as np
+import seaborn as sns
+
+import torch
+
+# GAT plots
 
 
 def plot_diagonal_attention_timeline(
@@ -775,4 +782,369 @@ def plot_3d_attention_volume(
 
     ax.set_title("3D Attention Volume Visualization")
 
+    return fig
+
+
+# Transformer plots
+
+
+def plot_transformer_attention(attn_matrix, layer_name="", head_idx=0, figsize=(10, 8)):
+    """
+    Plot a single attention head as a heatmap
+
+    Args:
+        attn_matrix: Attention matrix with shape [B, H, L, L]
+        layer_name: Name of the layer (for title)
+        head_idx: Which attention head to visualize
+        figsize: Size of the figure
+    """
+    # Extract the first batch item and specified head
+    attention = attn_matrix[0, head_idx].cpu().numpy()
+
+    fig, ax = plt.subplots(figsize=figsize)
+
+    # Create heatmap
+    sns.heatmap(
+        attention,
+        annot=True,
+        fmt=".2f",
+        cmap="viridis",
+        linewidths=0.5,
+        cbar=True,
+        ax=ax,
+    )
+
+    # Set labels and title
+    ax.set_xlabel("Target Token Position")
+    ax.set_ylabel("Source Token Position")
+    ax.set_title(f"{layer_name} - Attention Head {head_idx}")
+
+    # Custom tick labels for agent positions
+    n_agents = attention.shape[0]
+    ax.set_xticklabels([f"Agent {i+1}" for i in range(n_agents)])
+    ax.set_yticklabels([f"Agent {i+1}" for i in range(n_agents)])
+
+    plt.tight_layout()
+    return fig
+
+
+def plot_all_attention_heads(attn_matrix, layer_name="", figsize=(15, 12)):
+    """
+    Plot all attention heads in a grid
+
+    Args:
+        attn_matrix: Attention matrix with shape [B, H, L, L]
+        layer_name: Name of the layer (for title)
+        figsize: Size of the figure
+    """
+    batch_size, n_heads, seq_len, _ = attn_matrix.shape
+
+    # Create grid layout based on number of heads
+    n_cols = min(4, n_heads)
+    n_rows = (n_heads + n_cols - 1) // n_cols
+
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=figsize)
+    if n_heads == 1:
+        axes = np.array([axes])
+    axes = axes.flatten()
+
+    for h in range(n_heads):
+        if h < len(axes):
+            attention = attn_matrix[0, h].cpu().numpy()
+
+            sns.heatmap(
+                attention,
+                annot=True,
+                fmt=".2f",
+                cmap="viridis",
+                linewidths=0.5,
+                cbar=True if h == 0 else False,
+                ax=axes[h],
+            )
+
+            axes[h].set_title(f"Head {h+1}")
+
+            if h % n_cols == 0:  # Leftmost plots
+                axes[h].set_ylabel("Source Agent")
+            else:
+                axes[h].set_ylabel("")
+
+            if h >= n_heads - n_cols:  # Bottom row
+                axes[h].set_xlabel("Target Agent")
+            else:
+                axes[h].set_xlabel("")
+
+            # Custom tick labels
+            axes[h].set_xticklabels([f"{i+1}" for i in range(seq_len)], rotation=45)
+            axes[h].set_yticklabels([f"{i+1}" for i in range(seq_len)])
+
+    # Hide unused subplots
+    for i in range(n_heads, len(axes)):
+        axes[i].axis("off")
+
+    fig.suptitle(f"{layer_name} - All Attention Heads", fontsize=16)
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+
+    return fig
+
+
+def plot_averaged_attention(attn_matrix, layer_name="", figsize=(10, 8)):
+    """
+    Plot attention averaged across all heads
+
+    Args:
+        attn_matrix: Attention matrix with shape [B, H, L, L]
+        layer_name: Name of the layer (for title)
+        figsize: Size of the figure
+    """
+    # Average over heads dimension
+    avg_attention = attn_matrix[0].mean(dim=0).cpu().numpy()
+
+    fig, ax = plt.subplots(figsize=figsize)
+
+    # Create heatmap
+    sns.heatmap(
+        avg_attention,
+        annot=True,
+        fmt=".2f",
+        cmap="viridis",
+        linewidths=0.5,
+        cbar=True,
+        ax=ax,
+    )
+
+    # Set labels and title
+    ax.set_xlabel("Target Agent")
+    ax.set_ylabel("Source Agent")
+    ax.set_title(f"{layer_name} - Average Attention Across All Heads")
+
+    # Custom tick labels
+    n_agents = avg_attention.shape[0]
+    ax.set_xticklabels([f"{i+1}" for i in range(n_agents)])
+    ax.set_yticklabels([f"{i+1}" for i in range(n_agents)])
+
+    plt.tight_layout()
+    return fig
+
+
+def plot_attention_across_layers(attn_scores_dict, figsize=(15, 10)):
+    """
+    Plot average attention for each layer side by side
+
+    Args:
+        attn_scores_dict: Dictionary of attention matrices {layer_name: attn_matrix}
+        figsize: Size of the figure
+    """
+    n_layers = len(attn_scores_dict)
+
+    fig, axes = plt.subplots(1, n_layers, figsize=figsize)
+    if n_layers == 1:
+        axes = [axes]
+
+    for i, (layer_name, attn_matrix) in enumerate(attn_scores_dict.items()):
+        # Average over heads dimension
+        avg_attention = attn_matrix[0].mean(dim=0).cpu().numpy()
+
+        # Create heatmap
+        sns.heatmap(
+            avg_attention,
+            annot=True,
+            fmt=".2f",
+            cmap="viridis",
+            linewidths=0.5,
+            cbar=True if i == n_layers - 1 else False,
+            ax=axes[i],
+        )
+
+        axes[i].set_title(f"{layer_name}")
+        axes[i].set_xlabel("Target Agent")
+
+        if i == 0:  # Only first plot shows y-label
+            axes[i].set_ylabel("Source Agent")
+
+        # Custom tick labels
+        n_agents = avg_attention.shape[0]
+        axes[i].set_xticklabels([f"{i+1}" for i in range(n_agents)])
+        axes[i].set_yticklabels([f"{i+1}" for i in range(n_agents)])
+
+    fig.suptitle("Attention Patterns Across Layers", fontsize=16)
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+
+    return fig
+
+
+def plot_attention_over_time_grid(
+    attention_over_time, attn_type="Enc_L0", head_idx=0, num_samples=5, figsize=(20, 6)
+):
+    """
+    Plot attention at selected timesteps in a grid
+
+    Args:
+        attention_over_time: Dict with lists of attention weights per timestep
+        attn_type: Type of attention to visualize
+        head_idx: Which attention head to visualize
+        num_samples: Number of timesteps to sample and display
+        figsize: Size of the figure
+    """
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    import numpy as np
+
+    attention_matrices = attention_over_time[attn_type]
+    total_timesteps = len(attention_matrices)
+
+    # Sample evenly spaced timesteps
+    if total_timesteps > num_samples:
+        sample_indices = np.linspace(0, total_timesteps - 1, num_samples, dtype=int)
+    else:
+        sample_indices = np.arange(total_timesteps)
+
+    # Create figure with subplots
+    fig, axes = plt.subplots(1, len(sample_indices), figsize=figsize)
+    if len(sample_indices) == 1:
+        axes = [axes]
+
+    # Plot each sampled timestep
+    for i, t_idx in enumerate(sample_indices):
+        attn_matrix = attention_matrices[t_idx][0, head_idx].cpu().numpy()
+
+        sns.heatmap(
+            attn_matrix,
+            annot=True,
+            fmt=".2f",
+            cmap="viridis",
+            vmin=0,
+            vmax=1,
+            cbar=(i == len(sample_indices) - 1),  # Only add colorbar on last plot
+            ax=axes[i],
+        )
+
+        axes[i].set_title(f"Timestep {t_idx+1}")
+
+        if i == 0:  # Only add y-label to leftmost plot
+            axes[i].set_ylabel("Source Position")
+        else:
+            axes[i].set_ylabel("")
+
+        axes[i].set_xlabel("Target Position")
+
+        # Add tick labels
+        n_positions = attn_matrix.shape[0]
+        axes[i].set_xticklabels([f"{j+1}" for j in range(n_positions)], rotation=45)
+        axes[i].set_yticklabels([f"{j+1}" for j in range(n_positions)])
+
+    # Add overall title
+    type_label = {
+        "Enc_L0": "Encoder Self-Attention",
+        "Dec_L0": "Decoder Self-Attention",
+        "Cross_L0": "Cross-Attention",
+    }
+    fig.suptitle(
+        f"{type_label.get(attn_type, attn_type)} - Head {head_idx+1} Evolution",
+        fontsize=16,
+    )
+
+    plt.tight_layout(rect=[0, 0, 1, 0.95])
+    return fig
+
+
+def plot_key_attention_trends(
+    attention_over_time, attn_type="Enc_L0", head_idx=0, top_k=5, figsize=(12, 8)
+):
+    """
+    Plot the top-k attention connections over time as a line chart
+
+    Args:
+        attention_over_time: Dict with lists of attention weights per timestep
+        attn_type: Type of attention to visualize ('Enc_L0', 'Dec_L0', or 'Cross_L0')
+        head_idx: Which attention head to visualize
+        top_k: Number of top connections to track
+        figsize: Size of the figure
+    """
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    # Get the attention matrices for the specified type
+    attention_matrices = attention_over_time[attn_type]
+
+    if not attention_matrices:
+        print(f"No attention data found for {attn_type}")
+        return plt.figure(figsize=(6, 4))
+
+    num_timesteps = len(attention_matrices)
+
+    # Get matrix dimensions from first timestep
+    batch_size, num_heads, seq_len, _ = attention_matrices[0].shape
+
+    # Calculate average attention over time for each source-target pair
+    # to determine which ones are most important
+    avg_attention = torch.zeros((seq_len, seq_len))
+
+    for t in range(num_timesteps):
+        avg_attention += attention_matrices[t][0, head_idx].cpu()
+
+    avg_attention /= num_timesteps
+
+    # Find top-k connections
+    flat_indices = torch.topk(avg_attention.view(-1), top_k).indices
+    top_src = flat_indices // seq_len
+    top_tgt = flat_indices % seq_len
+
+    # Create figure
+    fig, ax = plt.subplots(figsize=figsize)
+
+    # Line colors
+    colors = plt.cm.viridis(np.linspace(0, 1, top_k))
+
+    # Prepare time series data
+    time_steps = np.arange(1, num_timesteps + 1)
+
+    # Plot each top connection
+    for i in range(top_k):
+        src, tgt = top_src[i].item(), top_tgt[i].item()
+        values = []
+
+        for t in range(num_timesteps):
+            values.append(attention_matrices[t][0, head_idx, src, tgt].item())
+
+        ax.plot(
+            time_steps,
+            values,
+            markersize=4,
+            linewidth=2,
+            color=colors[i],
+            label=f"Src {src+1} → Tgt {tgt+1}",
+        )
+
+    # Add labels and title
+    ax.set_xlabel("Timestep", fontsize=12)
+    ax.set_ylabel("Attention Weight", fontsize=12)
+
+    type_label = {
+        "Enc_L0": "Encoder Self-Attention",
+        "Dec_L0": "Decoder Self-Attention",
+        "Cross_L0": "Cross-Attention",
+    }
+
+    ax.set_title(
+        f"{type_label.get(attn_type, attn_type)} - Head {head_idx+1}\nTop {top_k} Attention Connections",
+        fontsize=14,
+    )
+
+    # Add grid and legend
+    ax.grid(True, alpha=0.3)
+    ax.legend(loc="center left", bbox_to_anchor=(1, 0.5))
+
+    # Set y-axis limits
+    ax.set_ylim(0, 1.05)
+
+    # Format y-axis ticks as percentages
+    ax.set_yticks([0, 0.25, 0.5, 0.75, 1.0])
+    ax.set_yticklabels(["0%", "25%", "50%", "75%", "100%"])
+
+    # Add horizontal lines at key thresholds
+    ax.axhline(y=0.5, color="gray", linestyle="--", alpha=0.5)
+    ax.axhline(y=0.75, color="gray", linestyle="--", alpha=0.5)
+
+    plt.tight_layout()
     return fig

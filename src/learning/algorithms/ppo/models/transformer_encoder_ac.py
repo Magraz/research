@@ -1,6 +1,11 @@
 import torch
 import torch.nn as nn
 from torch.distributions.normal import Normal
+from matplotlib import pyplot as plt
+
+from learning.plotting.utils import (
+    plot_all_attention_heads,
+)
 
 
 class ActorCritic(nn.Module):
@@ -124,6 +129,41 @@ class ActorCritic(nn.Module):
 
         return action_logprob, value, dist_entropy
 
+    def build_attention_hooks(self):
+        # --- monkey-patch all attention modules to return weights ----------
+        for layer in self.enc.layers:
+            old_fwd = layer.self_attn.forward
+
+            def make_enc_fwd(old_fwd):
+                def new_fwd(*args, **kwargs):
+                    kwargs["need_weights"] = True
+                    kwargs["average_attn_weights"] = False
+                    return old_fwd(*args, **kwargs)
+
+                return new_fwd
+
+            layer.self_attn.forward = make_enc_fwd(old_fwd)
+
+        # --- hook to grab the weights --------------------------------------------------
+        attn_scores = {}
+
+        def make_hook(name):
+            def hook(_, __, out):
+                # MultiheadAttention returns (attn_output, attn_weights)
+                if isinstance(out, tuple) and len(out) == 2:
+                    attn_scores[name] = out[1].detach()  # Just store the weights
+                else:
+                    print(f"Warning: Unexpected output format for {name}: {type(out)}")
+                    attn_scores[name] = out
+
+            return hook
+
+        # Add encoder self-attention hooks
+        for i, layer in enumerate(self.enc.layers):
+            layer.self_attn.register_forward_hook(make_hook(f"Enc_L{i}"))
+
+        return attn_scores
+
 
 if __name__ == "__main__":
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -138,3 +178,20 @@ if __name__ == "__main__":
 
     pytorch_total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(pytorch_total_params)
+
+    attn_scores = model.build_attention_hooks()
+
+    # -----------------------------------------------------------------------
+    x = torch.randn(1, 8, 18).to(device)  # (batch, sequence, d_model)
+    x = model.state_embedding(x)
+    enc_out = model.enc(x)
+
+    print(attn_scores["Enc_L0"].shape)
+
+    # Now visualize the attention matrices
+
+    # Encoder self-attention
+    fig_enc = plot_all_attention_heads(
+        attn_scores["Enc_L0"], layer_name="Encoder Layer 0"
+    )
+    plt.savefig("transformer_encoder_attention.png", dpi=300, bbox_inches="tight")
