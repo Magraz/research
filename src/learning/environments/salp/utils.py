@@ -18,16 +18,34 @@ COLOR_MAP = {
 }
 
 COLOR_LIST = [
-    Color.GREEN,
-    Color.RED,
-    Color.BLUE,
-    Color.BLACK,
-    Color.LIGHT_GREEN,
-    Color.GRAY,
-    Color.WHITE,
-    (0.75, 0.25, 0.75),
-    (0.75, 0.75, 0.25),
-    (0.9, 0.25, 0.5),
+    # Primary colors
+    (1.0, 0.0, 0.0),  # Red
+    (0.0, 1.0, 0.0),  # Green
+    (0.0, 0.0, 1.0),  # Blue
+    # Secondary colors
+    (1.0, 1.0, 0.0),  # Yellow
+    (0.0, 1.0, 1.0),  # Cyan
+    (1.0, 0.0, 1.0),  # Magenta
+    # Tertiary colors
+    (1.0, 0.5, 0.0),  # Orange
+    (0.5, 1.0, 0.0),  # Lime
+    (0.0, 1.0, 0.5),  # Spring Green
+    (0.0, 0.5, 1.0),  # Azure
+    (0.5, 0.0, 1.0),  # Violet
+    (1.0, 0.0, 0.5),  # Rose
+    # Additional distinct colors
+    (0.75, 0.25, 0.75),  # Purple
+    (0.75, 0.75, 0.25),  # Olive
+    (0.25, 0.75, 0.75),  # Teal
+    (0.6, 0.3, 0.1),  # Brown
+    (0.9, 0.6, 0.6),  # Light Pink
+    (0.6, 0.9, 0.6),  # Light Green
+    (0.6, 0.6, 0.9),  # Light Blue
+    (1.0, 0.84, 0.0),  # Gold
+    (0.8, 0.4, 0.2),  # Coral
+    (0.5, 0.3, 0.8),  # Lavender
+    (0.3, 0.6, 0.3),  # Forest Green
+    (0.4, 0.5, 0.6),  # Slate Blue
 ]
 
 

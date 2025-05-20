@@ -115,7 +115,7 @@ class SalpDomain(BaseScenario):
                 target = Landmark(
                     name=f"target_{n_agent}_chain_{n_target}",
                     shape=Sphere(radius=self.target_radius),
-                    color=COLOR_MAP["RED"],
+                    color=COLOR_LIST[n_agent],
                     collide=False,
                 )
                 world.add_landmark(target)
@@ -129,7 +129,7 @@ class SalpDomain(BaseScenario):
                 render_action=True,
                 shape=Box(length=self.agent_radius * 2, width=self.agent_radius * 2.5),
                 dynamics=SalpDynamics(),
-                color=random.choice(COLOR_LIST),
+                color=COLOR_LIST[n_agent],
                 u_multiplier=self.u_multiplier,
             )
             world.add_agent(agent)
@@ -844,12 +844,12 @@ class SalpDomain(BaseScenario):
         geoms: List[Geom] = []
         # Target ranges
         targets = self.get_targets()
-        for target in targets:
+        for i, target in enumerate(targets):
             range_circle = rendering.make_circle(self.target_radius, filled=False)
             xform = rendering.Transform()
             xform.set_translation(*target.state.pos[env_index])
             range_circle.add_attr(xform)
-            range_circle.set_color(*COLOR_MAP["RED"].value)
+            range_circle.set_color(*COLOR_LIST[i])
             geoms.append(range_circle)
 
         a_pos = self.get_agent_chain_position()
