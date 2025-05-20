@@ -293,7 +293,7 @@ class PPO_Evaluator:
                     "Dec_L0": [],  # Decoder self-attention
                     "Cross_L0": [],  # Cross-attention
                 }
-            case "gat":
+            case "gat" | "graph_transformer":
                 # Store edges and attention weights
                 edge_indices = []
                 attention_weights = []
@@ -319,7 +319,7 @@ class PPO_Evaluator:
             )
 
             match (exp_config.model):
-                case "gat":
+                case "gat" | "graph_transformer":
                     x = learner.policy.get_batched_graph(
                         process_state(
                             state,
@@ -386,7 +386,7 @@ class PPO_Evaluator:
 
         # Save plots
         match (exp_config.model):
-            case "gat":
+            case "gat" | "graph_transformer":
 
                 plot_attention_heatmap(edge_indices[-1], attention_weights[-1])
                 plt.savefig(

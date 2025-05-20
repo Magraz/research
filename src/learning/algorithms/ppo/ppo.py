@@ -116,6 +116,10 @@ class PPO:
                 from learning.algorithms.ppo.models.gcn_ac import ActorCritic
             case "gat":
                 from learning.algorithms.ppo.models.gat_ac import ActorCritic
+            case "graph_transformer":
+                from learning.algorithms.ppo.models.graph_transformer_ac import (
+                    ActorCritic,
+                )
 
         # Create models
         self.policy = ActorCritic(

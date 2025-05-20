@@ -4,7 +4,6 @@ import torch.nn as nn
 from enum import Enum
 from torch.distributions.normal import Normal
 import matplotlib.pyplot as plt
-from learning.plotting.utils import plot_all_attention_heads
 
 
 class ActorCritic(nn.Module):
@@ -181,6 +180,8 @@ class ActorCritic(nn.Module):
 
 
 if __name__ == "__main__":
+    from learning.plotting.utils import plot_all_attention_heads
+
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     model = ActorCritic(
@@ -215,8 +216,6 @@ if __name__ == "__main__":
     )
 
     print(attn_scores["Dec_L0"].shape)
-
-    # Now visualize the attention matrices
 
     # Decoder self-attention (fix this line)
     fig_dec = plot_all_attention_heads(

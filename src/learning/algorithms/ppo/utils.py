@@ -24,6 +24,7 @@ def process_state(
             | "transformer_full"
             | "gat"
             | "gcn"
+            | "graph_transformer"
         ):
             match (representation):
                 case "local":
@@ -51,6 +52,7 @@ def get_state_dim(obs_shape, state_representation: str, model: str, n_agents: in
             | "transformer_full"
             | "gat"
             | "gcn"
+            | "graph_transformer"
         ):
             match (state_representation):
                 case "local":

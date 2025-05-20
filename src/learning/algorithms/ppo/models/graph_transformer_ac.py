@@ -1,16 +1,49 @@
 import torch
 from torch_geometric.data import Data, Batch
-from torch_geometric.nn import GATv2Conv
 import torch.nn.functional as F
 from torch import nn
 from torch.distributions import Normal
 from torch_geometric.nn import AttentionalAggregation
+from torch_geometric.nn import TransformerConv
 import matplotlib.pyplot as plt
-import networkx as nx
 import numpy as np
 
 
-class ActorCritic(torch.nn.Module):
+class GraphTransformerLayer(nn.Module):
+    def __init__(
+        self, in_dim, out_dim, heads=4, dropout=0.1, edge_dim=None, concat=True
+    ):
+        super(GraphTransformerLayer, self).__init__()
+        self.transformer = TransformerConv(
+            in_dim,
+            out_dim // heads if concat else out_dim,
+            heads=heads,
+            dropout=dropout,
+            edge_dim=edge_dim,
+            concat=concat,
+            beta=True,  # Use the bias
+        )
+        self.layer_norm = nn.LayerNorm(out_dim if concat else out_dim)
+        self.concat = concat
+        self.out_dim = out_dim
+
+    def forward(self, x, edge_index, edge_attr=None, return_attention_weights=False):
+        # TransformerConv with residual connection and layer norm
+        if return_attention_weights:
+            res, attention_weights = self.transformer(
+                x, edge_index, edge_attr=edge_attr, return_attention_weights=True
+            )
+            out = F.gelu(res) + x  # Residual connection
+            out = self.layer_norm(out)
+            return out, attention_weights
+        else:
+            res = self.transformer(x, edge_index, edge_attr=edge_attr)
+            out = F.gelu(res) + x  # Residual connection
+            out = self.layer_norm(out)
+            return out
+
+
+class ActorCritic(nn.Module):
     def __init__(
         self,
         n_agents_train: int,
@@ -19,6 +52,8 @@ class ActorCritic(torch.nn.Module):
         d_action: int,
         device: str,
         hidden_dim=128,
+        n_layers=2,
+        heads=2,
     ):
         super(ActorCritic, self).__init__()
 
@@ -26,6 +61,7 @@ class ActorCritic(torch.nn.Module):
         self.d_action = d_action
         self.device = device
 
+        # Learnable action std
         self.log_action_std = nn.Parameter(
             torch.ones(
                 d_action * n_agents_train,
@@ -35,9 +71,24 @@ class ActorCritic(torch.nn.Module):
             * -0.5
         )
 
-        self.gat1 = GATv2Conv(d_state, hidden_dim, heads=2, concat=True)
-        self.gat2 = GATv2Conv(hidden_dim * 2, hidden_dim, heads=1, concat=False)
+        # Initial state embedding
+        self.state_embedding = nn.Linear(d_state, hidden_dim)
 
+        # Graph Transformer layers
+        self.transformer_layers = nn.ModuleList()
+        for i in range(n_layers):
+            in_dim = hidden_dim if i == 0 else hidden_dim
+            self.transformer_layers.append(
+                GraphTransformerLayer(
+                    in_dim=in_dim,
+                    out_dim=hidden_dim,
+                    heads=heads,
+                    dropout=0.1,
+                    concat=False,  # Keep dimension consistent
+                )
+            )
+
+        # Actor head
         self.actor_head = nn.Sequential(
             nn.Linear(hidden_dim, 128),
             nn.GELU(),
@@ -55,12 +106,13 @@ class ActorCritic(torch.nn.Module):
             nn.Linear(128, 1),
         )
 
+        # Global pooling via attention
         self.att_pool = AttentionalAggregation(
             nn.Sequential(nn.Linear(hidden_dim, 128), nn.GELU(), nn.Linear(128, 1))
         )
 
     def create_chain_graph_batch(self, x_tensor):
-        """Convert a batched tensor into a list of chain graphs."""
+        """Convert a batched tensor into a list of chain graphs with self-loops."""
         graphs = []
 
         for g in range(x_tensor.size(0)):
@@ -70,6 +122,10 @@ class ActorCritic(torch.nn.Module):
             # Chain edges: i <-> i+1
             edges = [[i, i + 1] for i in range(n_nodes - 1)]
             edges += [[i + 1, i] for i in range(n_nodes - 1)]
+
+            # Add self-loops (i -> i)
+            edges += [[i, i] for i in range(n_nodes)]
+
             edge_index = (
                 torch.tensor(edges, dtype=torch.long, device=self.device)
                 .t()
@@ -98,24 +154,29 @@ class ActorCritic(torch.nn.Module):
         return action_mean, value
 
     def forward(self, batch: Batch):
-        x = self.gat1(batch.x, batch.edge_index)
-        x = F.gelu(x)
-        # Normalization is important for GAT training stability
-        x = F.layer_norm(x, x.shape[1:])
-        x = self.gat2(x, batch.edge_index)
-        x = F.gelu(x)
+        # Initial embedding
+        x = self.state_embedding(batch.x)
+
+        # Apply transformer layers
+        for layer in self.transformer_layers:
+            x = layer(x, batch.edge_index)
 
         return x
 
     def forward_evaluation(self, batch: Batch):
-        x, att1 = self.gat1(batch.x, batch.edge_index, return_attention_weights=True)
-        x = F.gelu(x)
-        # Normalization is important for GAT training stability
-        x = F.layer_norm(x, x.shape[1:])
-        x, att2 = self.gat2(x, batch.edge_index, return_attention_weights=True)
-        x = F.gelu(x)
+        # Initial embedding
+        x = self.state_embedding(batch.x)
 
-        return x, (att1, att2)
+        attention_layers = []
+
+        # Apply transformer layers and collect attention weights
+        for layer in self.transformer_layers:
+            x, attention_weights = layer(
+                x, batch.edge_index, return_attention_weights=True
+            )
+            attention_layers.append(attention_weights)
+
+        return x, attention_layers
 
     def get_value(self, state: torch.Tensor):
         with torch.no_grad():
@@ -127,7 +188,6 @@ class ActorCritic(torch.nn.Module):
         return Normal(action_mean, action_std)
 
     def act(self, state, deterministic=False):
-
         action_mean, value = self.get_action_and_value(state)
 
         if deterministic:
@@ -145,7 +205,6 @@ class ActorCritic(torch.nn.Module):
         )
 
     def evaluate(self, state, action):
-
         action_mean, value = self.get_action_and_value(state)
 
         dist = self.get_action_dist(action_mean)
@@ -155,21 +214,12 @@ class ActorCritic(torch.nn.Module):
 
         return action_logprobs, value, dist_entropy
 
-    def get_batched_graph(self, x):
-        graph_list = self.create_chain_graph_batch(x)
-        return Batch.from_data_list(graph_list)
-
 
 if __name__ == "__main__":
     from learning.plotting.utils import (
-        plot_3d_attention_surface,
         plot_attention_heatmap,
         plot_attention_time_series,
         plot_gat_attention_as_graph,
-        plot_diagonal_attention_timeline,
-        plot_3d_attention_interactive,
-        plot_3d_attention_scatter,
-        plot_3d_attention_volume,
     )
 
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
@@ -184,74 +234,52 @@ if __name__ == "__main__":
 
     model.eval()
 
+    # Count parameters
     pytorch_total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(pytorch_total_params)
+    print(f"Total trainable parameters: {pytorch_total_params}")
 
-    # toy graph ----------------------------------------------------
+    # Test with toy data
     x = torch.randn(1, 8, 18).to(device)  # 8 nodes, 18-d features
     graph_list = model.create_chain_graph_batch(x)
-
     batched_graph = Batch.from_data_list(graph_list)
 
+    # Forward pass with attention collection
     x, attention_layers = model.forward_evaluation(batched_graph)
 
-    # Plot first layer attention (ei is edge_index, alpha is attention weights)
+    # Plot first layer attention
     edge_index, attention_weights = attention_layers[0]
 
     fig = plot_gat_attention_as_graph(edge_index, attention_weights)
-    plt.savefig("gat_attention_layer1.png", dpi=300, bbox_inches="tight")
+    plt.savefig("graph_transformer_attention_layer1.png", dpi=300, bbox_inches="tight")
 
     fig = plot_attention_heatmap(edge_index, attention_weights)
-    plt.savefig("attention_heatmap_layer1.png", dpi=300, bbox_inches="tight")
+    plt.savefig("graph_transformer_heatmap_layer1.png", dpi=300, bbox_inches="tight")
 
     # Plot second layer attention
     edge_index, attention_weights = attention_layers[1]
 
     fig = plot_gat_attention_as_graph(edge_index, attention_weights)
-    plt.savefig("gat_attention_layer2.png", dpi=300, bbox_inches="tight")
+    plt.savefig("graph_transformer_attention_layer2.png", dpi=300, bbox_inches="tight")
 
     fig = plot_attention_heatmap(edge_index, attention_weights)
-    plt.savefig("attention_heatmap_layer2.png", dpi=300, bbox_inches="tight")
+    plt.savefig("graph_transformer_heatmap_layer2.png", dpi=300, bbox_inches="tight")
 
-    # Plot through time
+    # Plot attention through time
     edge_indices = []
     attention_weights = []
 
     # Run model over multiple timesteps
-    for t in range(100):  # For example, 10 timesteps
-        # Your input at this timestep
+    for t in range(100):
         x_t = torch.randn(1, 8, 18).to(device)
-
-        # Forward pass
         graph_list = model.create_chain_graph_batch(x_t)
         batched_graph = Batch.from_data_list(graph_list)
 
         # Get attention weights
         _, attention_layers = model.forward_evaluation(batched_graph)
-
-        # Store edge indices and weights from first layer
         edge_index, attn_weight = attention_layers[0]
 
         edge_indices.append(edge_index)
         attention_weights.append(attn_weight)
 
     fig = plot_attention_time_series(edge_indices, attention_weights, top_k=5)
-    plt.savefig("attention_time_series.png", dpi=300)
-
-    fig = plot_3d_attention_surface(edge_indices, attention_weights)
-    plt.savefig("attention_3D.png", dpi=300)
-
-    ffig = plot_diagonal_attention_timeline(
-        edge_indices, attention_weights, num_samples=5
-    )
-    plt.savefig("attention_timeline.png", dpi=300)
-
-    # For the standard 3D scatter plot
-    fig = plot_3d_attention_scatter(edge_indices, attention_weights, sample_rate=5)
-    plt.savefig("attention_3d_scatter.png", dpi=300, bbox_inches="tight")
-
-    # For the 3D volume visualization
-    fig_volume = plot_3d_attention_volume(
-        edge_indices, attention_weights, sample_rate=5
-    )
-    plt.savefig("attention_3d_volume.png", dpi=300, bbox_inches="tight")
+    plt.savefig("graph_transformer_attention_time_series.png", dpi=300)

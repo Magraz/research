@@ -2,11 +2,6 @@ import torch
 import torch.nn as nn
 from torch.distributions.normal import Normal
 from matplotlib import pyplot as plt
-from learning.plotting.utils import (
-    plot_all_attention_heads,
-    plot_attention_over_time_grid,
-    plot_key_attention_trends,
-)
 
 
 class ActorCritic(nn.Module):
@@ -206,6 +201,12 @@ class ActorCritic(nn.Module):
 
 
 if __name__ == "__main__":
+    from learning.plotting.utils import (
+        plot_all_attention_heads,
+        plot_attention_over_time_grid,
+        plot_key_attention_trends,
+    )
+
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     model = ActorCritic(
