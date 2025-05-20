@@ -251,7 +251,7 @@ class PPO_Evaluator:
 
         # Save if requested
         plt.savefig(
-            Path(self.logs_dir) / "agents_vs_reward.png", dpi=300, bbox_inches="tight"
+            Path(self.plots_dir) / "agents_vs_reward.png", dpi=300, bbox_inches="tight"
         )
 
     def get_attention_plots(
