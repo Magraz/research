@@ -6,8 +6,6 @@ from torch import nn
 from torch.distributions import Normal
 from torch_geometric.nn import AttentionalAggregation
 import matplotlib.pyplot as plt
-import networkx as nx
-import numpy as np
 
 
 class ActorCritic(torch.nn.Module):
@@ -18,7 +16,7 @@ class ActorCritic(torch.nn.Module):
         d_state: int,
         d_action: int,
         device: str,
-        hidden_dim=128,
+        hidden_dim=64,
     ):
         super(ActorCritic, self).__init__()
 
