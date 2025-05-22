@@ -28,24 +28,74 @@ COLOR_LIST = [
     (1.0, 0.0, 1.0),  # Magenta
     # Tertiary colors
     (1.0, 0.5, 0.0),  # Orange
-    (0.5, 1.0, 0.0),  # Lime
-    (0.0, 1.0, 0.5),  # Spring Green
+    (0.5, 1.0, 0.0),  # Chartreuse
+    (0.0, 1.0, 0.5),  # Spring green
     (0.0, 0.5, 1.0),  # Azure
     (0.5, 0.0, 1.0),  # Violet
     (1.0, 0.0, 0.5),  # Rose
-    # Additional distinct colors
-    (0.75, 0.25, 0.75),  # Purple
-    (0.75, 0.75, 0.25),  # Olive
-    (0.25, 0.75, 0.75),  # Teal
+    # Mixed intensities
+    (0.75, 0.25, 0.25),  # Pale red
+    (0.25, 0.75, 0.25),  # Pale green
+    (0.25, 0.25, 0.75),  # Pale blue
+    (0.75, 0.75, 0.25),  # Pale yellow
+    (0.25, 0.75, 0.75),  # Pale cyan
+    (0.75, 0.25, 0.75),  # Pale magenta
+    # Dark variants
+    (0.5, 0.0, 0.0),  # Dark red
+    (0.0, 0.5, 0.0),  # Dark green
+    (0.0, 0.0, 0.5),  # Dark blue
+    (0.5, 0.5, 0.0),  # Dark yellow
+    (0.0, 0.5, 0.5),  # Dark cyan
+    (0.5, 0.0, 0.5),  # Dark magenta
+    # Earth tones
     (0.6, 0.3, 0.1),  # Brown
-    (0.9, 0.6, 0.6),  # Light Pink
-    (0.6, 0.9, 0.6),  # Light Green
-    (0.6, 0.6, 0.9),  # Light Blue
+    (0.8, 0.7, 0.6),  # Tan
+    (0.4, 0.3, 0.2),  # Dark brown
+    (0.5, 0.4, 0.3),  # Taupe
+    # Pastels
+    (1.0, 0.8, 0.8),  # Pastel red
+    (0.8, 1.0, 0.8),  # Pastel green
+    (0.8, 0.8, 1.0),  # Pastel blue
+    (1.0, 1.0, 0.8),  # Pastel yellow
+    # Vibrant variants
+    (1.0, 0.4, 0.4),  # Coral
+    (0.4, 1.0, 0.4),  # Light green
+    (0.4, 0.4, 1.0),  # Periwinkle
     (1.0, 0.84, 0.0),  # Gold
-    (0.8, 0.4, 0.2),  # Coral
-    (0.5, 0.3, 0.8),  # Lavender
-    (0.3, 0.6, 0.3),  # Forest Green
-    (0.4, 0.5, 0.6),  # Slate Blue
+    (0.8, 0.4, 0.8),  # Orchid
+    # More variations
+    (0.9, 0.6, 0.2),  # Orange gold
+    (0.2, 0.9, 0.6),  # Aquamarine
+    (0.6, 0.2, 0.9),  # Purple
+    # In-betweens
+    (0.7, 0.0, 0.0),  # Brick red
+    (0.0, 0.7, 0.0),  # Forest green
+    (0.0, 0.0, 0.7),  # Navy blue
+    # Grayscales
+    (0.9, 0.9, 0.9),  # Very light gray
+    (0.75, 0.75, 0.75),  # Light gray
+    (0.5, 0.5, 0.5),  # Gray
+    (0.25, 0.25, 0.25),  # Dark gray
+    # Additional colors
+    (0.55, 0.71, 0.0),  # Olive green
+    (0.18, 0.31, 0.31),  # Dark slate
+    (0.82, 0.41, 0.12),  # Sienna
+    (0.58, 0.0, 0.83),  # Purple
+    (0.0, 0.5, 0.25),  # Teal green
+    (0.5, 0.25, 0.0),  # Brown
+    (0.96, 0.87, 0.7),  # Wheat
+    (0.25, 0.88, 0.82),  # Turquoise
+    (0.93, 0.51, 0.93),  # Violet
+    (0.99, 0.0, 0.0),  # Crimson
+    (0.67, 0.43, 0.16),  # Raw sienna
+    (1.0, 0.39, 0.28),  # Tomato
+    (0.29, 0.0, 0.51),  # Indigo
+    (0.42, 0.56, 0.14),  # Olive drab
+    (0.44, 0.5, 0.56),  # Slate
+    (0.96, 0.96, 0.86),  # Light yellow
+    (0.4, 0.8, 0.67),  # Medium aquamarine
+    (0.8, 0.52, 0.25),  # Peru
+    (0.39, 0.58, 0.93),  # Cornflower blue
 ]
 
 
