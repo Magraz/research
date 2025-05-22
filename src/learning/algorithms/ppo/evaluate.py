@@ -9,7 +9,6 @@ from learning.algorithms.ppo.ppo import PPO
 from learning.algorithms.ppo.utils import get_state_dim, process_state
 from learning.plotting.utils import (
     plot_attention_heatmap,
-    plot_3d_attention_volume,
     plot_attention_time_series,
     plot_attention_over_time_grid,
     plot_key_attention_trends,
@@ -18,8 +17,6 @@ from learning.plotting.utils import (
 import dill
 from pathlib import Path
 import matplotlib.pyplot as plt
-import random
-from statistics import mean
 
 from vmas.simulator.utils import save_video
 
@@ -96,7 +93,7 @@ class PPO_Evaluator:
             exp_config,
             env_config,
             n_rollouts=50,
-            extra_agents=16,
+            extra_agents=64,
         )
 
     def get_scalability_plots(
@@ -111,11 +108,11 @@ class PPO_Evaluator:
         n_rollouts: int,
         extra_agents: int,
     ):
-
-        n_agents_list = [env_config.n_agents + i for i in range(extra_agents)]
+        n_agents_list = [env_config.n_agents + i for i in range(extra_agents + 1)]
+        seeds_list = [1998 * (i + 1) for i in range(len(n_agents_list))]
         data = {n_agents: [] for n_agents in n_agents_list}
 
-        for n_agents in n_agents_list:
+        for i, n_agents in enumerate(n_agents_list):
 
             # Load environment and policy
             env = create_env(
@@ -125,7 +122,7 @@ class PPO_Evaluator:
                 env_name=env_config.environment,
                 training=False,
                 n_agents=n_agents,
-                seed=params.random_seed + random.randint(1, 100),
+                seed=seeds_list[i],
             )
             learner = PPO(
                 self.device,
@@ -205,54 +202,9 @@ class PPO_Evaluator:
 
             data[n_agents] = rewards
 
-            print(data)
-
         # Store environment
         with open(self.logs_dir / "evaluation.dat", "wb") as f:
             dill.dump(data, f)
-
-        # Plot
-        n_agents = list(data.keys())
-        rewards = [np.mean(data[n]) for n in n_agents]
-
-        # Create plot
-        plt.figure(figsize=(10, 6))
-        plt.plot(n_agents, rewards, "o-", linewidth=2, markersize=8)
-
-        # Add error bars if there are multiple rewards per agent count
-        errors = [np.std(data[n]) if len(data[n]) > 1 else 0 for n in n_agents]
-        if any(errors):
-            # plt.fill_between(
-            #     n_agents,
-            #     [r - e for r, e in zip(rewards, errors)],
-            #     [r + e for r, e in zip(rewards, errors)],
-            #     alpha=0.2,
-            # )
-
-            plt.errorbar(
-                n_agents,
-                rewards,
-                yerr=errors,
-                fmt="o-",  # This maintains your original line style
-                linewidth=2,
-                markersize=8,
-                capsize=5,  # Adds caps to the error bars
-                ecolor="gray",  # Optional: set error bar color
-            )
-
-        # Customize plot
-        plt.grid(True, linestyle="--", alpha=0.7)
-        plt.title("Reward vs. Number of Agents", fontsize=16)
-        plt.xlabel("Number of Agents", fontsize=14)
-        plt.ylabel("Mean Reward", fontsize=14)
-        plt.xticks(n_agents)  # Ensure x-axis shows exact agent numbers
-
-        plt.tight_layout()
-
-        # Save if requested
-        plt.savefig(
-            Path(self.plots_dir) / "agents_vs_reward.png", dpi=300, bbox_inches="tight"
-        )
 
     def get_attention_plots(
         self,
