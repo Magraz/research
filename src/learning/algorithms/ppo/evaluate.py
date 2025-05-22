@@ -108,7 +108,7 @@ class PPO_Evaluator:
         n_rollouts: int,
         extra_agents: int,
     ):
-        n_agents_list = [env_config.n_agents + i for i in range(extra_agents + 1)]
+        n_agents_list = list(range(4, extra_agents + 1, 4))
         seeds_list = [1998 * (i + 1) for i in range(len(n_agents_list))]
         data = {n_agents: [] for n_agents in n_agents_list}
 
