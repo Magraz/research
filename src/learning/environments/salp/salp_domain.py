@@ -56,6 +56,8 @@ class SalpDomain(BaseScenario):
         self.max_n_agents = 24
         self.min_n_agents = 8
 
+        self.viewer_zoom = kwargs.pop("viewer_zoom", 2.0)
+
         # Agents
         self.n_agents = kwargs.pop("n_agents", self.min_n_agents)
         self.state_representation = kwargs.pop("state_representation", "global")
@@ -72,8 +74,16 @@ class SalpDomain(BaseScenario):
         self.training = kwargs.pop("training", True)
 
         # Environment
-        self.x_semidim = 1.0
-        self.y_semidim = 1.0
+        self.x_semidim = (
+            1.0
+            if self.n_agents <= 8
+            else 1.0 + self.n_agents / 2 * self.agent_joint_length
+        )
+        self.y_semidim = (
+            1.0
+            if self.n_agents <= 8
+            else 1.0 + self.n_agents / 2 * self.agent_joint_length
+        )
 
         if self.training:
             # Set a smaller world size for training like a fence
@@ -83,8 +93,6 @@ class SalpDomain(BaseScenario):
             # Increase world size for evaluation, like removing the fence
             self.world_x_dim = 10
             self.world_y_dim = 10
-
-        self.viewer_zoom = kwargs.pop("viewer_zoom", 1.0)
 
         # Reward Shaping
         self.frechet_shaping_factor = 1.0
