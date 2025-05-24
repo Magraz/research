@@ -1079,3 +1079,97 @@ def plot_key_attention_trends(
 
     plt.tight_layout()
     return fig
+
+
+def plot_token_attention_trends(
+    attention_over_time, attn_type="Enc_L0", src_idx=0, head_idx=0, figsize=(12, 8)
+):
+    """
+    Plot how one specific token attends to all other tokens over time
+
+    Args:
+        attention_over_time: Dict with lists of attention weights per timestep
+        attn_type: Type of attention to visualize ('Enc_L0', 'Dec_L0', or 'Cross_L0')
+        src_idx: Source token index to focus on (which token is doing the attending)
+        head_idx: Which attention head to visualize
+        figsize: Size of the figure
+    """
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    # Get the attention matrices for the specified type
+    attention_matrices = attention_over_time[attn_type]
+
+    if not attention_matrices:
+        print(f"No attention data found for {attn_type}")
+        return plt.figure(figsize=(6, 4))
+
+    num_timesteps = len(attention_matrices)
+
+    # Get matrix dimensions from first timestep
+    batch_size, num_heads, seq_len, _ = attention_matrices[0].shape
+
+    # Create figure
+    fig, ax = plt.subplots(figsize=figsize)
+
+    # Line colors - one for each target token
+    colors = plt.cm.viridis(np.linspace(0, 1, seq_len))
+
+    # Prepare time series data
+    time_steps = np.arange(1, num_timesteps + 1)
+
+    # Plot attention from src_idx to all target tokens
+    for tgt_idx in range(seq_len):
+        values = []
+
+        for t in range(num_timesteps):
+            values.append(attention_matrices[t][0, head_idx, src_idx, tgt_idx].item())
+
+        label = f"Token {src_idx+1} → Token {tgt_idx+1}"
+        if src_idx == tgt_idx:
+            label += " (self)"
+            line_style = "--"
+            line_width = 2.5
+        else:
+            line_style = "-"
+            line_width = 2
+
+        ax.plot(
+            time_steps,
+            values,
+            marker="o" if src_idx == tgt_idx else None,
+            markersize=3,
+            linewidth=line_width,
+            linestyle=line_style,
+            color=colors[tgt_idx],
+            label=label,
+        )
+
+    # Add labels and title
+    ax.set_xlabel("Timestep", fontsize=12)
+    ax.set_ylabel("Attention Weight", fontsize=12)
+
+    type_label = {
+        "Enc_L0": "Encoder Self-Attention",
+        "Dec_L0": "Decoder Self-Attention",
+        "Cross_L0": "Cross-Attention",
+    }
+
+    ax.set_title(
+        f"{type_label.get(attn_type, attn_type)} - Head {head_idx+1}\nToken {src_idx+1} Attending to All Tokens",
+        fontsize=14,
+    )
+
+    # Add grid and legend
+    ax.grid(True, alpha=0.3)
+    ax.legend(loc="center left", bbox_to_anchor=(1, 0.5))
+
+    # Set y-axis limits
+    ax.set_ylim(0, 1.05)
+
+    # Format y-axis ticks as percentages
+    ax.set_yticks([0, 0.25, 0.5, 0.75, 1.0])
+    ax.set_yticklabels(["0%", "25%", "50%", "75%", "100%"])
+
+    plt.tight_layout()
+    return fig
