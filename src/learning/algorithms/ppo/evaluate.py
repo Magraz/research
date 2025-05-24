@@ -12,13 +12,17 @@ from learning.plotting.utils import (
     plot_attention_time_series,
     plot_attention_over_time_grid,
     plot_key_attention_trends,
+    plot_token_attention_trends,
 )
 
 import dill
 from pathlib import Path
+import matplotlib
 import matplotlib.pyplot as plt
 
 from vmas.simulator.utils import save_video
+
+matplotlib.use("Agg")
 
 
 class PPO_Evaluator:
@@ -43,8 +47,10 @@ class PPO_Evaluator:
         # Create directories
         self.models_dir.mkdir(parents=True, exist_ok=True)
         self.logs_dir.mkdir(parents=True, exist_ok=True)
-        self.plots_dir.mkdir(parents=True, exist_ok=True)
         self.video_dir.mkdir(parents=True, exist_ok=True)
+        self.plots_dir.mkdir(parents=True, exist_ok=True)
+        for n_agents in range(4, 65, 4):
+            (self.plots_dir / str(n_agents)).mkdir(parents=True, exist_ok=True)
 
     def validate(
         self,
@@ -136,6 +142,9 @@ class PPO_Evaluator:
             )
             learner.load(self.models_dir / "best_model")
 
+            # Set policy to evaluation mode
+            learner.policy.eval()
+
             rewards = []
             episode_count = 0
             state = env.reset()
@@ -215,142 +224,182 @@ class PPO_Evaluator:
         d_action: int,
         exp_config: Experiment,
         env_config: EnvironmentParams,
+        extra_agents: int = 64,
     ):
 
-        learner = PPO(
-            self.device,
-            exp_config.model,
-            params,
-            env_config.n_agents,
-            n_agents,
-            1,
-            d_state,
-            d_action,
-        )
-        learner.load(self.models_dir / "best_model")
+        n_agents_list = list(range(4, extra_agents + 1, 4))
+        seeds_list = [1998 * (i + 1) for i in range(len(n_agents_list))]
 
-        # Set policy to evaluation mode
-        learner.policy.eval()
+        for i, n_agents in enumerate(n_agents_list):
 
-        match (exp_config.model):
-            case (
-                "transformer"
-                | "transformer_full"
-                | "transformer_encoder"
-                | "transformer_decoder"
-            ):
-                attention_weights = learner.policy.build_attention_hooks()
-                attention_over_time = {
-                    "Enc_L0": [],  # Encoder self-attention
-                    "Dec_L0": [],  # Decoder self-attention
-                    "Cross_L0": [],  # Cross-attention
-                }
-            case "gat" | "graph_transformer":
-                # Store edges and attention weights
-                edge_indices = []
-                attention_weights = []
-
-        # Frame list for vide
-        frames = []
-
-        # Reset environment
-        state = env.reset()
-
-        for _ in range(0, params.n_max_steps_per_episode):
-
-            action = torch.clamp(
-                learner.deterministic_action(
-                    process_state(
-                        state,
-                        env_config.state_representation,
-                        exp_config.model,
-                    )
-                ),
-                min=-1.0,
-                max=1.0,
+            # Load environment
+            env = create_env(
+                self.batch_dir,
+                1,
+                device=self.device,
+                env_name=env_config.environment,
+                training=False,
+                n_agents=n_agents,
+                seed=seeds_list[i],
             )
 
+            # Load PPO agent
+            learner = PPO(
+                self.device,
+                exp_config.model,
+                params,
+                env_config.n_agents,
+                n_agents,
+                1,
+                d_state,
+                d_action,
+            )
+            learner.load(self.models_dir / "best_model")
+
+            # Set policy to evaluation mode
+            learner.policy.eval()
+
+            edge_indices = []
+            attention_weights = []
+            attention_over_time = {
+                "Enc_L0": [],  # Encoder self-attention
+                "Dec_L0": [],  # Decoder self-attention
+                "Cross_L0": [],  # Cross-attention
+            }
             match (exp_config.model):
-                case "gat" | "graph_transformer":
-                    x = learner.policy.get_batched_graph(
-                        process_state(
-                            state,
-                            env_config.state_representation,
-                            exp_config.model,
-                        )
-                    )
-                    _, attention_layers = learner.policy.forward_evaluation(x)
-
-                    # Store edge indices and weights from last layer
-                    edge_index, attn_weight = attention_layers[-1]
-
-                    edge_indices.append(edge_index)
-                    attention_weights.append(attn_weight)
-
                 case (
                     "transformer"
                     | "transformer_full"
                     | "transformer_encoder"
                     | "transformer_decoder"
                 ):
-                    _ = learner.policy.forward(
+                    attention_weights = learner.policy.build_attention_hooks()
+
+            # Frame list for vide
+            frames = []
+
+            # Reset environment
+            state = env.reset()
+
+            for _ in range(0, params.n_max_steps_per_episode):
+
+                action = torch.clamp(
+                    learner.deterministic_action(
                         process_state(
                             state,
                             env_config.state_representation,
                             exp_config.model,
                         )
-                    )
-
-                    # Store attention weights for this timestep
-                    for attn_type in attention_over_time:
-                        if attn_type in attention_weights:
-                            attention_over_time[attn_type].append(
-                                attention_weights[attn_type].clone()
-                            )
-
-            action_tensor = action.reshape(
-                1,
-                n_agents,
-                d_action,
-            ).transpose(1, 0)
-
-            # Turn action tensor into list of tensors with shape (n_env, action_dim)
-            action_tensor_list = torch.unbind(action_tensor)
-
-            state, _, done, _ = env.step(action_tensor_list)
-
-            # Store frames for video
-            frames.append(
-                env.render(
-                    mode="rgb_array",
-                    agent_index_focus=None,  # Can give the camera an agent index to focus on
-                    visualize_when_rgb=False,
+                    ),
+                    min=-1.0,
+                    max=1.0,
                 )
+
+                match (exp_config.model):
+                    case "gat" | "graph_transformer":
+                        x = learner.policy.get_batched_graph(
+                            process_state(
+                                state,
+                                env_config.state_representation,
+                                exp_config.model,
+                            )
+                        )
+                        _, attention_layers = learner.policy.forward_evaluation(x)
+
+                        # Store edge indices and weights from last layer
+                        edge_index, attn_weight = attention_layers[-1]
+
+                        edge_indices.append(edge_index)
+                        attention_weights.append(attn_weight)
+
+                    case (
+                        "transformer"
+                        | "transformer_full"
+                        | "transformer_encoder"
+                        | "transformer_decoder"
+                    ):
+                        _ = learner.policy.forward(
+                            process_state(
+                                state,
+                                env_config.state_representation,
+                                exp_config.model,
+                            )
+                        )
+
+                        # Store attention weights for this timestep
+                        for attn_type in attention_over_time:
+                            if attn_type in attention_weights:
+                                attention_over_time[attn_type].append(
+                                    attention_weights[attn_type].clone()
+                                )
+
+                action_tensor = action.reshape(
+                    1,
+                    n_agents,
+                    d_action,
+                ).transpose(1, 0)
+
+                # Turn action tensor into list of tensors with shape (n_env, action_dim)
+                action_tensor_list = torch.unbind(action_tensor)
+
+                state, _, done, _ = env.step(action_tensor_list)
+
+                # Store frames for video
+                frames.append(
+                    env.render(
+                        mode="rgb_array",
+                        agent_index_focus=None,  # Can give the camera an agent index to focus on
+                        visualize_when_rgb=False,
+                    )
+                )
+
+                if torch.any(done):
+                    break
+
+            # Save video
+            save_video(
+                str(self.video_dir / f"plots_video_{n_agents}"),
+                frames,
+                fps=1 / env.scenario.world.dt,
             )
 
-            if torch.any(done):
-                break
+            self.attention_plot(
+                exp_config,
+                n_agents,
+                edge_indices,
+                attention_weights,
+                attention_over_time,
+            )
 
-        # Save video
-        save_video(
-            str(self.video_dir / "plots_video"), frames, fps=1 / env.scenario.world.dt
-        )
-
+    def attention_plot(
+        self,
+        exp_config: Experiment,
+        n_agents: int,
+        edge_indices,
+        attention_weights,
+        attention_over_time,
+    ):
         # Save plots
         match (exp_config.model):
             case "gat" | "graph_transformer":
 
                 plot_attention_heatmap(edge_indices[-1], attention_weights[-1])
                 plt.savefig(
-                    self.plots_dir / f"{exp_config.model}_attention_heatmap_last.png",
+                    self.plots_dir
+                    / str(n_agents)
+                    / f"{exp_config.model}_attention_heatmap_last.png",
                     dpi=300,
                 )
+                plt.close()
 
                 plot_attention_time_series(edge_indices, attention_weights, top_k=10)
                 plt.savefig(
-                    self.plots_dir / f"{exp_config.model}_attention_time_series.png",
+                    self.plots_dir
+                    / str(n_agents)
+                    / f"{exp_config.model}_attention_time_series.png",
                     dpi=300,
                 )
+                plt.close()
 
             case (
                 "transformer"
@@ -371,9 +420,11 @@ class PPO_Evaluator:
                             )
                             plt.savefig(
                                 self.plots_dir
+                                / str(n_agents)
                                 / f"{attn_type}_head{head_idx+1}_over_time.png",
                                 dpi=300,
                             )
+                            plt.close()
 
                 # Track key attention points
                 print("Creating trend plots...")
@@ -388,6 +439,33 @@ class PPO_Evaluator:
                             )
                             plt.savefig(
                                 self.plots_dir
+                                / str(n_agents)
                                 / f"{attn_type}_head{head_idx+1}_trends.png",
                                 dpi=300,
                             )
+                            plt.close()
+
+                # Track attention from specific tokens
+                print("Creating token-focused plots...")
+                for attn_type in ["Enc_L0", "Dec_L0", "Cross_L0"]:
+                    for head_idx in range(2):  # Assuming 2 attention heads
+                        for src_idx in [
+                            1,
+                            n_agents // 2,
+                            n_agents - 1,
+                        ]:  # Plot for first token and middle token
+                            plot_token_attention_trends(
+                                attention_over_time,
+                                attn_type=attn_type,
+                                src_idx=src_idx,
+                                head_idx=head_idx,
+                            )
+                            plt.savefig(
+                                self.plots_dir
+                                / str(n_agents)
+                                / f"{attn_type}_head{head_idx+1}_token{src_idx+1}_trends.png",
+                                dpi=300,
+                            )
+                            plt.close()
+
+        print("Attention plots saved successfully.")
