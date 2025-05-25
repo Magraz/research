@@ -115,7 +115,7 @@ class PPO_Evaluator:
         extra_agents: int,
     ):
         n_agents_list = list(range(4, extra_agents + 1, 4))
-        seeds_list = [1998 * (i + 1) for i in range(len(n_agents_list))]
+        seed = 1998
         data = {n_agents: [] for n_agents in n_agents_list}
 
         for i, n_agents in enumerate(n_agents_list):
@@ -128,7 +128,7 @@ class PPO_Evaluator:
                 env_name=env_config.environment,
                 training=False,
                 n_agents=n_agents,
-                seed=seeds_list[i],
+                seed=seed,
             )
             learner = PPO(
                 self.device,
@@ -178,7 +178,7 @@ class PPO_Evaluator:
 
                 state, reward, done, _ = env.step(action_tensor_list)
 
-                cumulative_rewards += reward[0]
+                cumulative_rewards = reward[0]
 
                 episode_len += torch.ones(
                     n_rollouts, dtype=torch.int32, device=self.device
@@ -228,7 +228,7 @@ class PPO_Evaluator:
     ):
 
         n_agents_list = list(range(4, extra_agents + 1, 4))
-        seeds_list = [1998 * (i + 1) for i in range(len(n_agents_list))]
+        seed = 1998
 
         for i, n_agents in enumerate(n_agents_list):
 
@@ -240,7 +240,7 @@ class PPO_Evaluator:
                 env_name=env_config.environment,
                 training=False,
                 n_agents=n_agents,
-                seed=seeds_list[i],
+                seed=seed,
             )
 
             # Load PPO agent

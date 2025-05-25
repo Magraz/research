@@ -566,8 +566,8 @@ class SalpDomain(BaseScenario):
 
             # Mix all rewards
             self.global_rew = (
-                goal_reached_rew + self.distance_rew
-            )  # + self.frechet_rew + self.centroid_rew + self.curvature_rew
+                goal_reached_rew + self.distance_rew if self.training else f_rew
+            )
 
         return self.global_rew
 
