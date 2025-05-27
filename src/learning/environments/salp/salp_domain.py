@@ -56,7 +56,7 @@ class SalpDomain(BaseScenario):
         self.max_n_agents = 24
         self.min_n_agents = 8
 
-        self.viewer_zoom = kwargs.pop("viewer_zoom", 2.0)
+        self.viewer_zoom = kwargs.pop("viewer_zoom", 1.45)
 
         # Agents
         self.n_agents = kwargs.pop("n_agents", self.min_n_agents)
@@ -87,8 +87,8 @@ class SalpDomain(BaseScenario):
 
         if self.training:
             # Set a smaller world size for training like a fence
-            self.world_x_dim = 2.0
-            self.world_y_dim = 2.0
+            self.world_x_dim = self.n_agents / 4
+            self.world_y_dim = self.n_agents / 4
         else:
             # Increase world size for evaluation, like removing the fence
             self.world_x_dim = 10

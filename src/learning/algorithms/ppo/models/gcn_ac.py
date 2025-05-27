@@ -5,6 +5,7 @@ import torch.nn.functional as F
 from torch import nn
 from torch.distributions import Normal
 from torch_geometric.nn import AttentionalAggregation
+from torch_geometric.explain import Explainer, GNNExplainer
 
 
 class ActorCritic(torch.nn.Module):
@@ -150,6 +151,14 @@ class ActorCritic(torch.nn.Module):
 
 
 if __name__ == "__main__":
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    import numpy as np
+    from learning.plotting.utils import (
+        visualize_gcn_relationships_over_time,
+        visualize_gcn_relationships_static,
+    )
+
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
     model = ActorCritic(
@@ -162,3 +171,19 @@ if __name__ == "__main__":
 
     pytorch_total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(pytorch_total_params)
+
+    # Get graph list and create batched graph
+    state_batch = torch.randn(1, 8, 18).to(device)  # 8 nodes, 18-d features
+    graph_list = model.create_chain_graph_batch(state_batch)
+    batched_graph = Batch.from_data_list(graph_list)
+
+    # Generate a sequence of states over time (simulation or real data)
+    state_sequence = []
+    for t in range(20):  # 20 timesteps
+        # Either use recorded states or create simulated ones
+        state = torch.randn(1, 8, 18).to(device)  # 8 nodes, 18-d features
+        state_sequence.append(state)
+
+    # Create static visualization
+    fig = visualize_gcn_relationships_static(model, state_sequence, num_samples=5)
+    plt.show()

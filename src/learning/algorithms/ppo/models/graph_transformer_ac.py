@@ -173,7 +173,15 @@ class ActorCritic(nn.Module):
             x, attention_weights = layer(
                 x, batch.edge_index, return_attention_weights=True
             )
-            attention_layers.append(attention_weights)
+            # Properly clone and detach to avoid memory corruption
+            # Extract (edge_index, attn_weights) tuple
+            edge_index, attn_weights = attention_weights
+
+            # Create a deep copy of the tensors to avoid memory issues
+            edge_index_copy = edge_index.clone().detach()
+            attn_weights_copy = attn_weights.clone().detach()
+
+            attention_layers.append((edge_index_copy, attn_weights_copy))
 
         return x, attention_layers
 
@@ -212,6 +220,10 @@ class ActorCritic(nn.Module):
         dist_entropy = torch.sum(dist.entropy(), dim=-1, keepdim=True)
 
         return action_logprobs, value, dist_entropy
+
+    def get_batched_graph(self, x):
+        graph_list = self.create_chain_graph_batch(x)
+        return Batch.from_data_list(graph_list)
 
 
 if __name__ == "__main__":

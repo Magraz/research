@@ -113,7 +113,24 @@ class ActorCritic(torch.nn.Module):
         x, att2 = self.gat2(x, batch.edge_index, return_attention_weights=True)
         x = F.gelu(x)
 
-        return x, (att1, att2)
+        # Move everything to CPU and convert to numpy to completely break connections
+        # For first attention layer
+        edge_index1, attn_weights1 = att1
+        edge_index1_safe = edge_index1.clone().detach().cpu()
+        attn_weights1_safe = attn_weights1.clone().detach().cpu()
+
+        # For second attention layer
+        edge_index2, attn_weights2 = att2
+        edge_index2_safe = edge_index2.clone().detach().cpu()
+        attn_weights2_safe = attn_weights2.clone().detach().cpu()
+
+        # Create safe copies that won't affect the computation graph
+        att_layers = [
+            (edge_index1_safe, attn_weights1_safe),
+            (edge_index2_safe, attn_weights2_safe),
+        ]
+
+        return x, att_layers
 
     def get_value(self, state: torch.Tensor):
         with torch.no_grad():

@@ -5,11 +5,13 @@ import numpy as np
 import networkx as nx
 
 from matplotlib.patches import Rectangle
+from torch_geometric.data import Batch
 
 import plotly.graph_objects as go
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
+from sklearn.decomposition import PCA
 
 import torch
 
@@ -226,7 +228,7 @@ def plot_gat_attention_as_graph(edge_index, attention_weights, figsize=(12, 10))
 
 
 def plot_attention_heatmap(
-    edge_index, attention_weights, figsize=(10, 8), cmap="Blues"
+    model_name, edge_index, attention_weights, figsize=(10, 8), cmap="Blues"
 ):
     """
     Plot attention weights as a matrix heatmap
@@ -249,7 +251,7 @@ def plot_attention_heatmap(
         edge_weights = weights.squeeze()
 
     # Get number of nodes
-    num_nodes = max(edges.max() + 1, 8)
+    num_nodes = max(edges.max() + 1, 4)
 
     # Create an empty attention matrix
     attention_matrix = np.zeros((num_nodes, num_nodes))
@@ -279,22 +281,22 @@ def plot_attention_heatmap(
     plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
 
     # Add title and labels
-    ax.set_title("Attention Weights Matrix")
+    ax.set_title(f"Attention Weights Matrix - {model_name}")
     ax.set_xlabel("Target Node")
     ax.set_ylabel("Source Node")
 
     # Loop over data dimensions and create text annotations
-    for i in range(num_nodes):
-        for j in range(num_nodes):
-            if attention_matrix[i, j] > 0:
-                text = ax.text(
-                    j,
-                    i,
-                    f"{attention_matrix[i, j]:.2f}",
-                    ha="center",
-                    va="center",
-                    color="black" if attention_matrix[i, j] < 0.5 else "white",
-                )
+    # for i in range(num_nodes):
+    #     for j in range(num_nodes):
+    #         if attention_matrix[i, j] > 0:
+    #             text = ax.text(
+    #                 j,
+    #                 i,
+    #                 f"{attention_matrix[i, j]:.2f}",
+    #                 ha="center",
+    #                 va="center",
+    #                 color="black" if attention_matrix[i, j] < 0.5 else "white",
+    #             )
 
     # Adjust layout
     fig.tight_layout()
@@ -366,6 +368,97 @@ def plot_attention_time_series(edge_indices, attention_weights_over_time, top_k=
     ax.grid(True, alpha=0.3)
     ax.legend()
 
+    return fig
+
+
+def plot_node_attention_trends(
+    model_name,
+    edge_indices,
+    attention_weights_over_time,
+    source_node_idx=0,
+    figsize=(12, 8),
+):
+    """
+    Plot how one specific node attends to all other nodes over time
+
+    Args:
+        edge_indices: List of edge_index tensors
+        attention_weights_over_time: List of attention weight tensors
+        source_node_idx: Source node index to focus on (which node is doing the attending)
+        figsize: Size of the figure
+    """
+    num_timesteps = len(edge_indices)
+
+    # Determine the maximum node index to set up the plot
+    max_node_idx = 0
+    for t in range(num_timesteps):
+        max_node_idx = max(max_node_idx, edge_indices[t].max().item())
+
+    # Create dictionary to track attention from source to each target
+    target_attention = {}
+
+    # For each timestep, find all edges coming from the source node
+    for t in range(num_timesteps):
+        edges = edge_indices[t].cpu().numpy()
+        weights = attention_weights_over_time[t].detach().cpu().numpy()
+
+        # Average over heads if multiple
+        if weights.shape[1] > 1:
+            weights = weights.mean(axis=1)
+        else:
+            weights = weights.squeeze()
+
+        # Find all edges where source_node_idx is the source
+        for i in range(edges.shape[1]):
+            src, dst = edges[0, i], edges[1, i]
+            if src == source_node_idx:
+                if dst not in target_attention:
+                    target_attention[dst] = [0] * num_timesteps
+                target_attention[dst][t] = weights[i]
+
+    # Create figure
+    fig, ax = plt.subplots(figsize=figsize)
+
+    # Plot each target's attention over time
+    time_steps = np.arange(1, num_timesteps + 1)
+    colors = plt.cm.viridis(np.linspace(0, 1, len(target_attention)))
+
+    for i, (target, values) in enumerate(target_attention.items()):
+        # Use dashed line for self-attention
+        linestyle = "--" if target == source_node_idx else "-"
+        linewidth = 2.5 if target == source_node_idx else 2
+
+        label = f"Node {source_node_idx} → Node {target}"
+        if target == source_node_idx:
+            label += " (self)"
+
+        ax.plot(
+            time_steps,
+            values,
+            linewidth=linewidth,
+            linestyle=linestyle,
+            marker="o" if target == source_node_idx else None,
+            markersize=4,
+            color=colors[i],
+            label=label,
+        )
+
+    # Add labels and title
+    ax.set_xlabel("Timestep", fontsize=12)
+    ax.set_ylabel("Attention Weight", fontsize=12)
+    ax.set_title(
+        f"Node {source_node_idx} Attention to All Nodes Over Time - {model_name}",
+        fontsize=14,
+    )
+
+    # Add grid and legend
+    ax.grid(True, alpha=0.3)
+    ax.legend(loc="center left", bbox_to_anchor=(1, 0.5))
+
+    # Set y-axis limits
+    ax.set_ylim(0, 1.05)
+
+    plt.tight_layout()
     return fig
 
 
@@ -905,7 +998,7 @@ def plot_attention_across_layers(attn_scores_dict, figsize=(15, 10)):
 
 
 def plot_attention_over_time_grid(
-    attention_over_time, attn_type="Enc_L0", head_idx=0, num_samples=5, figsize=(20, 6)
+    attention_over_time, attn_type="Enc_L0", head_idx=0, num_samples=4, figsize=(20, 6)
 ):
     """
     Plot attention at selected timesteps in a grid
@@ -943,7 +1036,7 @@ def plot_attention_over_time_grid(
             attn_matrix,
             annot=True,
             fmt=".2f",
-            cmap="viridis",
+            cmap="PuBu",
             vmin=0,
             vmax=1,
             cbar=(i == len(sample_indices) - 1),  # Only add colorbar on last plot
@@ -1082,7 +1175,12 @@ def plot_key_attention_trends(
 
 
 def plot_token_attention_trends(
-    attention_over_time, attn_type="Enc_L0", src_idx=0, head_idx=0, figsize=(12, 8)
+    model_name,
+    attention_over_time,
+    attn_type="Enc_L0",
+    src_idx=0,
+    head_idx=0,
+    figsize=(12, 8),
 ):
     """
     Plot how one specific token attends to all other tokens over time
@@ -1113,7 +1211,7 @@ def plot_token_attention_trends(
     fig, ax = plt.subplots(figsize=figsize)
 
     # Line colors - one for each target token
-    colors = plt.cm.viridis(np.linspace(0, 1, seq_len))
+    # colors = plt.cm.viridis(np.linspace(0, 1, seq_len))
 
     # Prepare time series data
     time_steps = np.arange(1, num_timesteps + 1)
@@ -1141,7 +1239,6 @@ def plot_token_attention_trends(
             markersize=3,
             linewidth=line_width,
             linestyle=line_style,
-            color=colors[tgt_idx],
             label=label,
         )
 
@@ -1156,7 +1253,7 @@ def plot_token_attention_trends(
     }
 
     ax.set_title(
-        f"{type_label.get(attn_type, attn_type)} - Head {head_idx+1}\nToken {src_idx+1} Attending to All Tokens",
+        f"{type_label.get(attn_type, attn_type)} - Head {head_idx+1}\nToken {src_idx+1} Attending to All Tokens - {model_name}",
         fontsize=14,
     )
 
@@ -1172,4 +1269,309 @@ def plot_token_attention_trends(
     ax.set_yticklabels(["0%", "25%", "50%", "75%", "100%"])
 
     plt.tight_layout()
+    return fig
+
+
+def visualize_gcn_relationships_over_time(model, state_sequence, figsize=(14, 10)):
+    """
+    Visualize how GCN node relationships evolve through time by tracking feature similarity.
+
+    Args:
+        model: Your GCN model
+        state_sequence: List of state tensors representing timesteps [t, batch, n_nodes, features]
+        figsize: Figure size (width, height)
+    """
+    import matplotlib.pyplot as plt
+    import numpy as np
+    import networkx as nx
+    import seaborn as sns
+    from matplotlib.animation import FuncAnimation
+
+    num_timesteps = len(state_sequence)
+    n_nodes = state_sequence[0].shape[1]
+
+    # Storage for embeddings and similarities over time
+    all_embeddings = []
+    all_similarities = []
+
+    # Process embeddings for each timestep
+    with torch.no_grad():
+        for t in range(num_timesteps):
+            # Get graph for this timestep
+            graph_list = model.create_chain_graph_batch(state_sequence[t])
+            batched_graph = Batch.from_data_list(graph_list)
+
+            # Get node embeddings
+            embeddings = model.forward(batched_graph).cpu().numpy()
+            all_embeddings.append(embeddings)
+
+            # Calculate similarity matrix for the first batch item
+            graph_embeddings = embeddings[:n_nodes]  # First graph only
+
+            sim_matrix = np.zeros((n_nodes, n_nodes))
+            for i in range(n_nodes):
+                for j in range(n_nodes):
+                    sim_matrix[i, j] = np.dot(
+                        graph_embeddings[i], graph_embeddings[j]
+                    ) / (
+                        np.linalg.norm(graph_embeddings[i])
+                        * np.linalg.norm(graph_embeddings[j])
+                    )
+
+            all_similarities.append(sim_matrix)
+
+    # Create figure with two subplots - graph on left, timeline on right
+    fig, (ax1, ax2) = plt.subplots(
+        1, 2, figsize=figsize, gridspec_kw={"width_ratios": [1.2, 1]}
+    )
+
+    # Create graph for visualization
+    G = nx.Graph()
+    for i in range(n_nodes):
+        G.add_node(i)
+
+    # Add edges between all nodes (will visualize strength via width/color)
+    for i in range(n_nodes):
+        for j in range(i + 1, n_nodes):
+            G.add_edge(i, j)
+
+    # Use circular layout for better visualization
+    pos = nx.circular_layout(G)
+
+    # Select a few interesting node pairs to track over time
+    # 1. Find pairs with highest variance in similarity
+    pair_variance = []
+    for i in range(n_nodes):
+        for j in range(i + 1, n_nodes):
+            similarities = [sim[i, j] for sim in all_similarities]
+            pair_variance.append(((i, j), np.var(similarities)))
+
+    # Sort by variance and take top 5
+    top_pairs = sorted(pair_variance, key=lambda x: x[1], reverse=True)[:5]
+
+    # Setup timeline plot
+    ax2.set_xlim(0, num_timesteps)
+    ax2.set_ylim(-1.1, 1.1)
+    ax2.set_xlabel("Timestep", fontsize=12)
+    ax2.set_ylabel("Feature Similarity", fontsize=12)
+    ax2.set_title("Node Pair Similarity Over Time", fontsize=14)
+    ax2.grid(True, alpha=0.3)
+
+    # Initialize lines for tracked pairs
+    timeline_lines = []
+    time_points = np.arange(num_timesteps)
+    colors = plt.cm.tab10(np.linspace(0, 1, len(top_pairs)))
+
+    for i, ((node1, node2), _) in enumerate(top_pairs):
+        (line,) = ax2.plot(
+            [],
+            [],
+            "-",
+            label=f"Nodes {node1}↔{node2}",
+            color=colors[i],
+            linewidth=2,
+            marker="o",
+            markersize=4,
+        )
+        timeline_lines.append((line, node1, node2))
+
+    ax2.legend(loc="upper right")
+
+    # Initialize heatmap
+    im = ax1.imshow(all_similarities[0], cmap="viridis", vmin=-1, vmax=1)
+    ax1.set_title("Feature Similarity Matrix (t=0)")
+    ax1.set_xlabel("Node Index")
+    ax1.set_ylabel("Node Index")
+
+    # Add colorbar
+    cbar = fig.colorbar(im, ax=ax1, shrink=0.6)
+    cbar.set_label("Cosine Similarity")
+
+    # Add time indicator
+    time_text = fig.text(0.5, 0.95, "Timestep: 0", ha="center", fontsize=14)
+
+    def update(frame):
+        # Update heatmap
+        im.set_array(all_similarities[frame])
+        ax1.set_title(f"Feature Similarity Matrix (t={frame})")
+
+        # Update time indicator
+        time_text.set_text(f"Timestep: {frame}")
+
+        # Update lines
+        for line, node1, node2 in timeline_lines:
+            similarity_values = [
+                sim[node1, node2] for sim in all_similarities[: frame + 1]
+            ]
+            line.set_data(range(frame + 1), similarity_values)
+
+        return [im, time_text] + [line for line, _, _ in timeline_lines]
+
+    ani = FuncAnimation(fig, update, frames=num_timesteps, interval=200, blit=True)
+
+    plt.tight_layout()
+    plt.subplots_adjust(top=0.9)  # Make room for time indicator
+
+    # Save animation
+    ani.save("gcn_similarity_over_time.gif", writer="pillow", fps=5, dpi=100)
+
+    return fig, ani
+
+
+def visualize_gcn_relationships_static(
+    model, state_sequence, num_samples=5, figsize=(18, 12)
+):
+    """
+    Create a static visualization of GCN node relationships over time.
+
+    Args:
+        model: Your GCN model
+        state_sequence: List of state tensors representing timesteps [t, batch, n_nodes, features]
+        num_samples: Number of timesteps to sample for visualization
+        figsize: Figure size (width, height)
+    """
+
+    num_timesteps = len(state_sequence)
+    n_nodes = state_sequence[0].shape[1]
+
+    # Sample evenly spaced timesteps
+    if num_timesteps <= num_samples:
+        sampled_timesteps = list(range(num_timesteps))
+    else:
+        sampled_timesteps = [
+            int(i * (num_timesteps - 1) / (num_samples - 1)) for i in range(num_samples)
+        ]
+
+    # Storage for embeddings and similarities
+    all_embeddings = []
+    all_similarities = []
+
+    # Process embeddings for each timestep
+    with torch.no_grad():
+        for t in sampled_timesteps:
+            # Get graph for this timestep
+            graph_list = model.create_chain_graph_batch(state_sequence[t])
+            batched_graph = Batch.from_data_list(graph_list)
+
+            # Get node embeddings
+            embeddings = model.forward(batched_graph).cpu().numpy()
+            all_embeddings.append(embeddings[:n_nodes])  # First graph only
+
+            # Calculate similarity matrix
+            graph_embeddings = embeddings[:n_nodes]
+            sim_matrix = np.zeros((n_nodes, n_nodes))
+            for i in range(n_nodes):
+                for j in range(n_nodes):
+                    sim_matrix[i, j] = np.dot(
+                        graph_embeddings[i], graph_embeddings[j]
+                    ) / (
+                        np.linalg.norm(graph_embeddings[i])
+                        * np.linalg.norm(graph_embeddings[j])
+                    )
+            all_similarities.append(sim_matrix)
+
+    # Create figure with multiple panels
+    fig = plt.figure(figsize=figsize)
+
+    # Define grid layout
+    gs = fig.add_gridspec(2, 3, height_ratios=[1.5, 1])
+
+    # 1. Top row: Similarity heatmaps at different timesteps
+    for i, t_idx in enumerate(sampled_timesteps[:3]):  # Show first 3 timesteps
+        ax = fig.add_subplot(gs[0, i])
+
+        # Plot heatmap
+        sns.heatmap(
+            all_similarities[i],
+            cmap="viridis",
+            vmin=-1,
+            vmax=1,
+            annot=False,
+            ax=ax,
+            cbar=(i == 2),
+        )
+        ax.set_title(f"Timestep {t_idx}")
+        ax.set_xlabel("Node Index")
+        ax.set_ylabel("Node Index")
+
+    # 2. Bottom left: Track specific node pairs over time
+    ax_pairs = fig.add_subplot(gs[1, 0])
+
+    # Find pairs with highest variance in similarity
+    all_pairs = []
+    for i in range(n_nodes):
+        for j in range(i + 1, n_nodes):
+            if i != j:
+                similarities = [sim[i, j] for sim in all_similarities]
+                variance = np.var(similarities)
+                all_pairs.append(((i, j), variance, similarities))
+
+    # Sort and get top 5 pairs
+    top_pairs = sorted(all_pairs, key=lambda x: x[1], reverse=True)[:5]
+
+    # Plot similarity trends
+    for (i, j), _, similarities in top_pairs:
+        ax_pairs.plot(
+            sampled_timesteps, similarities, marker="o", label=f"Nodes {i}↔{j}"
+        )
+
+    ax_pairs.set_xlabel("Timestep")
+    ax_pairs.set_ylabel("Similarity")
+    ax_pairs.set_title("Node Pair Similarity Over Time")
+    ax_pairs.grid(True, alpha=0.3)
+    ax_pairs.legend()
+
+    # 3. Bottom middle: Embedding trajectory in 2D space
+    ax_traj = fig.add_subplot(gs[1, 1])
+
+    # Flatten and stack embeddings from all timesteps for PCA
+    flattened_embeddings = np.vstack([emb for emb in all_embeddings])
+
+    # Apply PCA to reduce to 2D
+    pca = PCA(n_components=2)
+    reduced_embeddings = pca.fit_transform(flattened_embeddings)
+
+    # Split back into timesteps
+    reduced_by_time = np.split(reduced_embeddings, len(sampled_timesteps))
+
+    # Plot trajectory for each node
+    for node_idx in range(n_nodes):
+        x_coords = [
+            reduced_by_time[t][node_idx, 0] for t in range(len(sampled_timesteps))
+        ]
+        y_coords = [
+            reduced_by_time[t][node_idx, 1] for t in range(len(sampled_timesteps))
+        ]
+
+        # Plot with arrow indicating direction
+        ax_traj.plot(x_coords, y_coords, marker="o", label=f"Node {node_idx}")
+
+        # Add arrows to show direction of movement
+        for t in range(len(sampled_timesteps) - 1):
+            ax_traj.annotate(
+                "",
+                xy=(x_coords[t + 1], y_coords[t + 1]),
+                xytext=(x_coords[t], y_coords[t]),
+                arrowprops=dict(arrowstyle="->", lw=1.5, color="gray"),
+            )
+
+    ax_traj.set_title("Node Embedding Trajectories (PCA)")
+    ax_traj.grid(True, alpha=0.3)
+    ax_traj.legend()
+
+    # 4. Bottom right: Similarity change heatmap (final - initial)
+    ax_diff = fig.add_subplot(gs[1, 2])
+
+    # Calculate difference between first and last similarity matrix
+    sim_diff = all_similarities[-1] - all_similarities[0]
+
+    # Plot difference heatmap
+    sns.heatmap(sim_diff, cmap="coolwarm", center=0, annot=False, ax=ax_diff)
+    ax_diff.set_title("Similarity Change (Final - Initial)")
+    ax_diff.set_xlabel("Node Index")
+    ax_diff.set_ylabel("Node Index")
+
+    plt.tight_layout()
+    plt.savefig("gcn_relationships_over_time.png", dpi=300, bbox_inches="tight")
+
     return fig

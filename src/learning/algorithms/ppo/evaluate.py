@@ -227,8 +227,9 @@ class PPO_Evaluator:
         extra_agents: int = 64,
     ):
 
-        n_agents_list = list(range(4, extra_agents + 1, 4))
+        n_agents_list = list(range(8, extra_agents + 1, 16))
         seed = 1998
+        attention_dict = {}
 
         for i, n_agents in enumerate(n_agents_list):
 
@@ -307,10 +308,12 @@ class PPO_Evaluator:
                         _, attention_layers = learner.policy.forward_evaluation(x)
 
                         # Store edge indices and weights from last layer
+                        # Make sure to do a deep copy
                         edge_index, attn_weight = attention_layers[-1]
 
-                        edge_indices.append(edge_index)
-                        attention_weights.append(attn_weight)
+                        # Store completely detached copies
+                        edge_indices.append(edge_index.clone())
+                        attention_weights.append(attn_weight.clone())
 
                     case (
                         "transformer"
@@ -363,109 +366,12 @@ class PPO_Evaluator:
                 fps=1 / env.scenario.world.dt,
             )
 
-            self.attention_plot(
-                exp_config,
-                n_agents,
-                edge_indices,
-                attention_weights,
-                attention_over_time,
-            )
+            # Store environment
+            attention_dict[n_agents] = {
+                "edge_indices": edge_indices,
+                "attention_weights": attention_weights,
+                "attention_over_time": attention_over_time,
+            }
 
-    def attention_plot(
-        self,
-        exp_config: Experiment,
-        n_agents: int,
-        edge_indices,
-        attention_weights,
-        attention_over_time,
-    ):
-        # Save plots
-        match (exp_config.model):
-            case "gat" | "graph_transformer":
-
-                plot_attention_heatmap(edge_indices[-1], attention_weights[-1])
-                plt.savefig(
-                    self.plots_dir
-                    / str(n_agents)
-                    / f"{exp_config.model}_attention_heatmap_last.png",
-                    dpi=300,
-                )
-                plt.close()
-
-                plot_attention_time_series(edge_indices, attention_weights, top_k=10)
-                plt.savefig(
-                    self.plots_dir
-                    / str(n_agents)
-                    / f"{exp_config.model}_attention_time_series.png",
-                    dpi=300,
-                )
-                plt.close()
-
-            case (
-                "transformer"
-                | "transformer_full"
-                | "transformer_encoder"
-                | "transformer_decoder"
-            ):
-                # Create grid visualizations
-                print("Creating grid visualizations...")
-                for attn_type in ["Enc_L0", "Dec_L0", "Cross_L0"]:
-                    if attn_type in attention_weights:
-                        for head_idx in range(2):  # Assuming 2 attention heads
-                            plot_attention_over_time_grid(
-                                attention_over_time,
-                                attn_type=attn_type,
-                                head_idx=head_idx,
-                                num_samples=5,
-                            )
-                            plt.savefig(
-                                self.plots_dir
-                                / str(n_agents)
-                                / f"{attn_type}_head{head_idx+1}_over_time.png",
-                                dpi=300,
-                            )
-                            plt.close()
-
-                # Track key attention points
-                print("Creating trend plots...")
-                for attn_type in ["Enc_L0", "Dec_L0", "Cross_L0"]:
-                    if attn_type in attention_weights:
-                        for head_idx in range(2):
-                            plot_key_attention_trends(
-                                attention_over_time,
-                                attn_type=attn_type,
-                                head_idx=head_idx,
-                                top_k=10,  # You can adjust this number
-                            )
-                            plt.savefig(
-                                self.plots_dir
-                                / str(n_agents)
-                                / f"{attn_type}_head{head_idx+1}_trends.png",
-                                dpi=300,
-                            )
-                            plt.close()
-
-                # Track attention from specific tokens
-                print("Creating token-focused plots...")
-                for attn_type in ["Enc_L0", "Dec_L0", "Cross_L0"]:
-                    for head_idx in range(2):  # Assuming 2 attention heads
-                        for src_idx in [
-                            1,
-                            n_agents // 2,
-                            n_agents - 1,
-                        ]:  # Plot for first token and middle token
-                            plot_token_attention_trends(
-                                attention_over_time,
-                                attn_type=attn_type,
-                                src_idx=src_idx,
-                                head_idx=head_idx,
-                            )
-                            plt.savefig(
-                                self.plots_dir
-                                / str(n_agents)
-                                / f"{attn_type}_head{head_idx+1}_token{src_idx+1}_trends.png",
-                                dpi=300,
-                            )
-                            plt.close()
-
-        print("Attention plots saved successfully.")
+        with open(self.logs_dir / "attention.dat", "wb") as f:
+            dill.dump(attention_dict, f)
