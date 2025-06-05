@@ -89,7 +89,7 @@ class ActorCritic(torch.nn.Module):
 
         action_mean = (
             self.actor_head(x)
-            .reshape((state.shape[0], self.n_agents_eval, self.d_action))
+            .reshape((state.shape[0], state.shape[1], self.d_action))
             .flatten(start_dim=1)
         )
 
@@ -138,7 +138,7 @@ class ActorCritic(torch.nn.Module):
             return value
 
     def get_action_dist(self, action_mean):
-        action_std = torch.exp(self.log_action_std)
+        action_std = torch.exp(self.log_action_std[: action_mean.shape[-1]])
         return Normal(action_mean, action_std)
 
     def act(self, state, deterministic=False):

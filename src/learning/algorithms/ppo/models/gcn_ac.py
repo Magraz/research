@@ -93,7 +93,7 @@ class ActorCritic(torch.nn.Module):
 
         action_mean = (
             self.actor_head(x)
-            .reshape((state.shape[0], self.n_agents_eval, self.d_action))
+            .reshape((state.shape[0], state.shape[1], self.d_action))
             .flatten(start_dim=1)
         )
 
@@ -117,7 +117,7 @@ class ActorCritic(torch.nn.Module):
             return value
 
     def get_action_dist(self, action_mean):
-        action_std = torch.exp(self.log_action_std)
+        action_std = torch.exp(self.log_action_std[: action_mean.shape[-1]])
         return Normal(action_mean, action_std)
 
     def act(self, state, deterministic=False):
@@ -157,6 +157,9 @@ if __name__ == "__main__":
     from learning.plotting.utils import (
         visualize_gcn_relationships_over_time,
         visualize_gcn_relationships_static,
+        visualize_attention_weights,
+        visualize_attention_weights_over_time,
+        visualize_edge_importance_over_time,
     )
 
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
@@ -185,5 +188,12 @@ if __name__ == "__main__":
         state_sequence.append(state)
 
     # Create static visualization
-    fig = visualize_gcn_relationships_static(model, state_sequence, num_samples=5)
+    # fig = visualize_gcn_relationships_static(model, state_sequence, num_samples=5)
+    # visualize_attention_weights(model, state_batch)
+    # visualize_attention_weights_over_time(model, state_sequence)
+
+    visualize_edge_importance_over_time(
+        model, state_sequence, node_idx=1
+    )  # Focus on node 1
+
     plt.show()

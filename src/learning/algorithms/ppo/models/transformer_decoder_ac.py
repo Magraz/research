@@ -20,7 +20,6 @@ class ActorCritic(nn.Module):
         d_model: int = 64,
         n_heads: int = 2,
         n_decoder_layers: int = 2,
-        n_agents_max: int = 24,
     ):
         super(ActorCritic, self).__init__()
 

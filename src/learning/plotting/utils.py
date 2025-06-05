@@ -5,7 +5,7 @@ import numpy as np
 import networkx as nx
 
 from matplotlib.patches import Rectangle
-from torch_geometric.data import Batch
+from torch_geometric.data import Batch, Data
 
 import plotly.graph_objects as go
 import matplotlib.pyplot as plt
@@ -97,8 +97,8 @@ def plot_diagonal_attention_timeline(
             ax_t.set_xticks([])
             ax_t.set_yticks([])
         else:
-            ax_t.set_xlabel("Target Node", fontsize=8)
-            ax_t.set_ylabel("Source Node", fontsize=8)
+            ax_t.set_xlabel("Target Salp", fontsize=8)
+            ax_t.set_ylabel("Source Salp", fontsize=8)
 
             # Add proper tick labels
             ax_t.set_xticks(np.arange(max_nodes))
@@ -228,12 +228,13 @@ def plot_gat_attention_as_graph(edge_index, attention_weights, figsize=(12, 10))
 
 
 def plot_attention_heatmap(
-    model_name, edge_index, attention_weights, figsize=(10, 8), cmap="Blues"
+    model_name, edge_index, attention_weights, figsize=(10, 8), cmap="PuBu"
 ):
     """
-    Plot attention weights as a matrix heatmap
+    Plot attention weights as a matrix heatmap using seaborn
 
     Args:
+        model_name: Name of the model for title
         edge_index: Tensor of shape [2, num_edges] containing edge connections
         attention_weights: Tensor of shape [num_edges, num_heads] containing attention scores
         figsize: Size of the figure
@@ -264,43 +265,34 @@ def plot_attention_heatmap(
     # Create figure and axes
     fig, ax = plt.subplots(figsize=figsize)
 
-    # Plot heatmap
-    im = ax.imshow(attention_matrix, cmap=cmap)
-
-    # Add colorbar
-    cbar = ax.figure.colorbar(im, ax=ax)
-    cbar.ax.set_ylabel("Attention Weight", rotation=-90, va="bottom")
-
-    # Set ticks and labels
-    ax.set_xticks(np.arange(num_nodes))
-    ax.set_yticks(np.arange(num_nodes))
-    ax.set_xticklabels([f"Node {i}" for i in range(num_nodes)])
-    ax.set_yticklabels([f"Node {i}" for i in range(num_nodes)])
+    # Plot heatmap using seaborn
+    sns.heatmap(
+        attention_matrix,
+        annot=True,  # Show values in cells
+        fmt=".2f",  # Format for values
+        cmap=cmap,  # Use the same colormap as transformer attention
+        linewidths=0.5,  # Add grid lines between cells
+        cbar=True,  # Show colorbar
+        ax=ax,
+    )
 
     # Rotate the tick labels and set alignment
     plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
 
-    # Add title and labels
-    ax.set_title(f"Attention Weights Matrix - {model_name}")
-    ax.set_xlabel("Target Node")
-    ax.set_ylabel("Source Node")
+    # Set y-tick labels to horizontal
+    plt.setp(ax.get_yticklabels(), rotation=0)
 
-    # Loop over data dimensions and create text annotations
-    # for i in range(num_nodes):
-    #     for j in range(num_nodes):
-    #         if attention_matrix[i, j] > 0:
-    #             text = ax.text(
-    #                 j,
-    #                 i,
-    #                 f"{attention_matrix[i, j]:.2f}",
-    #                 ha="center",
-    #                 va="center",
-    #                 color="black" if attention_matrix[i, j] < 0.5 else "white",
-    #             )
+    # Set labels and title
+    ax.set_title(f"Attention Scores Matrix - {model_name}")
+    ax.set_xlabel("Target Salp")
+    ax.set_ylabel("Source Salp")
 
-    # Adjust layout
-    fig.tight_layout()
+    # Set custom tick labels
+    # Note: seaborn's heatmap already centers ticks in cells
+    ax.set_xticklabels([f"Salp {i}" for i in range(num_nodes)])
+    ax.set_yticklabels([f"Salp {i}" for i in range(num_nodes)])
 
+    plt.tight_layout()
     return fig
 
 
@@ -372,24 +364,16 @@ def plot_attention_time_series(edge_indices, attention_weights_over_time, top_k=
 
 
 def plot_node_attention_trends(
-    model_name,
+    experiment,
     edge_indices,
     attention_weights_over_time,
     source_node_idx=0,
     figsize=(12, 8),
 ):
-    """
-    Plot how one specific node attends to all other nodes over time
-
-    Args:
-        edge_indices: List of edge_index tensors
-        attention_weights_over_time: List of attention weight tensors
-        source_node_idx: Source node index to focus on (which node is doing the attending)
-        figsize: Size of the figure
-    """
+    """Plot how one specific node attends to all other nodes over time"""
     num_timesteps = len(edge_indices)
 
-    # Determine the maximum node index to set up the plot
+    # Determine the maximum node index
     max_node_idx = 0
     for t in range(num_timesteps):
         max_node_idx = max(max_node_idx, edge_indices[t].max().item())
@@ -397,13 +381,13 @@ def plot_node_attention_trends(
     # Create dictionary to track attention from source to each target
     target_attention = {}
 
-    # For each timestep, find all edges coming from the source node
+    # Process each timestep
     for t in range(num_timesteps):
         edges = edge_indices[t].cpu().numpy()
         weights = attention_weights_over_time[t].detach().cpu().numpy()
 
         # Average over heads if multiple
-        if weights.shape[1] > 1:
+        if len(weights.shape) > 1 and weights.shape[1] > 1:
             weights = weights.mean(axis=1)
         else:
             weights = weights.squeeze()
@@ -419,16 +403,34 @@ def plot_node_attention_trends(
     # Create figure
     fig, ax = plt.subplots(figsize=figsize)
 
+    # Create improved color generation for more distinct colors
+    num_targets = len(target_attention)
+
+    # Use multiple colormaps combined for greater variety
+    if num_targets <= 10:
+        colors = plt.cm.tab10(np.linspace(0, 1, 10))
+    elif num_targets <= 20:
+        # Combine two colormaps for more colors
+        colors1 = plt.cm.tab10(np.linspace(0, 1, 10))
+        colors2 = plt.cm.Set1(np.linspace(0, 1, 10))
+        colors = np.vstack([colors1, colors2])
+    else:
+        # For many targets, use HSV color space for more distinct colors
+        cmap = plt.cm.hsv
+        colors = cmap(
+            np.linspace(0, 0.9, num_targets)
+        )  # Stop at 0.9 to avoid red-red cycle
+
     # Plot each target's attention over time
     time_steps = np.arange(1, num_timesteps + 1)
-    colors = plt.cm.viridis(np.linspace(0, 1, len(target_attention)))
 
-    for i, (target, values) in enumerate(target_attention.items()):
+    for i, (target, values) in enumerate(sorted(target_attention.items())):
         # Use dashed line for self-attention
         linestyle = "--" if target == source_node_idx else "-"
-        linewidth = 2.5 if target == source_node_idx else 2
+        linewidth = 2.5 if target == source_node_idx else 1.8
+        color_idx = i % len(colors)
 
-        label = f"Node {source_node_idx} → Node {target}"
+        label = f"Salp {source_node_idx} → Salp {target}"
         if target == source_node_idx:
             label += " (self)"
 
@@ -439,7 +441,7 @@ def plot_node_attention_trends(
             linestyle=linestyle,
             marker="o" if target == source_node_idx else None,
             markersize=4,
-            color=colors[i],
+            color=colors[color_idx],
             label=label,
         )
 
@@ -447,13 +449,13 @@ def plot_node_attention_trends(
     ax.set_xlabel("Timestep", fontsize=12)
     ax.set_ylabel("Attention Weight", fontsize=12)
     ax.set_title(
-        f"Node {source_node_idx} Attention to All Nodes Over Time - {model_name}",
+        f"{experiment}: Salp {source_node_idx} Attention to All Nodes Over Time",
         fontsize=14,
     )
 
     # Add grid and legend
     ax.grid(True, alpha=0.3)
-    ax.legend(loc="center left", bbox_to_anchor=(1, 0.5))
+    ax.legend(loc="center left", bbox_to_anchor=(1, 0.5), fontsize=9)
 
     # Set y-axis limits
     ax.set_ylim(0, 1.05)
@@ -462,357 +464,12 @@ def plot_node_attention_trends(
     return fig
 
 
-def plot_3d_attention_surface(edge_indices, attention_weights_over_time):
-    """
-    Create a 3D surface plot showing attention evolution
-
-    Args:
-        edge_indices: List of edge_index tensors
-        attention_weights_over_time: List of attention weight tensors
-    """
-    num_timesteps = len(edge_indices)
-    max_nodes = max([edge.max().item() + 1 for edge in edge_indices])
-
-    # Create 3D matrix of attention weights [time, source, target]
-    attention_cube = np.zeros((num_timesteps, max_nodes, max_nodes))
-
-    for t in range(num_timesteps):
-        edges = edge_indices[t].cpu().numpy()
-        weights = attention_weights_over_time[t].detach().cpu().numpy()
-
-        if weights.shape[1] > 1:
-            edge_weights = weights.mean(axis=1)
-        else:
-            edge_weights = weights.squeeze()
-
-        for i in range(edges.shape[1]):
-            src, dst = edges[0, i], edges[1, i]
-            attention_cube[t, src, dst] = edge_weights[i]
-
-    # Create mesh grid
-    time_steps = np.arange(num_timesteps)
-    source_nodes = np.arange(max_nodes)
-    target_nodes = np.arange(max_nodes)
-
-    T, S = np.meshgrid(time_steps, source_nodes)
-
-    # Create figure
-    fig = plt.figure()
-    ax = fig.add_subplot(111, projection="3d")
-
-    # Plot multiple surfaces, one for each target node
-    for target in target_nodes:
-        surf = ax.plot_surface(
-            T, S, attention_cube[:, :, target].T, alpha=0.7, label=f"Target {target}"
-        )
-
-    ax.set_xlabel("Timestep")
-    ax.set_ylabel("Source Node")
-    ax.set_zlabel("Attention Weight")
-    ax.set_title("3D Attention Evolution")
-
-    return fig
-
-
-def plot_3d_attention_scatter(
-    edge_indices,
-    attention_weights_over_time,
-    figsize=(12, 10),
-    cmap="viridis",
-    sample_rate=1,
-):
-    """
-    Create a 3D scatter plot of attention weights with:
-    - X-axis: Source nodes
-    - Y-axis: Target nodes
-    - Z-axis: Time steps
-    - Color: Attention magnitude
-
-    Args:
-        edge_indices: List of edge_index tensors for each timestep
-        attention_weights_over_time: List of attention weight tensors
-        figsize: Figure size
-        cmap: Colormap for attention weights
-        sample_rate: Sample every N timesteps (for reducing visual clutter)
-    """
-    import matplotlib.pyplot as plt
-    from mpl_toolkits.mplot3d import Axes3D
-
-    # Sample timesteps to reduce visual clutter
-    timesteps = list(range(0, len(edge_indices), sample_rate))
-
-    # Create figure and 3D axis
-    fig = plt.figure(figsize=figsize)
-    ax = fig.add_subplot(111, projection="3d")
-
-    # Lists to store all data points
-    all_sources = []
-    all_targets = []
-    all_times = []
-    all_weights = []
-    all_sizes = []
-
-    # Process data for all timesteps
-    for t_idx, t in enumerate(timesteps):
-        # Get edge data
-        edges = edge_indices[t].cpu().numpy()
-        weights = attention_weights_over_time[t].detach().cpu().numpy()
-
-        # Average over heads if multiple
-        if weights.shape[1] > 1:
-            edge_weights = weights.mean(axis=1)
-        else:
-            edge_weights = weights.squeeze()
-
-        # Store source, target, time, and weight for each edge
-        for i in range(edges.shape[1]):
-            src, dst = edges[0, i], edges[1, i]
-            weight = edge_weights[i]
-
-            all_sources.append(src)
-            all_targets.append(dst)
-            all_times.append(t)
-            all_weights.append(weight)
-
-            # Size based on weight (makes important connections more visible)
-            all_sizes.append(100 * weight + 20)
-
-    # Convert to numpy arrays
-    all_sources = np.array(all_sources)
-    all_targets = np.array(all_targets)
-    all_times = np.array(all_times)
-    all_weights = np.array(all_weights)
-    all_sizes = np.array(all_sizes)
-
-    # Normalize weights for colormapping
-    norm_weights = (all_weights - all_weights.min()) / (
-        all_weights.max() - all_weights.min() + 1e-8
-    )
-
-    # Create scatter plot
-    scatter = ax.scatter(
-        all_sources,
-        all_targets,
-        all_times,
-        c=all_weights,
-        s=all_sizes,
-        cmap=cmap,
-        alpha=0.7,
-        edgecolors="w",
-        linewidth=0.5,
-    )
-
-    # Set labels and title
-    ax.set_xlabel("Source Node", fontsize=12)
-    ax.set_ylabel("Target Node", fontsize=12)
-    ax.set_zlabel("Timestep", fontsize=12)
-    ax.set_title("3D Attention Weights Visualization", fontsize=14)
-
-    # Set integer ticks for nodes
-    max_node = max(all_sources.max(), all_targets.max())
-    ax.set_xticks(np.arange(max_node + 1))
-    ax.set_yticks(np.arange(max_node + 1))
-
-    # Set integer ticks for timesteps (but not too many)
-    if len(timesteps) > 10:
-        z_ticks = np.linspace(0, max(timesteps), 10, dtype=int)
-    else:
-        z_ticks = timesteps
-    ax.set_zticks(z_ticks)
-
-    # Add a colorbar
-    cbar = fig.colorbar(scatter, ax=ax, pad=0.1, shrink=0.7)
-    cbar.set_label("Attention Weight", rotation=270, labelpad=20)
-
-    # Improve perspective
-    ax.view_init(elev=20, azim=45)
-
-    return fig
-
-
-def plot_3d_attention_interactive(
-    edge_indices, attention_weights_over_time, sample_rate=5
-):
-    """
-    Create an interactive 3D scatter plot of attention weights that you can rotate and zoom
-
-    Args:
-        edge_indices: List of edge_index tensors for each timestep
-        attention_weights_over_time: List of attention weight tensors
-        sample_rate: Sample every N timesteps (for reducing visual clutter)
-    """
-
-    # Sample timesteps to reduce visual clutter
-    timesteps = list(range(0, len(edge_indices), sample_rate))
-
-    # Lists to store all data points
-    all_sources = []
-    all_targets = []
-    all_times = []
-    all_weights = []
-    all_texts = []
-
-    # Process data for all timesteps
-    for t_idx, t in enumerate(timesteps):
-        # Get edge data
-        edges = edge_indices[t].cpu().numpy()
-        weights = attention_weights_over_time[t].detach().cpu().numpy()
-
-        # Average over heads if multiple
-        if weights.shape[1] > 1:
-            edge_weights = weights.mean(axis=1)
-        else:
-            edge_weights = weights.squeeze()
-
-        # Store source, target, time, and weight for each edge
-        for i in range(edges.shape[1]):
-            src, dst = edges[0, i], edges[1, i]
-            weight = edge_weights[i]
-
-            all_sources.append(src)
-            all_targets.append(dst)
-            all_times.append(t)
-            all_weights.append(weight)
-            all_texts.append(
-                f"Source: {src}<br>Target: {dst}<br>Time: {t}<br>Weight: {weight:.3f}"
-            )
-
-    # Create 3D scatter plot
-    fig = go.Figure(
-        data=[
-            go.Scatter3d(
-                x=all_sources,
-                y=all_targets,
-                z=all_times,
-                mode="markers",
-                marker=dict(
-                    size=10,
-                    color=all_weights,
-                    colorscale="Viridis",
-                    opacity=0.8,
-                    colorbar=dict(title="Attention Weight"),
-                    line=dict(color="white", width=0.5),
-                ),
-                text=all_texts,
-                hoverinfo="text",
-            )
-        ]
-    )
-
-    # Update layout
-    fig.update_layout(
-        title="Interactive 3D Attention Weights Visualization",
-        scene=dict(
-            xaxis_title="Source Node",
-            yaxis_title="Target Node",
-            zaxis_title="Timestep",
-            xaxis=dict(tickmode="linear", dtick=1),
-            yaxis=dict(tickmode="linear", dtick=1),
-        ),
-        width=900,
-        height=800,
-    )
-
-    # Save to HTML for interactive viewing
-    fig.write_html("interactive_attention_3d.html")
-
-    return fig
-
-
-def plot_3d_attention_volume(
-    edge_indices,
-    attention_weights_over_time,
-    figsize=(10, 8),
-    cmap="viridis",
-    sample_rate=1,
-):
-    """
-    Create a 3D volume visualization of attention weights as a cube
-
-    Args:
-        edge_indices: List of edge_index tensors
-        attention_weights_over_time: List of attention weight tensors
-        figsize: Figure size
-        cmap: Colormap for attention weights
-        sample_rate: Sample every N timesteps
-    """
-    from mpl_toolkits.mplot3d import Axes3D
-    import matplotlib.pyplot as plt
-
-    # Sample timesteps
-    timesteps = list(range(0, len(edge_indices), sample_rate))
-    num_timesteps = len(timesteps)
-
-    # Get max number of nodes
-    max_nodes = max([edge_indices[t].max().item() + 1 for t in timesteps])
-
-    # Create 3D attention volume [time, source, target]
-    attention_volume = np.zeros((num_timesteps, max_nodes, max_nodes))
-
-    # Fill in attention volume
-    for i, t in enumerate(timesteps):
-        edges = edge_indices[t].cpu().numpy()
-        weights = attention_weights_over_time[t].detach().cpu().numpy()
-
-        if weights.shape[1] > 1:
-            edge_weights = weights.mean(axis=1)
-        else:
-            edge_weights = weights.squeeze()
-
-        for j in range(edges.shape[1]):
-            src, dst = edges[0, j], edges[1, j]
-            attention_volume[i, src, dst] = edge_weights[j]
-
-    # Create figure for 3D visualization
-    fig = plt.figure(figsize=figsize)
-    ax = fig.add_subplot(111, projection="3d")
-
-    # Create coordinate arrays
-    t_indices, s_indices, d_indices = np.indices((num_timesteps, max_nodes, max_nodes))
-
-    # Scale to match the colormap
-    vmin = np.min(attention_volume)
-    vmax = np.max(attention_volume)
-    norm = plt.Normalize(vmin, vmax)
-    cmap = plt.get_cmap(cmap)
-
-    # Plot non-zero values as colored voxels
-    mask = attention_volume > 0.01  # threshold to reduce noise
-    colors = cmap(norm(attention_volume))
-
-    # Create the 3D voxel plot
-    ax.voxels(mask, facecolors=colors, edgecolor="k", linewidth=0.1, alpha=0.7)
-
-    # Set labels
-    ax.set_xlabel("Timestep")
-    ax.set_ylabel("Source Node")
-    ax.set_zlabel("Target Node")
-
-    # Set ticks
-    ax.set_xticks(np.linspace(0, num_timesteps - 1, min(5, num_timesteps)))
-    ax.set_xticklabels(
-        [
-            timesteps[int(i)]
-            for i in np.linspace(0, num_timesteps - 1, min(5, num_timesteps)).astype(
-                int
-            )
-        ]
-    )
-
-    # Add a colorbar
-    sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
-    sm.set_array([])
-    plt.colorbar(sm, ax=ax, label="Attention Weight")
-
-    ax.set_title("3D Attention Volume Visualization")
-
-    return fig
-
-
 # Transformer plots
 
 
-def plot_transformer_attention(attn_matrix, layer_name="", head_idx=0, figsize=(10, 8)):
+def plot_transformer_attention(
+    model_name, attn_matrix, layer_name="", head_idx=0, figsize=(10, 8)
+):
     """
     Plot a single attention head as a heatmap
 
@@ -832,21 +489,29 @@ def plot_transformer_attention(attn_matrix, layer_name="", head_idx=0, figsize=(
         attention,
         annot=True,
         fmt=".2f",
-        cmap="viridis",
+        cmap="PuBu",
         linewidths=0.5,
         cbar=True,
         ax=ax,
     )
 
-    # Set labels and title
-    ax.set_xlabel("Target Token Position")
-    ax.set_ylabel("Source Token Position")
-    ax.set_title(f"{layer_name} - Attention Head {head_idx}")
+    # Rotate the tick labels and set alignment
+    plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
 
-    # Custom tick labels for agent positions
+    # Set y-tick labels to horizontal
+    plt.setp(ax.get_yticklabels(), rotation=0)
+
+    # Set labels and title
+    ax.set_xlabel("Target Salp")
+    ax.set_ylabel("Source Salp")
+    ax.set_title(f"Attention Scores Matrix - {model_name}")
+
+    # Custom tick labels - FIXED: explicitly set tick positions first
     n_agents = attention.shape[0]
-    ax.set_xticklabels([f"Agent {i+1}" for i in range(n_agents)])
-    ax.set_yticklabels([f"Agent {i+1}" for i in range(n_agents)])
+
+    # Now set the labels for those positions
+    ax.set_xticklabels([f"Salp {i+1}" for i in range(n_agents)])
+    ax.set_yticklabels([f"Salp {i+1}" for i in range(n_agents)])
 
     plt.tight_layout()
     return fig
@@ -1175,101 +840,217 @@ def plot_key_attention_trends(
 
 
 def plot_token_attention_trends(
-    model_name,
+    experiment,
+    n_agents,
     attention_over_time,
     attn_type="Enc_L0",
     src_idx=0,
     head_idx=0,
     figsize=(12, 8),
+    min_threshold=0.05,  # Add threshold parameter
+    filter_by="max",  # Filter by max or avg attention
 ):
     """
-    Plot how one specific token attends to all other tokens over time
-
-    Args:
-        attention_over_time: Dict with lists of attention weights per timestep
-        attn_type: Type of attention to visualize ('Enc_L0', 'Dec_L0', or 'Cross_L0')
-        src_idx: Source token index to focus on (which token is doing the attending)
-        head_idx: Which attention head to visualize
-        figsize: Size of the figure
+    Plot how one specific token attends to all other tokens over time.
     """
-    import matplotlib.pyplot as plt
-    import numpy as np
+    if attn_type not in attention_over_time:
+        print(f"Attention type {attn_type} not found in data")
+        return None
 
-    # Get the attention matrices for the specified type
-    attention_matrices = attention_over_time[attn_type]
+    # Get data
+    timesteps = attention_over_time[attn_type]
+    num_timesteps = len(timesteps)
 
-    if not attention_matrices:
-        print(f"No attention data found for {attn_type}")
-        return plt.figure(figsize=(6, 4))
+    # Check first timestep's shape to validate indexing
+    first_tensor = timesteps[0]
+    if len(first_tensor.shape) != 4:
+        print(
+            f"Unexpected tensor shape: {first_tensor.shape}. Expected (batch, heads, seq, seq)"
+        )
+        return None
 
-    num_timesteps = len(attention_matrices)
+    # Check if we have enough heads
+    if first_tensor.shape[1] <= head_idx:
+        print(
+            f"Warning: Head index {head_idx} out of bounds. Model has {first_tensor.shape[1]} heads"
+        )
+        return None
 
-    # Get matrix dimensions from first timestep
-    batch_size, num_heads, seq_len, _ = attention_matrices[0].shape
+    # Create dictionary to track token's attention to each target
+    token_attention = {}
+
+    # Extract attention patterns for the source token over time
+    for t in range(num_timesteps):
+        try:
+            # Get attention matrix for this timestep and head - FIXED INDEXING HERE
+            attn_matrix = timesteps[t][
+                0, head_idx
+            ].cpu()  # Add batch dimension index [0]
+
+            # Extract row corresponding to source token (its attention to all tokens)
+            if src_idx < attn_matrix.shape[0]:
+                src_attention = attn_matrix[src_idx, :]
+
+                # Store attention to each target
+                for tgt_idx in range(src_attention.shape[0]):
+                    if tgt_idx not in token_attention:
+                        token_attention[tgt_idx] = [0] * num_timesteps
+
+                    # Extract value safely
+                    if isinstance(src_attention[tgt_idx], torch.Tensor):
+                        if src_attention[tgt_idx].numel() == 1:
+                            token_attention[tgt_idx][t] = src_attention[tgt_idx].item()
+                        else:
+                            token_attention[tgt_idx][t] = (
+                                src_attention[tgt_idx].mean().item()
+                            )
+                    else:
+                        token_attention[tgt_idx][t] = src_attention[tgt_idx]
+            else:
+                print(f"Warning: Source index {src_idx} out of bounds for {attn_type}")
+        except Exception as e:
+            print(f"Error processing {attn_type}, head {head_idx}, timestep {t}: {e}")
+            continue
+
+    # Skip if we couldn't extract any attention patterns
+    if not token_attention:
+        print(
+            f"No valid attention patterns found for {attn_type}, head {head_idx}, source {src_idx}"
+        )
+        return None
+
+    # Filter targets with consistently low attention
+    filtered_token_attention = {}
+    for target, values in token_attention.items():
+        if filter_by.lower() == "max":
+            metric = max(values)
+        else:  # 'avg'
+            metric = sum(values) / len(values)
+
+        # Keep this target if it meets the threshold or is self-attention
+        if metric >= min_threshold or target == src_idx:
+            filtered_token_attention[target] = values
+
+    # Print filtering statistics
+    filtered_out = len(token_attention) - len(filtered_token_attention)
+    if filtered_out > 0:
+        print(
+            f"Filtered out {filtered_out} targets with {filter_by} attention below {min_threshold}"
+        )
+
+    # Use filtered data for plotting
+    token_attention = filtered_token_attention
 
     # Create figure
     fig, ax = plt.subplots(figsize=figsize)
 
-    # Line colors - one for each target token
-    # colors = plt.cm.viridis(np.linspace(0, 1, seq_len))
+    # Improved color generation
+    num_targets = len(token_attention)
 
-    # Prepare time series data
+    # Create colors using different approaches based on number of targets
+    if num_targets <= 10:
+        # Use tab10 but with high-contrast ordering
+        base_colors = plt.cm.tab10(np.linspace(0, 1, 10))
+        color_order = [i for pair in zip(range(5), range(5, 10)) for i in pair]
+        colors = base_colors[color_order[:num_targets]]
+    elif num_targets <= 20:
+        # For more targets, combine colormaps in alternating pattern
+        colors1 = plt.cm.tab10(np.linspace(0, 1, 10))
+        colors2 = plt.cm.Set2(np.linspace(0, 1, 8))
+        colors3 = plt.cm.Dark2(np.linspace(0, 1, 8))
+        colors = []
+        for i in range(max(10, 8, 8)):
+            if i < 10:
+                colors.append(colors1[i])
+            if i < 8:
+                colors.append(colors2[i])
+            if i < 8:
+                colors.append(colors3[i])
+        colors = np.array(colors[:num_targets])
+    else:
+        # For many targets, use HSV with alternating brightness/saturation
+        cmap = plt.cm.hsv
+        primary_colors = cmap(np.linspace(0, 0.8, num_targets // 2))
+        secondary_colors = cmap(np.linspace(0.4, 1.0, num_targets - num_targets // 2))
+        colors = []
+        for i in range(max(len(primary_colors), len(secondary_colors))):
+            if i < len(primary_colors):
+                colors.append(primary_colors[i])
+            if i < len(secondary_colors):
+                colors.append(secondary_colors[i])
+        colors = np.array(colors[:num_targets])
+
+    # Plot attention over time for each target token
     time_steps = np.arange(1, num_timesteps + 1)
 
-    # Plot attention from src_idx to all target tokens
-    for tgt_idx in range(seq_len):
-        values = []
+    # Get sorted target indices
+    sorted_targets = sorted(token_attention.keys())
 
-        for t in range(num_timesteps):
-            values.append(attention_matrices[t][0, head_idx, src_idx, tgt_idx].item())
-
-        label = f"Token {src_idx+1} → Token {tgt_idx+1}"
-        if src_idx == tgt_idx:
-            label += " (self)"
-            line_style = "--"
-            line_width = 2.5
+    # Create a mapping to specifically alternate colors
+    color_mapping = {}
+    for i, target in enumerate(sorted_targets):
+        # Map indices to maximize visual difference
+        if num_targets <= 10:
+            color_mapping[target] = i
         else:
-            line_style = "-"
-            line_width = 2
+            color_mapping[target] = (i * 7) % num_targets
+
+    # Plot using the color mapping
+    for target, values in token_attention.items():
+        # Special formatting for self-attention
+        linestyle = "--" if target == src_idx else "-"
+        linewidth = 2.5 if target == src_idx else 1.8
+        marker = "o" if target == src_idx else None
+        markersize = 4 if target == src_idx else 0
+
+        # Use the color mapping to get the color index
+        color_idx = color_mapping[target]
+
+        label = f"Salp {src_idx} → Salp {target}"
+        if target == src_idx:
+            label += " (self)"
 
         ax.plot(
             time_steps,
             values,
-            marker="o" if src_idx == tgt_idx else None,
-            markersize=3,
-            linewidth=line_width,
-            linestyle=line_style,
+            linewidth=linewidth,
+            linestyle=linestyle,
+            marker=marker,
+            markersize=markersize,
+            color=colors[color_idx % len(colors)],
             label=label,
         )
 
     # Add labels and title
-    ax.set_xlabel("Timestep", fontsize=12)
-    ax.set_ylabel("Attention Weight", fontsize=12)
+    ax.set_xlabel("Timestep")
+    ax.set_ylabel("Attention Weight")
+    # ax.set_title(
+    #     f"{experiment}: {attn_type} Head {head_idx}, Token {src_idx} Attention",
+    #     fontsize=14,
+    # )
 
-    type_label = {
-        "Enc_L0": "Encoder Self-Attention",
-        "Dec_L0": "Decoder Self-Attention",
-        "Cross_L0": "Cross-Attention",
-    }
-
-    ax.set_title(
-        f"{type_label.get(attn_type, attn_type)} - Head {head_idx+1}\nToken {src_idx+1} Attending to All Tokens - {model_name}",
-        fontsize=14,
-    )
+    ax.set_title(f"Salp #{src_idx} in {n_agents}-Unit Chain Attention Over Time\n")
 
     # Add grid and legend
     ax.grid(True, alpha=0.3)
-    ax.legend(loc="center left", bbox_to_anchor=(1, 0.5))
+
+    # Adjust legend for large number of targets
+    if num_targets > 15:
+        ax.legend(loc="center left", bbox_to_anchor=(1, 0.5))
+    else:
+        ax.legend(loc="center left", bbox_to_anchor=(1, 0.5))
 
     # Set y-axis limits
     ax.set_ylim(0, 1.05)
 
-    # Format y-axis ticks as percentages
-    ax.set_yticks([0, 0.25, 0.5, 0.75, 1.0])
-    ax.set_yticklabels(["0%", "25%", "50%", "75%", "100%"])
-
     plt.tight_layout()
+    filename = f"{experiment}_{attn_type}_head{head_idx}_token{src_idx}_attention_{n_agents}.png"
+    plt.savefig(filename, dpi=300, bbox_inches="tight")
+
     return fig
+
+
+# GCN
 
 
 def visualize_gcn_relationships_over_time(model, state_sequence, figsize=(14, 10)):
@@ -1575,3 +1356,347 @@ def visualize_gcn_relationships_static(
     plt.savefig("gcn_relationships_over_time.png", dpi=300, bbox_inches="tight")
 
     return fig
+
+
+def visualize_attention_weights(model, state_batch):
+    """Visualize which nodes the model pays attention to when making decisions"""
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+
+    # Forward pass to get node embeddings
+    with torch.no_grad():
+        graph_list = model.create_chain_graph_batch(state_batch)
+        batched_graph = Batch.from_data_list(graph_list)
+        node_embeddings = model.forward(batched_graph)
+
+        # Extract attention weights from attentional aggregation
+        # We need to run the gate_nn inside AttentionalAggregation
+        gate = model.att_pool.gate_nn(node_embeddings)
+        weights = gate.squeeze(-1).softmax(dim=0).cpu().numpy()
+
+    # Plot attention weights
+    fig, ax = plt.subplots(figsize=(10, 6))
+    sns.barplot(x=np.arange(len(weights)), y=weights, ax=ax)
+    ax.set_title("Attention Weights for Each Node")
+    ax.set_xlabel("Node Index")
+    ax.set_ylabel("Attention Weight")
+
+    plt.tight_layout()
+    return fig
+
+
+def visualize_attention_weights_over_time(model, state_sequence, figsize=(12, 8)):
+    """Visualize how attention weights change over time.
+
+    Args:
+        model: Your GCN model
+        state_sequence: List of state tensors representing timesteps
+        figsize: Size of the figure
+    """
+    import matplotlib.pyplot as plt
+    import numpy as np
+    import seaborn as sns
+
+    num_timesteps = len(state_sequence)
+    n_nodes = state_sequence[0].shape[1]
+
+    # Storage for attention weights over time
+    attention_weights_over_time = []
+
+    # Process each timestep
+    with torch.no_grad():
+        for t, state_batch in enumerate(state_sequence):
+            # Get graph for this timestep
+            graph_list = model.create_chain_graph_batch(state_batch)
+            batched_graph = Batch.from_data_list(graph_list)
+
+            # Forward pass to get node embeddings
+            node_embeddings = model.forward(batched_graph)
+
+            # Extract attention weights from attentional aggregation
+            gate = model.att_pool.gate_nn(node_embeddings)
+            weights = gate.squeeze(-1).softmax(dim=0).cpu().numpy()
+
+            attention_weights_over_time.append(weights)
+
+    # Convert to numpy array for easier handling
+    attention_weights_over_time = np.array(attention_weights_over_time)
+
+    # Create figure with two subplots
+    fig, (ax1, ax2) = plt.subplots(
+        2, 1, figsize=figsize, gridspec_kw={"height_ratios": [2, 1]}
+    )
+
+    # Plot 1: Attention weights over time as line plot
+    # Create colormap to distinguish nodes better
+    cmap = plt.cm.viridis
+    colors = cmap(np.linspace(0, 1, n_nodes))
+
+    for node_idx in range(n_nodes):
+        ax1.plot(
+            range(num_timesteps),
+            attention_weights_over_time[:, node_idx],
+            marker="o",
+            linewidth=2,
+            markersize=4,
+            color=colors[node_idx],
+            label=f"Node {node_idx}",
+        )
+
+    ax1.set_xlabel("Timestep")
+    ax1.set_ylabel("Attention Weight")
+    ax1.set_title("Attention Weights for Each Node Over Time")
+    ax1.grid(True, alpha=0.3)
+    ax1.legend(bbox_to_anchor=(1.05, 1), loc="upper left")
+
+    # Plot 2: Attention weights over time as heatmap
+    sns.heatmap(
+        attention_weights_over_time.T,  # Transpose to have nodes as rows, time as columns
+        cmap="viridis",
+        ax=ax2,
+        cbar=True,
+        xticklabels=5,  # Show every 5th timestep label
+        yticklabels=np.arange(n_nodes),
+    )
+    ax2.set_xlabel("Timestep")
+    ax2.set_ylabel("Node")
+    ax2.set_title("Attention Weight Heatmap")
+
+    plt.tight_layout()
+    plt.savefig("attention_weights_over_time.png", dpi=300)
+    return fig
+
+
+def visualize_edge_importance_over_time(
+    model, state_sequence, node_idx=1, figsize=(14, 10)
+):
+    """
+    Visualize how edge importance changes over time using GNNExplainer
+    """
+    import matplotlib.pyplot as plt
+    import networkx as nx
+    import numpy as np
+    import seaborn as sns
+    from torch_geometric.explain import Explainer, GNNExplainer
+
+    num_timesteps = len(state_sequence)
+
+    # Create a wrapper model that returns what GNNExplainer expects
+    class ModelWrapper(torch.nn.Module):
+        def __init__(self, model):
+            super().__init__()
+            self.model = model
+
+        def forward(self, x, edge_index):
+            data = Data(x=x, edge_index=edge_index)
+            batch = Batch.from_data_list([data])
+            return self.model.forward(batch)
+
+    wrapped_model = ModelWrapper(model)
+
+    # Initialize GNNExplainer
+    explainer = Explainer(
+        model=wrapped_model,
+        algorithm=GNNExplainer(epochs=100),
+        explanation_type="model",
+        node_mask_type="attributes",
+        edge_mask_type="object",
+        model_config=dict(
+            mode="regression",
+            task_level="node",
+            return_type="raw",
+        ),
+    )
+
+    # Storage for edge importance over time
+    edge_importance_over_time = []
+    edge_indices_list = []
+
+    # IMPORTANT: Remove torch.no_grad() here since explainer needs gradients
+    for t, state in enumerate(state_sequence):
+        print(f"Processing timestep {t}...")
+
+        # Create graph for this timestep - still use no_grad for this part
+        with torch.no_grad():
+            graph_list = model.create_chain_graph_batch(state)
+            graph = graph_list[0]  # Use first graph
+
+            # Get node features and edge index
+            node_features = graph.x
+            edge_index = graph.edge_index
+
+            # Store edge indices for reference
+            edge_indices_list.append(edge_index.cpu().numpy())
+
+        # Create copies that require gradients
+        node_features_grad = node_features.clone().detach().requires_grad_(True)
+        edge_index_grad = (
+            edge_index.clone().detach()
+        )  # Edge indices typically don't need gradients
+
+        # Run the explainer WITHOUT torch.no_grad()
+        try:
+            # Get explanations - we explain predictions for the selected node
+            explanation = explainer(
+                x=node_features_grad,
+                edge_index=edge_index_grad,
+                target=node_idx,
+            )
+
+            # Extract edge importance
+            edge_mask = explanation.edge_mask.detach().cpu().numpy()
+            edge_importance_over_time.append(edge_mask)
+        except Exception as e:
+            print(f"Error at timestep {t}: {e}")
+            # If explanation fails, use zeros as fallback
+            num_edges = edge_index.shape[1]
+            edge_importance_over_time.append(np.zeros(num_edges))
+            continue
+
+    # Rest of the function remains the same...
+    # Convert to numpy array
+    edge_importance_over_time = np.array(edge_importance_over_time)
+
+    # Create figure with multiple subplots
+    fig = plt.figure(figsize=figsize)
+    gs = fig.add_gridspec(2, 2, height_ratios=[1, 1.5])
+
+    # Get number of edges from first timestep
+    num_edges = edge_importance_over_time[0].shape[0]
+
+    # 1. Line plot for top edges over time
+    ax1 = fig.add_subplot(gs[0, :])
+
+    # Calculate average importance for each edge
+    avg_importance = np.mean(edge_importance_over_time, axis=0)
+
+    # Get indices of top 5 edges based on average importance
+    top_edge_indices = np.argsort(-avg_importance)[:5]
+
+    # Plot top edges over time with distinct colors
+    cmap = plt.cm.tab10
+    colors = cmap(np.linspace(0, 1, len(top_edge_indices)))
+
+    for i, edge_idx in enumerate(top_edge_indices):
+        ax1.plot(
+            range(num_timesteps),
+            edge_importance_over_time[:, edge_idx],
+            linewidth=2,
+            marker="o",
+            markersize=4,
+            color=colors[i],
+            label=f"Edge {edge_idx}",
+        )
+
+    # Reference edges from first timestep
+    edges_ref = edge_indices_list[0]
+
+    # Add edge annotations to the legend
+    handles, labels = ax1.get_legend_handles_labels()
+    new_labels = []
+    for i, edge_idx in enumerate(top_edge_indices):
+        src, dst = edges_ref[0, edge_idx], edges_ref[1, edge_idx]
+        new_labels.append(f"Edge {edge_idx} ({src.item()}->{dst.item()})")
+
+    ax1.legend(handles, new_labels, loc="upper right")
+    ax1.set_xlabel("Timestep")
+    ax1.set_ylabel("Edge Importance")
+    ax1.set_title(f"Top 5 Edge Importance Over Time for Node {node_idx}")
+    ax1.grid(True, alpha=0.3)
+
+    # 2. Heatmap of all edge importance over time
+    ax2 = fig.add_subplot(gs[1, :])
+    sns.heatmap(
+        edge_importance_over_time.T,  # Transpose to have edges as rows, time as columns
+        cmap="viridis",
+        ax=ax2,
+        cbar=True,
+        xticklabels=5,  # Show every 5th timestep
+    )
+    ax2.set_xlabel("Timestep")
+    ax2.set_ylabel("Edge Index")
+    ax2.set_title("All Edge Importance Over Time")
+
+    # 3. Network visualization for first and last timestep
+    t_first, t_last = 0, -1
+
+    # First timestep network
+    ax3 = fig.add_subplot(gs[1, 0])
+    _plot_network_with_edge_importance(
+        edge_indices_list[t_first],
+        edge_importance_over_time[t_first],
+        ax=ax3,
+        title=f"Edge Importance at t={t_first}",
+    )
+
+    # Last timestep network
+    ax4 = fig.add_subplot(gs[1, 1])
+    _plot_network_with_edge_importance(
+        edge_indices_list[t_last],
+        edge_importance_over_time[t_last],
+        ax=ax4,
+        title=f"Edge Importance at t={num_timesteps-1}",
+    )
+
+    plt.tight_layout()
+    plt.savefig(
+        f"edge_importance_over_time_node{node_idx}.png", dpi=300, bbox_inches="tight"
+    )
+    return fig
+
+
+def _plot_network_with_edge_importance(edge_index, edge_importance, ax, title):
+    """Helper function to plot network with edge importance"""
+    import networkx as nx
+
+    # Create networkx graph
+    G = nx.DiGraph()
+
+    # Add nodes and edges
+    edges = edge_index.T
+
+    # Get number of nodes from edge index
+    num_nodes = edge_index.max() + 1
+
+    # Add nodes
+    for i in range(num_nodes):
+        G.add_node(i)
+
+    # Add edges with importance weights
+    for i, (src, dst) in enumerate(edges):
+        src_idx, dst_idx = src.item(), dst.item()
+        G.add_edge(src_idx, dst_idx, weight=edge_importance[i])
+
+    # Position nodes in a circle layout
+    pos = nx.spring_layout(G, seed=42)
+
+    # Draw nodes
+    nx.draw_networkx_nodes(
+        G, pos, node_color="lightblue", node_size=500, alpha=0.8, ax=ax
+    )
+
+    # Create edge list with importance-based width
+    edge_widths = [G[u][v]["weight"] * 5.0 for u, v in G.edges()]
+
+    # Normalize edge widths
+    if edge_widths:
+        max_width = max(edge_widths)
+        if max_width > 0:
+            edge_widths = [w / max_width * 5.0 for w in edge_widths]
+
+    # Draw edges with width based on importance
+    nx.draw_networkx_edges(
+        G,
+        pos,
+        width=edge_widths,
+        edge_color=edge_widths,
+        edge_cmap=plt.cm.viridis,
+        alpha=0.7,
+        ax=ax,
+    )
+
+    # Draw labels
+    nx.draw_networkx_labels(G, pos, font_size=10, ax=ax)
+
+    ax.set_title(title)
+    ax.axis("off")

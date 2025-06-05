@@ -13,7 +13,7 @@ import dill
 from pathlib import Path
 import random
 import time
-
+from statistics import mean
 from vmas.simulator.utils import save_video
 
 
@@ -192,7 +192,7 @@ class PPO_Trainer:
                         data.append(r)
 
                         print(
-                            f"Step {global_step}, Reward: {r}, Minutes {"{:.2f}".format((time.time() - start_time) / 60)}"
+                            f"Step {global_step}, Reward: {r}, Minutes {'{:.2f}'.format((time.time() - start_time) / 60)}"
                         )
 
                         running_avg_reward = (
@@ -247,8 +247,8 @@ class PPO_Trainer:
         params = Params(**exp_config.params)
 
         n_agents_train = env_config.n_agents
-        n_agents_eval = 12
-        n_rollouts = 3
+        n_agents_eval = 8
+        n_rollouts = 1
 
         env = create_env(
             self.batch_dir,
@@ -257,7 +257,7 @@ class PPO_Trainer:
             env_name=env_config.environment,
             n_agents=n_agents_eval,
             training=False,
-            seed=params.random_seed + random.randint(1, 100),
+            seed=500,  # 10265,
         )
 
         d_action = env.action_space.spaces[0].shape[0]
@@ -279,8 +279,11 @@ class PPO_Trainer:
             d_action,
         )
         learner.load(self.models_dir / "best_model")
+        learner.policy.eval()
 
         frame_list = []
+
+        rollout_r_average = []
 
         for i in range(n_rollouts):
 
@@ -314,8 +317,8 @@ class PPO_Trainer:
 
                 state, reward, done, _ = env.step(action_tensor_list)
 
-                r.append(reward)
-                R += reward[0]
+                r.append(reward[0].item())
+                R = reward[0].item()
 
                 frame = env.render(
                     mode="rgb_array",
@@ -329,6 +332,14 @@ class PPO_Trainer:
                     print("DONE")
                     break
 
+            rollout_r_average.append(R)
+
             print(f"TOTAL RETURN: {R}")
 
-        save_video(self.video_name, frame_list, fps=1 / env.scenario.world.dt)
+        print(f"MEAN RETURN OVER {n_rollouts}: {mean(rollout_r_average)}")
+
+        save_video(
+            f"{self.video_name}_{n_agents_eval}",
+            frame_list,
+            fps=1 / env.scenario.world.dt,
+        )

@@ -19,7 +19,6 @@ class ActorCritic(nn.Module):
         n_heads: int = 2,
         n_encoder_layers: int = 1,
         n_decoder_layers: int = 1,
-        n_agents_max: int = 24,
     ):
         super(ActorCritic, self).__init__()
 
