@@ -60,7 +60,7 @@ class SalpDomain(BaseScenario):
 
         # Agents
         self.n_agents = kwargs.pop("n_agents", self.min_n_agents)
-        self.state_representation = kwargs.pop("state_representation", "global")
+        self.state_representation = kwargs.pop("state_representation", "local")
         self.agent_chains = [None for _ in range(batch_dim)]
 
         # Targets
@@ -160,13 +160,6 @@ class SalpDomain(BaseScenario):
             world.add_joint(joint)
             self.joints.append(joint)
 
-        # Assign neighbors to agents
-        # for agent in world.agents:
-        #     agent.state.local_neighbors = self.get_local_neighbors(agent, world.joints)
-        #     agent.state.left_neighbors, agent.state.right_neighbors = (
-        #         self.get_all_neighbors(agent, world.agents)
-        #     )
-
         # Initialize reward tensors
         self.reached_goal_bonus = 1
         self.global_rew = torch.zeros(batch_dim, device=device, dtype=torch.float32)
@@ -196,14 +189,18 @@ class SalpDomain(BaseScenario):
         agent_scale = 0.1
         agent_offset = 0.0
 
-        target_offset = 0.5
-        target_scale = 0.5
+        target_offset = self.n_agents * self.agent_joint_length
+        target_scale = self.n_agents * self.agent_joint_length
 
         if env_index is None:
             # Create new agent and target chains
             self.agent_chains = [
                 self.create_agent_chain(
-                    offset=agent_offset, scale=agent_scale, theta_min=0.0, theta_max=0.0
+                    offset=agent_offset,
+                    scale=agent_scale,
+                    theta_min=0.0,
+                    theta_max=0.0,
+                    rotation_angle=random.uniform(0, 2 * math.pi),
                 )
                 for _ in range(self.world.batch_dim)
             ]
@@ -212,7 +209,7 @@ class SalpDomain(BaseScenario):
                 self.create_target_chain(
                     offset=target_offset,
                     scale=target_scale,
-                    rotation_angle=math.radians(random.uniform(0, 359)),
+                    rotation_angle=random.uniform(0, 2 * math.pi),
                 )
                 for _ in range(self.world.batch_dim)
             ]
@@ -268,12 +265,16 @@ class SalpDomain(BaseScenario):
 
         else:
             self.agent_chains[env_index] = self.create_agent_chain(
-                offset=agent_offset, scale=agent_scale, theta_min=0.0, theta_max=0.0
+                offset=agent_offset,
+                scale=agent_scale,
+                theta_min=0.0,
+                theta_max=0.0,
+                rotation_angle=random.uniform(0, 2 * math.pi),
             )
             self.target_chains[env_index] = self.create_target_chain(
                 offset=target_offset,
                 scale=target_scale,
-                rotation_angle=math.radians(random.uniform(0, 359)),
+                rotation_angle=random.uniform(0, 2 * math.pi),
             )
 
             for n_agent, agent in enumerate(self.world.agents):
@@ -350,8 +351,8 @@ class SalpDomain(BaseScenario):
         x_coord, y_coord = generate_random_coordinate_outside_box(
             offset,
             scale,
-            self.x_semidim,
-            self.y_semidim,
+            1.0,
+            1.0,
         )
         chain = rotate_points(
             points=generate_target_points(
@@ -372,8 +373,8 @@ class SalpDomain(BaseScenario):
         x_coord, y_coord = generate_random_coordinate_outside_box(
             offset,
             scale,
-            self.x_semidim,
-            self.y_semidim,
+            1.0,
+            1.0,
         )
 
         n_bends = random.choice([0, 1])
@@ -395,17 +396,6 @@ class SalpDomain(BaseScenario):
         ).to(self.device)
 
         return chain
-
-    def create_chain_from_agents(self, n_env):
-        agents_pos = [agent.state.pos[n_env] for agent in self.world.agents]
-        chain = torch.stack(agents_pos)
-        return chain
-
-    def update_agent_chains(self):
-        self.agent_chains = [
-            self.create_chain_from_agents(n_env)
-            for n_env in range(self.world.batch_dim)
-        ]
 
     def interpolate(
         self,
@@ -565,46 +555,9 @@ class SalpDomain(BaseScenario):
             goal_reached_rew += self.reached_goal_bonus * goal_reached_mask.int()
 
             # Mix all rewards
-            self.global_rew = (
-                goal_reached_rew + self.distance_rew if self.training else f_rew
-            )
+            self.global_rew = self.distance_rew if self.training else f_rew
 
         return self.global_rew
-
-    def get_local_neighbors(self, agent: Agent, joints: ValuesView):
-        neighbors = []
-        links = []
-
-        # Get links
-        for joint in joints:
-
-            if agent == joint.entity_a:
-                links.append(joint.entity_b)
-            elif agent == joint.entity_b:
-                links.append(joint.entity_a)
-
-        # Get agents
-        for joint in joints:
-
-            if (joint.entity_a in links) and (joint.entity_b != agent):
-                neighbors.append(joint.entity_b)
-            elif (joint.entity_b in links) and (joint.entity_a != agent):
-                neighbors.append(joint.entity_a)
-
-        return neighbors
-
-    def get_all_neighbors(self, agent, all_agents):
-        l_neighbors = []
-        r_neighbors = []
-
-        for a in all_agents:
-            if a != agent:
-                if agent.idx < a.idx:
-                    r_neighbors.append(a)
-                else:
-                    l_neighbors.append(a)
-
-        return l_neighbors, r_neighbors
 
     def get_heading(self, agent: Agent):
         x = torch.cos(agent.state.rot + 1.5 * torch.pi).squeeze(-1)
@@ -842,9 +795,9 @@ class SalpDomain(BaseScenario):
         return torch.logical_or(target_reached, out_of_bounds)
 
     def info(self, agent: Agent) -> Dict[str, Tensor]:
-        return {
-            "global_reward": (self.global_rew),
-        }
+        chain_pos = self.get_agent_chain_position()
+        target_pos = self.get_target_chain_position()
+        return {"target_pose": (target_pos), "chain_pose": (chain_pos)}
 
     def extra_render(self, env_index: int = 0) -> "List[Geom]":
         from vmas.simulator import rendering
@@ -879,30 +832,3 @@ class SalpDomain(BaseScenario):
         geoms.append(range_circle)
 
         return geoms
-
-    def random_point_around_center(center_x, center_y, radius):
-        """
-        Generates a random (x, y) coordinate around a given circle center within the specified radius.
-
-        Parameters:
-            center_x (float): The x-coordinate of the circle center.
-            center_y (float): The y-coordinate of the circle center.
-            radius (float): The radius around the center where the point will be generated.
-
-        Returns:
-            tuple: A tuple (x, y) representing the random point.
-        """
-        # Generate a random angle in radians
-        angle = random.uniform(0, 2 * math.pi)
-        # Generate a random distance from the center, within the circle
-        distance = random.uniform(0, radius)
-
-        # Calculate the x and y coordinates
-        random_x = center_x + distance * math.cos(angle)
-        random_y = center_y + distance * math.sin(angle)
-
-        return [random_x, random_y]
-
-
-if __name__ == "__main__":
-    render_interactively(__file__, joints=True, control_two_agents=True)

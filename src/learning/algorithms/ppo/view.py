@@ -1,7 +1,5 @@
 import os
 import torch
-import numpy as np
-from torch.utils.tensorboard import SummaryWriter
 
 from learning.environments.types import EnvironmentParams
 from learning.environments.create_env import create_env
@@ -11,8 +9,6 @@ from learning.algorithms.ppo.utils import get_state_dim, process_state
 
 import dill
 from pathlib import Path
-import random
-import time
 from statistics import mean
 from vmas.simulator.utils import save_video
 
@@ -23,11 +19,11 @@ def view(
     device: str,
     dirs: dict,
     # View parameters
-    n_agents_eval=8,
-    n_rollouts=1,
-    rollout_length=512,
+    n_agents_eval=24,
+    n_rollouts=250,
+    rollout_length=1,
     seed=500,
-    render=True,
+    render=False,
 ):
 
     params = Params(**exp_config.params)
@@ -66,7 +62,7 @@ def view(
     learner.policy.eval()
 
     frame_list = []
-
+    info_list = []
     rollout_r_average = []
 
     for i in range(n_rollouts):
@@ -99,7 +95,9 @@ def view(
             # Turn action tensor into list of tensors with shape (n_env, action_dim)
             action_tensor_list = torch.unbind(action_tensor)
 
-            state, reward, done, _ = env.step(action_tensor_list)
+            state, reward, done, info = env.step(action_tensor_list)
+
+            info_list.append(info[0])
 
             r.append(reward[0].item())
             R = reward[0].item()
@@ -122,6 +120,9 @@ def view(
         print(f"TOTAL RETURN: {R}")
 
     print(f"MEAN RETURN OVER {n_rollouts}: {mean(rollout_r_average)}")
+
+    with open(dirs["logs"] / f"test_rollouts_info_{n_agents_eval}.dat", "wb") as f:
+        dill.dump(info_list, f)
 
     if render:
         save_video(

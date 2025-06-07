@@ -3,6 +3,7 @@ import random
 import numpy as np
 import torch
 import math
+from typing import List, Tuple
 
 COLOR_MAP = {
     "GREEN": Color.GREEN,
@@ -325,33 +326,6 @@ def angular_velocity(R, V):
     return omega
 
 
-def generate_random_coordinate_outside_box(
-    offset: float, scale: float, x_boundary: float, y_boundary: float
-):
-    x_scaled = x_boundary * scale
-    y_scaled = y_boundary * scale
-
-    x_coord = random.uniform(-x_scaled, x_scaled)
-
-    y_coord = random.uniform(-y_scaled, y_scaled)
-
-    if x_coord > 0:
-        x_coord += offset
-    else:
-        x_coord -= offset
-
-    if y_coord > 0:
-        y_coord += offset
-    else:
-        y_coord -= offset
-
-    return np.float64(x_coord), np.float64(y_coord)
-
-
-import math
-from typing import List, Tuple
-
-
 def generate_curve(
     x0: float,
     y0: float,
@@ -426,10 +400,6 @@ def generate_curve(
         pts.append(torch.tensor((xk, yk)))
 
     return pts
-
-
-import math
-from typing import List, Tuple
 
 
 def generate_bending_curve(
@@ -543,15 +513,9 @@ def calculate_moment(position, force):
     return moment
 
 
-import numpy as np
-
-
 def wrap_to_pi(angle):
     """Map any angle array to (-π, π]."""
     return torch.remainder(angle + torch.pi, 2.0 * torch.pi) - torch.pi
-
-
-import torch
 
 
 def unwrap(p, discont=torch.pi, axis=-1):
@@ -725,3 +689,50 @@ def binary_encode(number: int, num_bits: int, device=None) -> torch.Tensor:
         binary.append(bit)
 
     return torch.tensor(binary, dtype=torch.float32, device=device)
+
+
+def random_point_around_center(center_x, center_y, radius):
+    """
+    Generates a random (x, y) coordinate around a given circle center within the specified radius.
+
+    Parameters:
+        center_x (float): The x-coordinate of the circle center.
+        center_y (float): The y-coordinate of the circle center.
+        radius (float): The radius around the center where the point will be generated.
+
+    Returns:
+        tuple: A tuple (x, y) representing the random point.
+    """
+    # Generate a random angle in radians
+    angle = random.uniform(0, 2 * math.pi)
+    # Generate a random distance from the center, within the circle
+    distance = random.uniform(0, radius)
+
+    # Calculate the x and y coordinates
+    random_x = center_x + distance * math.cos(angle)
+    random_y = center_y + distance * math.sin(angle)
+
+    return np.float64(random_x), np.float64(random_y)
+
+
+def generate_random_coordinate_outside_box(
+    offset: float, scale: float, x_boundary: float, y_boundary: float
+):
+    x_scaled = x_boundary * scale
+    y_scaled = y_boundary * scale
+
+    x_coord = random.uniform(-x_scaled, x_scaled)
+
+    y_coord = random.uniform(-y_scaled, y_scaled)
+
+    if x_coord > 0:
+        x_coord += offset
+    else:
+        x_coord -= offset
+
+    if y_coord > 0:
+        y_coord += offset
+    else:
+        y_coord -= offset
+
+    return np.float64(x_coord), np.float64(y_coord)
