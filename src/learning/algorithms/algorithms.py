@@ -6,8 +6,7 @@ from pathlib import Path
 from learning.algorithms.ccea.train import CCEA_Trainer
 from learning.algorithms.ccea.types import Experiment as CCEA_Experiment
 
-from learning.algorithms.ppo.train import PPO_Trainer
-from learning.algorithms.ppo.evaluate import PPO_Evaluator
+from learning.algorithms.ppo.run import PPO_Runner
 from learning.algorithms.ppo.types import Experiment as PPO_Experiment
 
 from learning.algorithms.td3.train import TD3_Trainer
@@ -63,7 +62,7 @@ def run_algorithm(
 
         case AlgorithmEnum.CCEA:
             exp_config = CCEA_Experiment(**exp_dict)
-            trainer = CCEA_Trainer(
+            runner = CCEA_Trainer(
                 device="cuda" if torch.cuda.is_available() else "cpu",
                 batch_dir=batch_dir,
                 trials_dir=Path(batch_dir).parents[1]
@@ -77,7 +76,7 @@ def run_algorithm(
 
         case AlgorithmEnum.IPPO:
             exp_config = PPO_Experiment(**exp_dict)
-            trainer = IPPO_Trainer(
+            runner = IPPO_Trainer(
                 device="cpu",
                 batch_dir=batch_dir,
                 trials_dir=Path(batch_dir).parents[1]
@@ -91,7 +90,7 @@ def run_algorithm(
 
         case AlgorithmEnum.PPO:
             exp_config = PPO_Experiment(**exp_dict)
-            trainer = PPO_Trainer(
+            runner = PPO_Runner(
                 device=exp_config.device,
                 batch_dir=batch_dir,
                 trials_dir=Path(batch_dir).parents[1]
@@ -99,23 +98,12 @@ def run_algorithm(
                 / batch_name
                 / experiment_name,
                 trial_id=trial_id,
-                video_name=f"{experiment_name}_{trial_id}",
                 checkpoint=checkpoint,
-            )
-            evaluator = PPO_Evaluator(
-                device=exp_config.device,
-                batch_dir=batch_dir,
-                trials_dir=Path(batch_dir).parents[1]
-                / "results"
-                / batch_name
-                / experiment_name,
-                trial_id=trial_id,
-                video_name=f"{experiment_name}_{trial_id}",
             )
 
         case AlgorithmEnum.TD3:
             exp_config = None
-            trainer = TD3_Trainer(
+            runner = TD3_Trainer(
                 device="cpu",
                 batch_dir=batch_dir,
                 trials_dir=Path(batch_dir).parents[1]
@@ -129,9 +117,8 @@ def run_algorithm(
 
         case AlgorithmEnum.NONE:
             exp_config = None
-            train = False
 
-            trainer = ManualControl(
+            runner = ManualControl(
                 device="cpu",
                 batch_dir=batch_dir,
                 trials_dir=Path(batch_dir).parents[1]
@@ -144,17 +131,17 @@ def run_algorithm(
             )
 
     if view:
-        trainer.view(
+        runner.view(
             env_config=env_config,
             exp_config=exp_config,
         )
     elif evaluate:
-        evaluator.validate(
+        runner.evaluate(
             env_config=env_config,
             exp_config=exp_config,
         )
     else:
-        trainer.train(
+        runner.train(
             env_config=env_config,
             exp_config=exp_config,
         )
