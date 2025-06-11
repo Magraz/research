@@ -3,7 +3,12 @@ from learning.algorithms.algorithms import run_algorithm
 import argparse
 from pathlib import Path
 
+# Enable multiprocessing support
+# import torch.multiprocessing as mp
+
 if __name__ == "__main__":
+
+    # mp.set_start_method("spawn")
 
     # Arg parser variables
     parser = argparse.ArgumentParser()

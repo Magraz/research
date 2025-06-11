@@ -6,6 +6,8 @@ from pathlib import Path
 from learning.algorithms.ccea.train import CCEA_Trainer
 from learning.algorithms.ccea.types import Experiment as CCEA_Experiment
 
+from learning.algorithms.ppo_parallel.run import PPO_Parallel_Runner
+
 from learning.algorithms.ppo.run import PPO_Runner
 from learning.algorithms.ppo.types import Experiment as PPO_Experiment
 
@@ -91,6 +93,19 @@ def run_algorithm(
         case AlgorithmEnum.PPO:
             exp_config = PPO_Experiment(**exp_dict)
             runner = PPO_Runner(
+                device=exp_config.device,
+                batch_dir=batch_dir,
+                trials_dir=Path(batch_dir).parents[1]
+                / "results"
+                / batch_name
+                / experiment_name,
+                trial_id=trial_id,
+                checkpoint=checkpoint,
+            )
+
+        case AlgorithmEnum.PPO_PARALLEL:
+            exp_config = PPO_Experiment(**exp_dict)
+            runner = PPO_Parallel_Runner(
                 device=exp_config.device,
                 batch_dir=batch_dir,
                 trials_dir=Path(batch_dir).parents[1]

@@ -5,9 +5,9 @@ from torch.utils.tensorboard import SummaryWriter
 
 from learning.environments.types import EnvironmentParams
 from learning.environments.create_env import create_env
-from learning.algorithms.ppo.types import Experiment, Params
-from learning.algorithms.ppo.ppo import PPO
-from learning.algorithms.ppo.utils import get_state_dim, process_state
+from learning.algorithms.ppo_parallel.types import Experiment, Params
+from learning.algorithms.ppo_parallel.ppo import PPO
+from learning.algorithms.ppo_parallel.utils import get_state_dim, process_state
 
 import dill
 import random
@@ -33,10 +33,27 @@ def train(
     torch.manual_seed(params.random_seed)
     torch.cuda.manual_seed(params.random_seed)
 
-    # Create environment
+    # Initialize multiprocessing support
+    import torch.multiprocessing as mp
+
+    if __name__ == "__main__":  # Required for Windows
+        mp.set_start_method("spawn", force=True)
+
+    # Set optimal thread settings
+    num_threads = os.cpu_count() // 2 if os.cpu_count() else 1
+    if num_threads == 0:
+        num_threads = 1
+    torch.set_num_threads(num_threads)
+    print(f"PyTorch using {torch.get_num_threads()} threads for CPU operations")
+
+    # Create env_creator function
+    from learning.algorithms.ppo_parallel.utils import create_vmas_env_creator
+
+    env_creator = create_vmas_env_creator(env_config, dirs["batch"], device)
+
+    # Create a test environment (still needed for evaluation)
     n_envs = env_config.n_envs
     n_agents = env_config.n_agents
-
     env = create_env(
         dirs["batch"],
         n_envs,
@@ -55,7 +72,7 @@ def train(
         n_agents,
     )
 
-    # Create learner object
+    # Create learner object with env_creator
     learner = PPO(
         device,
         exp_config.model,
@@ -67,10 +84,17 @@ def train(
         d_action,
         writer,
         checkpoint,
+        env_creator=env_creator,  # Pass the env_creator
     )
 
     # Checkpoint loading logic
-    data = []
+    training_data = {
+        "rewards_per_episode": [],
+        "steps": [],
+        "episodes": [],
+        "timestamp": [],
+        "dones": [],
+    }
     if checkpoint:
 
         checkpoint_path = dirs["models"] / "checkpoint"
@@ -80,8 +104,8 @@ def train(
             learner.load(checkpoint_path)
 
             # Load data
-            with open(dirs["logs"] / "data.dat", "rb") as data_file:
-                data = dill.load(data_file)
+            with open(dirs["logs"] / "train.dat", "rb") as data_file:
+                training_data = dill.load(data_file)
 
             # Load env up to checkpoint
             with open(dirs["models"] / "env.dat", "rb") as env_file:
@@ -97,7 +121,17 @@ def train(
     # Log start time
     start_time = time.time()
 
+    steps_per_env = params.batch_size // n_envs
+
     while global_step < params.n_total_steps:
+
+        # Collect experience in parallel across cores
+        buffer = learner.collect_experience(steps_per_env)
+
+        # Update policy with collected experience
+        learner.update(buffer)
+
+        global_step += steps_per_env * n_envs
 
         episode_len = torch.zeros(env_config.n_envs, dtype=torch.int32, device=device)
         cum_rewards = torch.zeros(env_config.n_envs, dtype=torch.float32, device=device)
@@ -143,9 +177,6 @@ def train(
             # Create timeout boolean mask
             timeout = episode_len == params.n_max_steps_per_episode
 
-            # Increase counters
-            global_step += env_config.n_envs
-
             if torch.any(done) or torch.any(timeout):
 
                 # Get done and timeout indices
@@ -156,14 +187,10 @@ def train(
                 indices = list(set(done_indices + timeout_indices))
 
                 for idx in indices:
-                    # Log data when episode is done
                     r = cum_rewards[idx].item()
 
-                    data.append(r)
-
-                    print(
-                        f"Step {global_step}, Reward: {r}, Minutes {'{:.2f}'.format((time.time() - start_time) / 60)}"
-                    )
+                    # Log data when episode is done
+                    training_data["rewards_per_episode"].append(r)
 
                     running_avg_reward = (
                         0.99 * running_avg_reward + 0.01 * r
@@ -177,20 +204,19 @@ def train(
 
                     total_episodes += 1
 
-        # Store best model if running average reward is higher than previous best
-        if running_avg_reward > rmax:
-            print(f"New best reward: {running_avg_reward} at step {global_step}")
-            rmax = running_avg_reward
-            learner.save(dirs["models"] / "best_model")
+                training_data["dones"].append(len(indices))
+                training_data["steps"].append(global_step)
+                training_data["episodes"].append(total_episodes)
+                training_data["timestamp"].append(time.time() - start_time)
 
         # Store checkpoint
-        if global_step - checkpoint_step >= 10000:
+        if global_step - checkpoint_step >= 5000:
             # Save model
             learner.save(dirs["models"] / "checkpoint")
 
             # Store reward per episode data
-            with open(dirs["logs"] / "data.dat", "wb") as f:
-                dill.dump(data, f)
+            with open(dirs["logs"] / "train.dat", "wb") as f:
+                dill.dump(training_data, f)
 
             # Store environment
             with open(dirs["models"] / "env.dat", "wb") as f:
@@ -198,14 +224,16 @@ def train(
 
             checkpoint_step = global_step
 
-            print("CHECKPOINT SAVED")
+            print(
+                f"Step: {global_step}, Episodes: {total_episodes}, Running Avg Reward: {running_avg_reward}, Minutes {'{:.2f}'.format((time.time() - start_time) / 60)}"
+            )
 
         # Do training step
         learner.update()
 
         # Log reward data with tensorboard
         if writer is not None:
-            for reward in data:
+            for reward in training_data["rewards_per_episode"]:
                 writer.add_scalar("Agent/rewards_per_episode", reward, total_episodes)
 
     writer.close()

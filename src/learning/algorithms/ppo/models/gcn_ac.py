@@ -22,6 +22,7 @@ class ActorCritic(torch.nn.Module):
 
         self.n_agents_eval = n_agents_eval
         self.d_action = d_action
+        self.d_state = d_state
         self.device = device
 
         self.log_action_std = nn.Parameter(

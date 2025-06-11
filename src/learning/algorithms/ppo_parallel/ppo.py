@@ -1,10 +1,11 @@
 import torch
-import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 from torch.utils.tensorboard import SummaryWriter
 import torch.nn.functional as F
-from learning.algorithms.ppo.types import Params
-
+from learning.algorithms.ppo_parallel.types import Params
+from learning.algorithms.ppo_parallel.parallel_rollout_collector import (
+    ParallelRolloutCollector,
+)
 import dill
 
 # Useful for error tracing
@@ -73,6 +74,7 @@ class PPO:
         d_action: int,
         writer: SummaryWriter = None,
         checkpoint: bool = False,
+        env_creator=None,  # Add env_creator parameter
     ):
         self.device = device
         self.writer = writer
@@ -155,6 +157,52 @@ class PPO:
             if path.is_file():
                 with open(path, "rb") as file:
                     self.total_epochs = dill.load(file)["total_epochs"]
+
+        # Setup parallel rollout collection
+        import torch.multiprocessing as mp
+
+        n_cpu = mp.cpu_count()
+        self.n_workers = max(
+            1, min(8, n_cpu - 1)
+        )  # Use up to 8 workers, leave one core free
+        self.envs_per_worker = max(1, n_envs // self.n_workers)
+
+        # Ensure we have an env_creator function
+        if env_creator is not None:
+            self.use_parallel = True
+            self.rollout_collector = ParallelRolloutCollector(
+                self.policy_old,
+                env_creator,
+                self.envs_per_worker,
+                self.n_workers,
+                self.device,
+            )
+        else:
+            # Fallback to sequential collection
+            self.use_parallel = False
+
+    def collect_experience(self, steps_per_env):
+        """Collect experience using either parallel or sequential collection."""
+        if hasattr(self, "use_parallel") and self.use_parallel:
+            # Use parallel collection if available
+            buffer = self.rollout_collector.collect_rollouts(steps_per_env)
+
+            # Convert TensorRolloutBuffer to your current buffer format if needed
+            # (or modify update() to work directly with TensorRolloutBuffer)
+            self.buffer.actions = buffer.actions.reshape(
+                -1, self.n_agents, self.d_action
+            )
+            self.buffer.states = buffer.states.reshape(-1, self.n_agents, self.d_state)
+            self.buffer.logprobs = buffer.logprobs.reshape(-1, self.n_agents)
+            self.buffer.rewards = buffer.rewards.reshape(-1)
+            self.buffer.values = buffer.values.reshape(-1, 1)
+            self.buffer.is_terminals = buffer.is_terminals.reshape(-1)
+
+            return buffer
+        else:
+            # Fallback to original collection logic
+            # Your existing collection code here
+            pass
 
     def calc_value_loss(self, values, value_preds_batch, return_batch):
         """

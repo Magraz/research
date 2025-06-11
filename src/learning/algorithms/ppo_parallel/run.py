@@ -1,13 +1,13 @@
 from learning.environments.types import EnvironmentParams
-from learning.algorithms.ppo.types import Experiment
-from learning.algorithms.ppo.train import train
-from learning.algorithms.ppo.view import view
-from learning.algorithms.ppo.evaluate import evaluate
+from learning.algorithms.ppo_parallel.types import Experiment
+from learning.algorithms.ppo_parallel.train import train
+from learning.algorithms.ppo_parallel.view import view
+from learning.algorithms.ppo_parallel.evaluate import evaluate
 
 from pathlib import Path
 
 
-class PPO_Runner:
+class PPO_Parallel_Runner:
     def __init__(
         self,
         device: str,
