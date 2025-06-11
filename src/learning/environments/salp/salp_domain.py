@@ -192,6 +192,15 @@ class SalpDomain(BaseScenario):
         target_offset = self.n_agents * self.agent_joint_length
         target_scale = self.n_agents * self.agent_joint_length
 
+        # Rotation params
+        agent_rotation_angles = [
+            random.uniform(0, 2 * math.pi) for _ in range(self.world.batch_dim)
+        ]
+        agent_rotation_tensor = torch.tensor(
+            agent_rotation_angles, device=self.device
+        ).unsqueeze(-1)
+        target_rotation_angle = random.uniform(0, 2 * math.pi)
+
         if env_index is None:
             # Create new agent and target chains
             self.agent_chains = [
@@ -200,16 +209,16 @@ class SalpDomain(BaseScenario):
                     scale=agent_scale,
                     theta_min=0.0,
                     theta_max=0.0,
-                    rotation_angle=random.uniform(0, 2 * math.pi),
+                    rotation_angle=agent_rotation_tensor[i],
                 )
-                for _ in range(self.world.batch_dim)
+                for i in range(self.world.batch_dim)
             ]
 
             self.target_chains = [
                 self.create_target_chain(
                     offset=target_offset,
                     scale=target_scale,
-                    rotation_angle=random.uniform(0, 2 * math.pi),
+                    rotation_angle=target_rotation_angle,
                 )
                 for _ in range(self.world.batch_dim)
             ]
@@ -220,14 +229,15 @@ class SalpDomain(BaseScenario):
             )
             for i, agent in enumerate(self.agents):
                 pos = agent_chain_tensor[:, i, :]
-                agent.set_pos(pos, batch_index=env_index)
+                agent.set_pos(pos, batch_index=None)
+                agent.set_rot(agent_rotation_tensor, batch_index=None)
 
             target_chain_tensor = torch.stack(
                 [target_chain for target_chain in self.target_chains]
             )
             for i, target in enumerate(self.targets):
                 pos = target_chain_tensor[:, i, :]
-                target.set_pos(pos, batch_index=env_index)
+                target.set_pos(pos, batch_index=None)
 
             joint_delta = torch.tensor(
                 (joint_delta_x, joint_delta_y), device=self.device
@@ -235,8 +245,7 @@ class SalpDomain(BaseScenario):
 
             for i, joint in enumerate(self.joints):
                 joint.landmark.set_pos(
-                    self.agents[i].state.pos + joint_delta,
-                    batch_index=env_index,
+                    self.agents[i].state.pos + joint_delta, batch_index=None
                 )
 
             a_pos = self.get_agent_chain_position()
@@ -269,17 +278,18 @@ class SalpDomain(BaseScenario):
                 scale=agent_scale,
                 theta_min=0.0,
                 theta_max=0.0,
-                rotation_angle=random.uniform(0, 2 * math.pi),
+                rotation_angle=agent_rotation_tensor[env_index],
             )
             self.target_chains[env_index] = self.create_target_chain(
                 offset=target_offset,
                 scale=target_scale,
-                rotation_angle=random.uniform(0, 2 * math.pi),
+                rotation_angle=target_rotation_angle,
             )
 
             for n_agent, agent in enumerate(self.world.agents):
                 pos = self.agent_chains[env_index][n_agent]
                 agent.set_pos(pos, batch_index=env_index)
+                agent.set_rot(agent_rotation_tensor[env_index], batch_index=env_index)
 
             for n_target, target in enumerate(self.targets):
                 pos = self.target_chains[env_index][n_target]

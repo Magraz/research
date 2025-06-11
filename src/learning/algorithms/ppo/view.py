@@ -19,11 +19,12 @@ def view(
     device: str,
     dirs: dict,
     # View parameters
-    n_agents_eval=24,
-    n_rollouts=250,
-    rollout_length=1,
+    n_envs=1,
+    n_agents_eval=8,
+    n_rollouts=10,
+    rollout_length=512,
     seed=500,
-    render=False,
+    render=True,
 ):
 
     params = Params(**exp_config.params)
@@ -32,7 +33,7 @@ def view(
 
     env = create_env(
         dirs["batch"],
-        1,
+        n_envs,
         device,
         env_config.environment,
         seed,  # 10265
@@ -54,7 +55,7 @@ def view(
         params,
         n_agents_train,
         n_agents_eval,
-        1,
+        n_envs,
         d_state,
         d_action,
     )
@@ -87,7 +88,7 @@ def view(
             )
 
             action_tensor = action.reshape(
-                1,
+                n_envs,
                 n_agents_eval,
                 d_action,
             ).transpose(1, 0)
