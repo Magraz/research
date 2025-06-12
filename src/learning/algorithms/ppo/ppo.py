@@ -1,5 +1,5 @@
+import os
 import torch
-import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 from torch.utils.tensorboard import SummaryWriter
 import torch.nn.functional as F
@@ -11,22 +11,39 @@ import dill
 torch.autograd.set_detect_anomaly(True)
 
 
-class RolloutBuffer:
-    def __init__(self):
-        self.actions = []
-        self.states = []
-        self.logprobs = []
-        self.rewards = []
-        self.values = []
-        self.is_terminals = []
+class TensorRolloutBuffer:
+    def __init__(self, batch_size, n_envs, n_agents, d_state, d_action, device):
+        # Calculate buffer size
+        steps = batch_size // n_envs
+
+        # Pre-allocate tensors
+        self.states = torch.zeros((steps, n_envs, n_agents, d_state), device=device)
+        self.actions = torch.zeros((steps, n_envs, n_agents * d_action), device=device)
+        self.logprobs = torch.zeros((steps, n_envs, n_agents), device=device)
+        self.rewards = torch.zeros((steps, n_envs), device=device)
+        self.values = torch.zeros((steps, n_envs, 1), device=device)
+        self.is_terminals = torch.zeros(
+            (steps, n_envs), dtype=torch.bool, device=device
+        )
+
+        self.step = 0  # Current position in buffer
+        self.capacity = steps
+
+    def add(self, state, action, logprob, value, reward, done):
+        if self.step < self.capacity:
+            self.states[self.step] = state
+            self.actions[self.step] = action
+            self.logprobs[self.step] = logprob
+            self.values[self.step] = value
+            self.rewards[self.step] = reward
+            self.is_terminals[self.step] = done
+            self.step += 1
+
+        else:
+            raise ValueError("Buffer is full. Cannot advance further.")
 
     def clear(self):
-        del self.actions[:]
-        del self.states[:]
-        del self.logprobs[:]
-        del self.rewards[:]
-        del self.values[:]
-        del self.is_terminals[:]
+        self.step = 0
 
 
 class RolloutData(Dataset):
@@ -80,7 +97,9 @@ class PPO:
         self.n_envs = n_envs
         self.n_agents = n_agents_train
         self.d_action = d_action
-        self.buffer = RolloutBuffer()
+        self.buffer = TensorRolloutBuffer(
+            params.batch_size, n_envs, n_agents_train, d_state, d_action, device
+        )
 
         # Algorithm parameters
         self.n_epochs = params.n_epochs
@@ -188,16 +207,10 @@ class PPO:
 
         return value_loss
 
-    def select_action(self, state: torch.Tensor):
+    def select_action(self, state):
         with torch.no_grad():
             action, action_logprob, state_val = self.policy_old.act(state)
-
-        self.buffer.states.append(state)
-        self.buffer.actions.append(action)
-        self.buffer.logprobs.append(action_logprob)
-        self.buffer.values.append(state_val)
-
-        return action.detach()
+        return state, action, action_logprob, state_val
 
     def deterministic_action(self, state):
         with torch.no_grad():
@@ -205,27 +218,29 @@ class PPO:
 
         return action.detach()
 
-    def add_reward_terminal(self, reward: float, done: bool):
-        self.buffer.rewards.append(reward)
-        self.buffer.is_terminals.append(done)
+    def gae(self):
+        # Get next value for bootstrapping
+        with torch.no_grad():
+            next_value = (
+                self.policy_old.get_value(self.buffer.states[-1])
+                * (~self.buffer.is_terminals[-1]).unsqueeze(-1).float()
+            )
 
-    def gae(
-        self,
-        bootstrapped_values: list[torch.Tensor],
-    ):
-        values = torch.stack(bootstrapped_values).squeeze()
-        rewards = torch.stack(self.buffer.rewards)
-        is_terminals = torch.stack(self.buffer.is_terminals)
+        # Prepare data for vectorized computation
+        values = torch.cat([self.buffer.values, next_value.unsqueeze(0)]).squeeze(-1)
+        mask = (~self.buffer.is_terminals).float()
 
-        advantages = torch.zeros_like(rewards)
+        # Vectorized GAE calculation
+        advantages = torch.zeros_like(self.buffer.rewards)
         gae = torch.zeros(self.n_envs, device=self.device)
 
-        timesteps, _ = rewards.shape
-
-        for t in reversed(range(timesteps)):
-            mask = 1 - is_terminals[t].int()  # Convert bool to float
-            delta = rewards[t] + self.gamma * values[t + 1] * mask - values[t]
-            gae = delta + self.gamma * self.lmbda * mask * gae
+        for t in reversed(range(self.buffer.step)):
+            delta = (
+                self.buffer.rewards[t]
+                + self.gamma * values[t + 1] * mask[t]
+                - values[t]
+            )
+            gae = delta + self.gamma * self.lmbda * mask[t] * gae
             advantages[t] = gae
 
         returns = advantages + values[:-1, :]
@@ -233,96 +248,32 @@ class PPO:
         # Normalize advantages
         advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
-        return (
-            advantages.transpose(1, 0).flatten().unsqueeze(-1).detach(),
-            returns.transpose(1, 0).flatten().unsqueeze(-1).detach(),
-        )
-
-    def bootstrap_episodes(self):
-        # Bootstrap episodes by calculating the value of the final state if not terminated
-        final_values = self.policy_old.get_value(
-            self.buffer.states[-1]
-        ) * ~self.buffer.is_terminals[-1].unsqueeze(-1)
-
-        bootstrapped_values = self.buffer.values.copy()
-        bootstrapped_values.append(final_values)
-
-        # bootstrapped_rewards = self.buffer.rewards.copy()
-        # bootstrapped_rewards.append(final_values.squeeze())
-
-        # bootstrapped_is_terminals = self.buffer.is_terminals.copy()
-        # bootstrapped_is_terminals.append(torch.ones(self.n_envs, dtype=bool))
-
-        return bootstrapped_values  # , bootstrapped_rewards, bootstrapped_is_terminals
-
-    def get_discounted_rewards(
-        self,
-        bootstrapped_rewards: list[torch.Tensor],
-        bootstrapped_is_terminals: list[torch.Tensor],
-    ):
-        # Monte Carlo estimate of returns
-        discounted_rewards = []
-        discounted_reward = torch.zeros(self.n_envs, device=self.device)
-
-        for reward, is_terminal in zip(
-            reversed(bootstrapped_rewards),
-            reversed(bootstrapped_is_terminals),
-        ):
-            # If episode terminated reset discounting
-            discounted_reward *= ~is_terminal
-
-            discounted_reward = reward + (self.gamma * discounted_reward)
-            discounted_rewards.insert(0, discounted_reward)
-
-        discounted_rewards = (
-            torch.stack(discounted_rewards[:-1])
-            .transpose(1, 0)
-            .flatten(end_dim=1)
-            .unsqueeze(-1)
-        )
-
-        # Normalizing the rewards
-        discounted_rewards = (discounted_rewards - discounted_rewards.mean()) / (
-            discounted_rewards.std() + 1e-8
-        )
-
-        return discounted_rewards.detach()
+        # Reshape for training (no need for transposing with tensor buffer)
+        return (advantages.reshape(-1, 1).detach(), returns.reshape(-1, 1).detach())
 
     def update(self):
 
-        # Bootstrapped incomplete episodes
-        boots_values = self.bootstrap_episodes()
+        # Get advantages and returns
+        advantages, returns = self.gae()
 
-        # Calculate advantages
-        advantages, returns = self.gae(boots_values)
-
-        # Convert buffer lists from list of (n_env,dim) per timestep to a tensor of shape (timestep*n_envs, dim)
-        old_states = (
-            torch.stack(self.buffer.states).transpose(1, 0).flatten(end_dim=1).detach()
-        )
-        old_actions = (
-            torch.stack(self.buffer.actions).transpose(1, 0).flatten(end_dim=1).detach()
-        )
-        old_values = (
-            torch.stack(self.buffer.values).transpose(1, 0).flatten(end_dim=1).detach()
-        )
-        old_logprobs = (
-            torch.stack(self.buffer.logprobs)
-            .transpose(1, 0)
-            .flatten(end_dim=1)
-            .detach()
-        )
+        # Reshape data directly - no need for stacking operations
+        old_states = self.buffer.states.flatten(0, 1)
+        old_actions = self.buffer.actions.flatten(0, 1)
+        old_values = self.buffer.values.flatten(0, 1)
+        old_logprobs = self.buffer.logprobs.flatten(0, 1)
 
         # Create dataset from rollout
         dataset = RolloutData(
             old_states, old_actions, old_values, old_logprobs, advantages, returns
         )
+
         loader = DataLoader(
             dataset,
             batch_size=self.minibatch_size,
             shuffle=True,
-            num_workers=4,
+            num_workers=min(8, os.cpu_count() or 4),
             pin_memory=True,
+            persistent_workers=True,  # Keep workers alive between iterations
         )
 
         # Load model into GPU for training

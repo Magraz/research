@@ -21,6 +21,10 @@ def train(
     dirs: dict,
     checkpoint: bool = False,
 ):
+    # Set optimal thread settings
+    torch.set_num_threads(1)
+    print(f"PyTorch using {torch.get_num_threads()} threads")
+
     # Set logger
     writer = SummaryWriter(dirs["logs"])
 
@@ -97,7 +101,6 @@ def train(
     global_step = 0
     checkpoint_step = 0
     total_episodes = 0
-    rmax = -1e6
     running_avg_reward = 0
 
     # Log start time
@@ -114,31 +117,31 @@ def train(
         for _ in range(0, params.batch_size, env_config.n_envs):
 
             # Clamp because actions are stochastic and can lead to them been out of -1 to 1 range
+            b_state, b_action, b_logprob, b_state_val = learner.select_action(
+                process_state(
+                    state,
+                    env_config.state_representation,
+                    exp_config.model,
+                )
+            )
             actions_per_env = torch.clamp(
-                learner.select_action(
-                    process_state(
-                        state,
-                        env_config.state_representation,
-                        exp_config.model,
-                    )
-                ),
+                b_action,
                 min=-1.0,
                 max=1.0,
             )
 
             # Permute action tensor of shape (n_envs, n_agents * action_dim) to (agents, n_env, action_dim)
-            action_tensor = actions_per_env.reshape(
-                n_envs,
-                n_agents,
-                d_action,
-            ).transpose(1, 0)
+            action_tensor = actions_per_env.view(n_envs, n_agents, d_action)
 
             # Turn action tensor into list of tensors with shape (n_env, action_dim)
-            action_tensor_list = torch.unbind(action_tensor)
+            action_tensor_list = [action_tensor[:, i] for i in range(n_agents)]
 
             state, reward, done, _ = env.step(action_tensor_list)
 
-            learner.add_reward_terminal(reward[0], done)
+            # Add data to learner buffer
+            learner.buffer.add(
+                b_state, b_action, b_logprob, b_state_val, reward[0], done
+            )
 
             cum_rewards += reward[0]
 
