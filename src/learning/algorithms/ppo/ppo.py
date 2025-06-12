@@ -271,7 +271,7 @@ class PPO:
             dataset,
             batch_size=self.minibatch_size,
             shuffle=True,
-            num_workers=min(8, os.cpu_count() or 4),
+            num_workers=min(os.cpu_count(), 4),
             pin_memory=True,
             persistent_workers=True,  # Keep workers alive between iterations
         )
