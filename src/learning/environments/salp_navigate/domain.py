@@ -7,11 +7,10 @@ from typing import Dict, List
 import torch
 from torch import Tensor
 from vmas.simulator.joints import Joint
-from vmas.simulator.core import Agent, Landmark, Box, Sphere, Line
+from vmas.simulator.core import Agent, Landmark, Box, Sphere, World
 from vmas.simulator.scenario import BaseScenario
 from vmas.simulator.utils import ScenarioUtils
 
-from learning.environments.salp_navigate.world import SalpNavigateWorld
 from learning.environments.salp_navigate.dynamics import SalpDynamics
 from learning.environments.salp_navigate.utils import (
     COLOR_LIST,
@@ -32,7 +31,6 @@ from learning.environments.salp_navigate.utils import (
 from learning.environments.salp_navigate.types import GlobalObservation
 import random
 import math
-from copy import deepcopy
 
 if typing.TYPE_CHECKING:
     from vmas.simulator.rendering import Geom
@@ -61,7 +59,6 @@ class SalpNavigateDomain(BaseScenario):
         self.agent_chains = [None for _ in range(batch_dim)]
 
         # Targets
-        self.n_targets = kwargs.pop("n_targets", 1)
         self.target_chains = [None for _ in range(batch_dim)]
 
         if kwargs.pop("shuffle_agents_positions", False):
@@ -101,7 +98,7 @@ class SalpNavigateDomain(BaseScenario):
 
         self.device = device
         # Make world
-        world = SalpNavigateWorld(
+        world = World(
             batch_dim=batch_dim,
             x_semidim=self.world_x_dim,
             y_semidim=self.world_y_dim,
@@ -115,16 +112,15 @@ class SalpNavigateDomain(BaseScenario):
 
         # Set targets
         self.targets = []
-        for n_target in range(self.n_targets):
-            for n_agent in range(self.n_agents):
-                target = Landmark(
-                    name=f"target_{n_agent}_chain_{n_target}",
-                    shape=Sphere(radius=self.target_radius),
-                    color=COLOR_LIST[n_agent],
-                    collide=False,
-                )
-                world.add_landmark(target)
-                self.targets.append(target)
+        for n_agent in range(self.n_agents):
+            target = Landmark(
+                name=f"target_{n_agent}_chain",
+                shape=Sphere(radius=self.target_radius),
+                color=COLOR_LIST[n_agent],
+                collide=False,
+            )
+            world.add_landmark(target)
+            self.targets.append(target)
 
         # Add agents
         self.agents = []
@@ -220,7 +216,7 @@ class SalpNavigateDomain(BaseScenario):
                 for _ in range(self.world.batch_dim)
             ]
 
-            # Set positions according to chains
+            # Set agent positions and rotations
             agent_chain_tensor = torch.stack(
                 [agent_chain for agent_chain in self.agent_chains]
             )
@@ -229,6 +225,7 @@ class SalpNavigateDomain(BaseScenario):
                 agent.set_pos(pos, batch_index=None)
                 agent.set_rot(agent_rotation_tensor, batch_index=None)
 
+            # Set target positions
             target_chain_tensor = torch.stack(
                 [target_chain for target_chain in self.target_chains]
             )

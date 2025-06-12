@@ -4,11 +4,9 @@ from learning.environments.types import EnvironmentEnum
 from dataclasses import asdict
 
 # EXPERIMENT SETTINGS
-ENVIRONMENT = EnvironmentEnum.VMAS_SALP
-BATCH_NAME = f"{ENVIRONMENT}_local_8a"
+ENVIRONMENT = EnvironmentEnum.VMAS_SALP_NAVIGATE
+BATCH_NAME = f"{ENVIRONMENT}_8a"
 EXPERIMENTS_LIST = [
-    "mlp",
-    "transformer",
     "transformer_full",
     "transformer_encoder",
     "transformer_decoder",

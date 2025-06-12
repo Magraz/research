@@ -5,18 +5,14 @@ import typing
 from typing import Dict, List
 
 import torch
-import torch.nn.functional as F
 from torch import Tensor
-from typing import ValuesView
-from vmas import render_interactively
 from vmas.simulator.joints import Joint
-from vmas.simulator.core import Agent, Landmark, Box, Sphere, World, Line
+from vmas.simulator.core import Agent, Landmark, Box, Sphere, World
 from vmas.simulator.scenario import BaseScenario
 from vmas.simulator.utils import ScenarioUtils
 
-from learning.environments.salp.world import SalpWorld
-from learning.environments.salp.dynamics import SalpDynamics
-from learning.environments.salp.utils import (
+from learning.environments.salp_passage.dynamics import SalpDynamics
+from learning.environments.salp_passage.utils import (
     COLOR_LIST,
     COLOR_MAP,
     generate_target_points,
@@ -32,7 +28,7 @@ from learning.environments.salp.utils import (
     get_neighbor_angles,
     binary_encode,
 )
-from learning.environments.salp.types import GlobalObservation
+from learning.environments.salp_passage.types import GlobalObservation
 import random
 import math
 from copy import deepcopy
@@ -104,7 +100,7 @@ class SalpDomain(BaseScenario):
 
         self.device = device
         # Make world
-        world = SalpWorld(
+        world = World(
             batch_dim=batch_dim,
             x_semidim=self.world_x_dim,
             y_semidim=self.world_y_dim,

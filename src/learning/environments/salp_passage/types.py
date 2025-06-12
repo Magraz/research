@@ -40,7 +40,7 @@ class GlobalObservation:
 
 
 @dataclass
-class SalpEnvironmentParams(EnvironmentParams):
+class SalpPassageEnvironmentParams(EnvironmentParams):
     state_representation: str = None
 
 

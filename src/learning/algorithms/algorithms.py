@@ -22,6 +22,7 @@ from learning.algorithms.types import AlgorithmEnum
 from learning.environments.types import EnvironmentEnum, EnvironmentParams
 from learning.environments.rover.types import RoverEnvironmentParams
 from learning.environments.salp_navigate.types import SalpNavigateEnvironmentParams
+from learning.environments.salp_passage.types import SalpPassageEnvironmentParams
 
 
 def run_algorithm(
@@ -36,18 +37,21 @@ def run_algorithm(
     evaluate: bool = False,
 ):
 
+    # Load environment config
     env_file = batch_dir / "_env.yaml"
 
     with open(env_file, "r") as file:
         env_dict = yaml.safe_load(file)
 
-    # Load environment config
     match (environment):
         case EnvironmentEnum.VMAS_ROVER:
             env_config = RoverEnvironmentParams(**env_dict)
 
         case EnvironmentEnum.VMAS_SALP_NAVIGATE:
             env_config = SalpNavigateEnvironmentParams(**env_dict)
+
+        case EnvironmentEnum.VMAS_SALP_PASSAGE:
+            env_config = SalpPassageEnvironmentParams(**env_dict)
 
         case EnvironmentEnum.VMAS_BALANCE | EnvironmentEnum.VMAS_BUZZ_WIRE:
             env_config = EnvironmentParams(**env_dict)
