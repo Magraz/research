@@ -6,7 +6,7 @@ from vmas import make_env
 from vmas.simulator.environment import Environment
 
 from learning.environments.rover.rover_domain import RoverDomain
-from learning.environments.salp.salp_domain import SalpDomain
+from learning.environments.salp_navigate.domain import SalpNavigateDomain
 
 from learning.environments.types import EnvironmentEnum
 
@@ -96,10 +96,10 @@ def create_env(
             }
             return create_vmas_env(n_envs, device, seed, env_args)
 
-        case EnvironmentEnum.VMAS_SALP:
+        case EnvironmentEnum.VMAS_SALP_NAVIGATE:
             env_args = {
                 # Environment data
-                "scenario": SalpDomain(),
+                "scenario": SalpNavigateDomain(),
                 "training": kwargs.get("training", True),
                 # Agent data
                 "n_agents": kwargs.get("n_agents", 1),

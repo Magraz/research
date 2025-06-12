@@ -21,7 +21,7 @@ from learning.algorithms.types import AlgorithmEnum
 
 from learning.environments.types import EnvironmentEnum, EnvironmentParams
 from learning.environments.rover.types import RoverEnvironmentParams
-from learning.environments.salp.types import SalpEnvironmentParams
+from learning.environments.salp_navigate.types import SalpNavigateEnvironmentParams
 
 
 def run_algorithm(
@@ -46,8 +46,8 @@ def run_algorithm(
         case EnvironmentEnum.VMAS_ROVER:
             env_config = RoverEnvironmentParams(**env_dict)
 
-        case EnvironmentEnum.VMAS_SALP:
-            env_config = SalpEnvironmentParams(**env_dict)
+        case EnvironmentEnum.VMAS_SALP_NAVIGATE:
+            env_config = SalpNavigateEnvironmentParams(**env_dict)
 
         case EnvironmentEnum.VMAS_BALANCE | EnvironmentEnum.VMAS_BUZZ_WIRE:
             env_config = EnvironmentParams(**env_dict)
