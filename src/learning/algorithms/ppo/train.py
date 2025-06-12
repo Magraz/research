@@ -102,6 +102,7 @@ def train(
     checkpoint_step = 0
     total_episodes = 0
     running_avg_reward = 0
+    rmax = -1e6
 
     # Log start time
     start_time = time.time()
@@ -187,8 +188,13 @@ def train(
                 training_data["episodes"].append(total_episodes)
                 training_data["timestamp"].append(time.time() - start_time)
 
+        # Store best model if running average reward is higher than previous bestAdd commentMore actions
+        if running_avg_reward > rmax:
+            rmax = running_avg_reward
+            learner.save(dirs["models"] / "best_model")
+
         # Store checkpoint
-        if global_step - checkpoint_step >= 5000:
+        if global_step - checkpoint_step >= 10000:
             # Save model
             learner.save(dirs["models"] / "checkpoint")
 
