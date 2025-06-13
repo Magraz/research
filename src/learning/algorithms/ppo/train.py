@@ -22,7 +22,9 @@ def train(
     checkpoint: bool = False,
 ):
     # Set optimal thread settings
-    torch.set_num_threads(1)
+    n_threads = 1
+    torch.set_num_threads(n_threads)
+    torch.set_num_interop_threads(n_threads)
     print(f"PyTorch using {torch.get_num_threads()} threads")
 
     # Set logger
@@ -208,9 +210,9 @@ def train(
 
             checkpoint_step = global_step
 
-            print(
-                f"Step: {global_step}, Episodes: {total_episodes}, Running Avg Reward: {running_avg_reward}, Minutes {'{:.2f}'.format((time.time() - start_time) / 60)}"
-            )
+        print(
+            f"Step: {global_step}, Episodes: {total_episodes}, Running Avg Reward: {running_avg_reward}, Minutes {'{:.2f}'.format((time.time() - start_time) / 60)}"
+        )
 
         # Do training step
         learner.update()

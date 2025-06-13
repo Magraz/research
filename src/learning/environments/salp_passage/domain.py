@@ -39,11 +39,11 @@ if typing.TYPE_CHECKING:
 torch.set_printoptions(precision=5)
 
 
-class SalpDomain(BaseScenario):
+class SalpPassageDomain(BaseScenario):
     def make_world(self, batch_dim: int, device: torch.device, **kwargs):
         # CONSTANTS
         self.agent_radius = 0.02
-        self.agent_joint_length = 0.06
+        self.agent_joint_length = 0.07
         self.agent_max_angle = 45
         self.agent_min_angle = -45
         self.u_multiplier = 1.0
@@ -52,7 +52,7 @@ class SalpDomain(BaseScenario):
         self.max_n_agents = 24
         self.min_n_agents = 8
 
-        self.viewer_zoom = kwargs.pop("viewer_zoom", 1.45)
+        self.viewer_zoom = kwargs.pop("viewer_zoom", 1.00)
 
         # Agents
         self.n_agents = kwargs.pop("n_agents", self.min_n_agents)
@@ -60,7 +60,6 @@ class SalpDomain(BaseScenario):
         self.agent_chains = [None for _ in range(batch_dim)]
 
         # Targets
-        self.n_targets = kwargs.pop("n_targets", 1)
         self.target_chains = [None for _ in range(batch_dim)]
 
         if kwargs.pop("shuffle_agents_positions", False):
@@ -114,16 +113,15 @@ class SalpDomain(BaseScenario):
 
         # Set targets
         self.targets = []
-        for n_target in range(self.n_targets):
-            for n_agent in range(self.n_agents):
-                target = Landmark(
-                    name=f"target_{n_agent}_chain_{n_target}",
-                    shape=Sphere(radius=self.target_radius),
-                    color=COLOR_LIST[n_agent],
-                    collide=False,
-                )
-                world.add_landmark(target)
-                self.targets.append(target)
+        for n_agent in range(self.n_agents):
+            target = Landmark(
+                name=f"target_{n_agent}_chain",
+                shape=Sphere(radius=self.target_radius),
+                color=COLOR_LIST[n_agent],
+                collide=False,
+            )
+            world.add_landmark(target)
+            self.targets.append(target)
 
         # Add agents
         self.agents = []
@@ -148,8 +146,8 @@ class SalpDomain(BaseScenario):
                 anchor_a=(0, 0),
                 anchor_b=(0, 0),
                 dist=self.agent_joint_length,
-                rotate_a=False,
-                rotate_b=False,
+                rotate_a=True,
+                rotate_b=True,
                 collidable=False,
                 width=0,
             )
@@ -403,56 +401,24 @@ class SalpDomain(BaseScenario):
 
         return chain
 
-    def interpolate(
-        self,
-        value,
-        source_min=-1,
-        source_max=1,
-        target_min=-torch.pi,
-        target_max=torch.pi,
-    ):
-        # Linear interpolation using PyTorch
-        return target_min + (value - source_min) / (source_max - source_min) * (
-            target_max - target_min
-        )
-
     def process_action(self, agent: Agent):
-        magnitude_pos = self.interpolate(
-            agent.action.u[:, 0], target_min=0, target_max=1
-        )
 
-        magnitude_neg = self.interpolate(
-            agent.action.u[:, 1], target_min=0, target_max=1
-        )
+        magnitude = agent.action.u[:, 0]
 
-        magnitude = magnitude_pos - magnitude_neg
-
-        # Set angle
-        # turn_angle = torch.pi / 4
-
-        # in_theta = self.interpolate(
-        #     agent.action.u[:, 1], target_min=-turn_angle, target_max=turn_angle
-        # )
-
-        in_theta = 0
+        # Set salp's rotation
+        agent.state.rot += agent.action.u[:, 1].unsqueeze(-1)
 
         # Get heading vector
         agent_rot = agent.state.rot % (2 * torch.pi)
         heading_offset = agent_rot + torch.pi / 2
 
-        theta = (in_theta + heading_offset) % (2 * torch.pi)
+        theta = heading_offset % (2 * torch.pi)
 
+        # Set salp's force vector
         x = torch.cos(theta).squeeze(-1) * magnitude
         y = torch.sin(theta).squeeze(-1) * magnitude
 
         agent.state.force = torch.stack((x, y), dim=-1)
-
-        # Unconstrained action
-        # agent.state.force = agent.action.u[:] * 0.4
-
-        # Join action
-        # if agent.state.join.any():
-        #     self.world.detach_joint(self.joint_list[0])
 
     def get_targets(self):
         return [landmark for landmark in self.world.landmarks if not landmark.is_joint]

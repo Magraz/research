@@ -7,6 +7,7 @@ from vmas.simulator.environment import Environment
 
 from learning.environments.rover.rover_domain import RoverDomain
 from learning.environments.salp_navigate.domain import SalpNavigateDomain
+from learning.environments.salp_passage.domain import SalpPassageDomain
 
 from learning.environments.types import EnvironmentEnum
 
@@ -104,8 +105,18 @@ def create_env(
                 # Agent data
                 "n_agents": kwargs.get("n_agents", 1),
                 "state_representation": env_config["state_representation"],
-                # POIs data
-                "n_targets": 1,
+                "rotating_salps": env_config["rotating_salps"],
+            }
+            return create_vmas_env(n_envs, device, seed, env_args)
+
+        case EnvironmentEnum.VMAS_SALP_PASSAGE:
+            env_args = {
+                # Environment data
+                "scenario": SalpPassageDomain(),
+                "training": kwargs.get("training", True),
+                # Agent data
+                "n_agents": kwargs.get("n_agents", 1),
+                "state_representation": env_config["state_representation"],
             }
             return create_vmas_env(n_envs, device, seed, env_args)
 

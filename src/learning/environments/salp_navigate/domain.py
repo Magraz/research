@@ -42,13 +42,12 @@ class SalpNavigateDomain(BaseScenario):
     def make_world(self, batch_dim: int, device: torch.device, **kwargs):
         # CONSTANTS
         self.agent_radius = 0.02
-        self.agent_joint_length = 0.06
+        self.agent_joint_length = 0.07
         self.agent_max_angle = 45
         self.agent_min_angle = -45
         self.u_multiplier = 1.0
         self.target_radius = self.agent_radius / 2
         self.frechet_thresh = 0.95
-        self.max_n_agents = 24
         self.min_n_agents = 8
 
         self.viewer_zoom = kwargs.pop("viewer_zoom", 1.45)
@@ -57,6 +56,7 @@ class SalpNavigateDomain(BaseScenario):
         self.n_agents = kwargs.pop("n_agents", self.min_n_agents)
         self.state_representation = kwargs.pop("state_representation", "local")
         self.agent_chains = [None for _ in range(batch_dim)]
+        self.rotating_salps = kwargs.pop("rotating_salps", False)
 
         # Targets
         self.target_chains = [None for _ in range(batch_dim)]
@@ -145,8 +145,8 @@ class SalpNavigateDomain(BaseScenario):
                 anchor_a=(0, 0),
                 anchor_b=(0, 0),
                 dist=self.agent_joint_length,
-                rotate_a=False,
-                rotate_b=False,
+                rotate_a=self.rotating_salps,
+                rotate_b=self.rotating_salps,
                 collidable=False,
                 width=0,
             )
@@ -415,42 +415,35 @@ class SalpNavigateDomain(BaseScenario):
         )
 
     def process_action(self, agent: Agent):
-        magnitude_pos = self.interpolate(
-            agent.action.u[:, 0], target_min=0, target_max=1
-        )
 
-        magnitude_neg = self.interpolate(
-            agent.action.u[:, 1], target_min=0, target_max=1
-        )
+        if self.rotating_salps:
+            magnitude = agent.action.u[:, 0]
 
-        magnitude = magnitude_pos - magnitude_neg
+            # Set salp's rotation
+            agent.state.rot += agent.action.u[:, 1].unsqueeze(-1)
 
-        # Set angle
-        # turn_angle = torch.pi / 4
+        else:
+            magnitude_pos = self.interpolate(
+                agent.action.u[:, 0], target_min=0, target_max=1
+            )
 
-        # in_theta = self.interpolate(
-        #     agent.action.u[:, 1], target_min=-turn_angle, target_max=turn_angle
-        # )
+            magnitude_neg = self.interpolate(
+                agent.action.u[:, 1], target_min=0, target_max=1
+            )
 
-        in_theta = 0
+            magnitude = magnitude_pos - magnitude_neg
 
         # Get heading vector
         agent_rot = agent.state.rot % (2 * torch.pi)
         heading_offset = agent_rot + torch.pi / 2
 
-        theta = (in_theta + heading_offset) % (2 * torch.pi)
+        theta = heading_offset % (2 * torch.pi)
 
+        # Set salp's force vector
         x = torch.cos(theta).squeeze(-1) * magnitude
         y = torch.sin(theta).squeeze(-1) * magnitude
 
         agent.state.force = torch.stack((x, y), dim=-1)
-
-        # Unconstrained action
-        # agent.state.force = agent.action.u[:] * 0.4
-
-        # Join action
-        # if agent.state.join.any():
-        #     self.world.detach_joint(self.joint_list[0])
 
     def get_targets(self):
         return [landmark for landmark in self.world.landmarks if not landmark.is_joint]
