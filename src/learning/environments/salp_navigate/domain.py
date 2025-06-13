@@ -73,17 +73,6 @@ class SalpNavigateDomain(BaseScenario):
         self.training = kwargs.pop("training", True)
 
         # Environment
-        self.x_semidim = (
-            1.0
-            if self.n_agents <= 8
-            else 1.0 + self.n_agents / 2 * self.agent_joint_length
-        )
-        self.y_semidim = (
-            1.0
-            if self.n_agents <= 8
-            else 1.0 + self.n_agents / 2 * self.agent_joint_length
-        )
-
         if self.training:
             # Set a smaller world size for training like a fence
             self.world_x_dim = self.n_agents / 4
@@ -259,10 +248,8 @@ class SalpNavigateDomain(BaseScenario):
 
             t_pos = self.get_target_chain_position()
 
-            f_dist, _ = self.calculate_frechet_reward(a_pos, t_pos)
-            c_dist, _ = self.calculate_centroid_reward(
-                a_pos.mean(dim=1), t_pos.mean(dim=1)
-            )
+            f_dist, _ = calculate_frechet_reward(a_pos, t_pos)
+            c_dist, _ = calculate_centroid_reward(a_pos.mean(dim=1), t_pos.mean(dim=1))
             curvature = calculate_curvature_reward(
                 a_pos, t_pos, self.agent_joint_length
             )
@@ -468,8 +455,6 @@ class SalpNavigateDomain(BaseScenario):
         is_first = agent == self.world.agents[0]
 
         if is_first:
-
-            # Calculate G
 
             self.frechet_rew[:] = 0
             self.centroid_rew[:] = 0
