@@ -24,9 +24,14 @@ from learning.environments.salp_navigate.utils import (
     internal_angles_xy,
     wrap_to_pi,
     menger_curvature,
-    centre_and_rotate,
     get_neighbor_angles,
     binary_encode,
+)
+from learning.environments.salp_navigate.rewards import (
+    calculate_centroid_reward,
+    calculate_curvature_reward,
+    calculate_distance_reward,
+    calculate_frechet_reward,
 )
 from learning.environments.salp_navigate.types import GlobalObservation
 import random
@@ -258,8 +263,10 @@ class SalpNavigateDomain(BaseScenario):
             c_dist, _ = self.calculate_centroid_reward(
                 a_pos.mean(dim=1), t_pos.mean(dim=1)
             )
-            curvature = self.calculate_curvature_reward(a_pos, t_pos)
-            dist_rew = self.calculate_distance_reward(a_pos, t_pos)
+            curvature = calculate_curvature_reward(
+                a_pos, t_pos, self.agent_joint_length
+            )
+            dist_rew = calculate_distance_reward(a_pos, t_pos)
 
             self.frechet_shaping = f_dist * self.frechet_shaping_factor
             self.centroid_shaping = c_dist * self.centroid_shaping_factor
@@ -315,12 +322,12 @@ class SalpNavigateDomain(BaseScenario):
 
             t_pos = self.get_target_chain_position()
 
-            f_dist, _ = self.calculate_frechet_reward(a_pos, t_pos)
-            c_dist, _ = self.calculate_centroid_reward(
-                a_pos.mean(dim=1), t_pos.mean(dim=1)
+            f_dist, _ = calculate_frechet_reward(a_pos, t_pos)
+            c_dist, _ = calculate_centroid_reward(a_pos.mean(dim=1), t_pos.mean(dim=1))
+            curvature = calculate_curvature_reward(
+                a_pos, t_pos, self.agent_joint_length
             )
-            curvature = self.calculate_curvature_reward(a_pos, t_pos)
-            dist_rew = self.calculate_distance_reward(a_pos, t_pos)
+            dist_rew = calculate_distance_reward(a_pos, t_pos)
 
             self.frechet_shaping[env_index] = (
                 f_dist[env_index] * self.frechet_shaping_factor
@@ -457,44 +464,6 @@ class SalpNavigateDomain(BaseScenario):
         target_pos = [t.state.pos for t in targets]
         return torch.stack(target_pos).transpose(1, 0).float()
 
-    def calculate_distance_reward(self, a_pos: torch.Tensor, t_pos: torch.Tensor):
-        pos_err = t_pos - a_pos  # [B, N, 2]
-        dists = torch.linalg.norm(pos_err, dim=-1)
-        dist_rew = -dists.mean(dim=-1)
-        return dist_rew
-
-    def calculate_frechet_reward(
-        self, a_pos: torch.Tensor, t_pos: torch.Tensor, aligned: bool = False
-    ) -> torch.Tensor:
-
-        if aligned:
-            a_pos, t_pos = centre_and_rotate(a_pos, t_pos)
-
-        f_dist = batch_discrete_frechet_distance(a_pos, t_pos)
-        f_rew = 1 / torch.exp(f_dist)
-
-        return -f_dist, f_rew
-
-    def calculate_centroid_reward(
-        self, a_centroid: torch.Tensor, t_centroid: torch.Tensor
-    ) -> torch.Tensor:
-
-        c_dist = torch.norm(a_centroid - t_centroid, dim=1)
-        c_rew = 1 / torch.exp(c_dist)
-
-        return -c_dist, c_rew
-
-    def calculate_curvature_reward(
-        self, a_pos: torch.Tensor, t_pos: torch.Tensor
-    ) -> torch.Tensor:
-
-        k = menger_curvature(a_pos, self.agent_joint_length)
-        k_star = menger_curvature(t_pos, self.agent_joint_length)
-
-        rew = -torch.sum(torch.abs(k - k_star), dim=-1)
-
-        return rew
-
     def reward(self, agent: Agent):
         is_first = agent == self.world.agents[0]
 
@@ -512,15 +481,15 @@ class SalpNavigateDomain(BaseScenario):
             target_pos = self.get_target_chain_position()
 
             # Distance reward
-            dist_rew = self.calculate_distance_reward(agent_pos, target_pos)
+            dist_rew = calculate_distance_reward(agent_pos, target_pos)
             dist_shaping = dist_rew * self.distance_shaping_factor
             self.distance_rew = dist_shaping - self.distance_shaping
             self.distance_shaping = dist_shaping
 
             # Frechet reward
 
-            _, f_rew = self.calculate_frechet_reward(agent_pos, target_pos)
-            # f_dist, _ = self.calculate_frechet_reward(
+            _, f_rew = calculate_frechet_reward(agent_pos, target_pos)
+            # f_dist, _ = calculate_frechet_reward(
             #     agent_pos, target_pos, aligned=True
             # )
             # frechet_shaping = f_dist * self.frechet_shaping_factor
@@ -528,7 +497,7 @@ class SalpNavigateDomain(BaseScenario):
             # self.frechet_shaping = frechet_shaping
 
             # Curvature reward
-            # curvature_rew = self.calculate_curvature_reward(agent_pos, target_pos)
+            # curvature_rew = calculate_curvature_reward(agent_pos, target_pos, self.agent_joint_length)
             # curvature_shaping = curvature_rew * self.curvature_shaping_factor
             # self.curvature_rew += torch.tanh(curvature_shaping - self.curvature_shaping)
             # self.curvature_shaping = curvature_shaping
@@ -536,7 +505,7 @@ class SalpNavigateDomain(BaseScenario):
             # Centroid reward
             # agent_centroid = agent_pos.mean(dim=1)
             # target_centroid = target_pos.mean(dim=1)
-            # cent_dist, _ = self.calculate_centroid_reward(
+            # cent_dist, _ = calculate_centroid_reward(
             #     agent_centroid, target_centroid
             # )
             # centroid_shaping = cent_dist * self.centroid_shaping_factor
