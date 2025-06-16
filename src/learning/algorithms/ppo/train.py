@@ -190,13 +190,22 @@ def train(
                 training_data["episodes"].append(total_episodes)
                 training_data["timestamp"].append(time.time() - start_time)
 
+        # Do training step
+        learner.update()
+
+        print(
+            f"Step: {global_step}, Episodes: {total_episodes}, Running Avg Reward: {running_avg_reward}, Minutes {'{:.2f}'.format((time.time() - start_time) / 60)}"
+        )
+
         # Store best model if running average reward is higher than previous bestAdd commentMore actions
         if running_avg_reward > rmax:
             rmax = running_avg_reward
             learner.save(dirs["models"] / "best_model")
 
         # Store checkpoint
-        if global_step - checkpoint_step >= 10000:
+        if (
+            global_step - checkpoint_step >= 10000
+        ) or params.n_total_episodes == total_episodes:
             # Save model
             learner.save(dirs["models"] / "checkpoint")
 
@@ -210,12 +219,9 @@ def train(
 
             checkpoint_step = global_step
 
-        print(
-            f"Step: {global_step}, Episodes: {total_episodes}, Running Avg Reward: {running_avg_reward}, Minutes {'{:.2f}'.format((time.time() - start_time) / 60)}"
-        )
-
-        # Do training step
-        learner.update()
+            if params.n_total_episodes == total_episodes:
+                print("Finished training")
+                break
 
         # Log reward data with tensorboard
         if writer is not None:

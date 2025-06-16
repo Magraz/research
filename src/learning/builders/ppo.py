@@ -25,6 +25,7 @@ for experiment_name in EXPERIMENTS_LIST:
         params=Params(
             n_epochs=10,
             n_total_steps=1e8,
+            n_total_episodes=3e4,
             n_max_steps_per_episode=512,
             batch_size=5120,
             minibatch_size=256,

@@ -367,10 +367,10 @@ class PPO:
 
                     self.total_epochs += 1
 
-                    # Store epoch count
-                    with open(self.writer.log_dir / "tensorboard.dat", "wb") as f:
-                        log_data_dict = {"total_epochs": self.total_epochs}
-                        dill.dump(log_data_dict, f)
+        # Store epoch count
+        with open(self.writer.log_dir / "tensorboard.dat", "wb") as f:
+            log_data_dict = {"total_epochs": self.total_epochs}
+            dill.dump(log_data_dict, f)
 
         # Load model back to cpu to collect rollouts
         self.policy.to(self.device)
