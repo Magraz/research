@@ -1,9 +1,9 @@
 #Experiment config
-moving_avg_window_size: 1000
+moving_avg_window_size: 10
 datapoints: 60000
 base_path: "/home/magraz/research/src/learning/experiments/results"
-batches: ["salp_local_8a"]
+batches: ["salp_navigate_8a"]
 # experiments: ["mlp","transformer_full", "transformer_encoder", "transformer_decoder", "gat","graph_transformer", "gcn"]
 experiments: ["mlp","transformer_full", "transformer_encoder", "transformer_decoder", "gat","graph_transformer", "gcn"]
 
-trials: ["test"]
+trials: ["no_frechet"]
