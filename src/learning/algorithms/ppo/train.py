@@ -77,11 +77,15 @@ def train(
 
     # Checkpoint loading logic
     training_data = {
-        "rewards_per_episode": [],
         "steps": [],
-        "episodes": [],
-        "timestamp": [],
         "dones": [],
+        "episodes": [],
+        "timestamps": [],
+        "rewards_per_episode": [],
+        "last_timestamp": 0,
+        "last_step_count": 0,
+        "last_episode_count": 0,
+        "last_running_avg_rew": 0,
     }
     if checkpoint:
 
@@ -100,14 +104,14 @@ def train(
                 env = dill.load(env_file)
 
     # Setup loop variables
-    global_step = 0
+    global_step = training_data["last_step_count"]
+    total_episodes = training_data["last_episode_count"]
+    running_avg_reward = training_data["last_running_avg_rew"]
     checkpoint_step = 0
-    total_episodes = 0
-    running_avg_reward = 0
     rmax = -1e6
 
     # Log start time
-    start_time = time.time()
+    start_time = time.time() + training_data["last_timestamp"]
 
     while global_step < params.n_total_steps:
 
@@ -188,7 +192,10 @@ def train(
                 training_data["dones"].append(len(indices))
                 training_data["steps"].append(global_step)
                 training_data["episodes"].append(total_episodes)
-                training_data["timestamp"].append(time.time() - start_time)
+                training_data["timestamps"].append(time.time() - start_time)
+                training_data["last_episode_count"] = total_episodes
+                training_data["last_running_avg_rew"] = running_avg_reward
+                training_data["last_timestamp"] = time.time() - start_time
 
         # Do training step
         learner.update()
