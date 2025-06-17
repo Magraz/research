@@ -1,13 +1,15 @@
 ### To Install
 Project requires Python 3.12
 
-Run the following commands inside `src/vmas_salps` after cloning:
+Run the following commands inside after cloning:
 1. `git submodule init`
 2. `git submodule update`
 3. `cd VectorizedMultiAgentSimulator`
 4. `pip install -e .`
 7. `cd ../src`
-8. `pip install -r requirements.txt`
+8. `pip install -e .`
+9. `cd ..`
+10. `pip install -r requirements.txt`
 
 ### To Run Experiment
 
