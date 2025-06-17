@@ -1,4 +1,4 @@
-### To Install
+### To install
 Project requires Python 3.12
 
 Run the following commands inside after cloning:
@@ -11,7 +11,11 @@ Run the following commands inside after cloning:
 9. `cd ..`
 10. `pip install -r requirements.txt`
 
-### To Run Experiment
+### To build an experiment
+
+Run the jupyter notebook `src/learning/builders/experiment_builder.ipynb`
+
+### To run experiment
 
 Run the following command for running experiments in different modalities:
 
