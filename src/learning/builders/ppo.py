@@ -13,6 +13,7 @@ EXPERIMENTS_LIST = [
     "gat",
     "gcn",
     "graph_transformer",
+    "mlp",
 ]
 DEVICE = "cpu"
 
