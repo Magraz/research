@@ -12,12 +12,16 @@ torch.autograd.set_detect_anomaly(True)
 
 
 class TensorRolloutBuffer:
-    def __init__(self, batch_size, n_envs, n_agents, d_state, d_action, device):
+    def __init__(self, model, batch_size, n_envs, n_agents, d_state, d_action, device):
         # Calculate buffer size
         steps = batch_size // n_envs
 
         # Pre-allocate tensors
-        self.states = torch.zeros((steps, n_envs, n_agents, d_state), device=device)
+        if model == "mlp":
+            self.states = torch.zeros((steps, n_envs, d_state), device=device)
+        else:
+            self.states = torch.zeros((steps, n_envs, n_agents, d_state), device=device)
+
         self.actions = torch.zeros((steps, n_envs, n_agents * d_action), device=device)
         self.logprobs = torch.zeros((steps, n_envs, n_agents), device=device)
         self.rewards = torch.zeros((steps, n_envs), device=device)
@@ -98,7 +102,7 @@ class PPO:
         self.n_agents = n_agents_train
         self.d_action = d_action
         self.buffer = TensorRolloutBuffer(
-            params.batch_size, n_envs, n_agents_train, d_state, d_action, device
+            model, params.batch_size, n_envs, n_agents_train, d_state, d_action, device
         )
 
         # Algorithm parameters
