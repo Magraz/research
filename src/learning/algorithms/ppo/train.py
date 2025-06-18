@@ -227,7 +227,7 @@ def train(
 
             checkpoint_step = global_step
 
-            if params.n_total_episodes == total_episodes:
+            if total_episodes >= params.n_total_episodes:
                 print("Finished training")
                 break
 
