@@ -272,9 +272,7 @@ class PPO:
         )
 
         loader = DataLoader(
-            dataset,
-            batch_size=self.minibatch_size,
-            shuffle=True,
+            dataset, batch_size=self.minibatch_size, shuffle=True, pin_memory=True
         )
 
         # Load model into GPU for training

@@ -193,6 +193,7 @@ def train(
                 training_data["steps"].append(global_step)
                 training_data["episodes"].append(total_episodes)
                 training_data["timestamps"].append(time.time() - start_time)
+                training_data["last_step_count"] = global_step
                 training_data["last_episode_count"] = total_episodes
                 training_data["last_running_avg_rew"] = running_avg_reward
                 training_data["last_timestamp"] = time.time() - start_time
@@ -212,7 +213,7 @@ def train(
         # Store checkpoint
         if (
             global_step - checkpoint_step >= 10000
-        ) or params.n_total_episodes == total_episodes:
+        ) or total_episodes >= params.n_total_episodes:
             # Save model
             learner.save(dirs["models"] / "checkpoint")
 
