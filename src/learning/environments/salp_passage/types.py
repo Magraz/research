@@ -42,6 +42,7 @@ class GlobalObservation:
 @dataclass
 class SalpPassageEnvironmentParams(EnvironmentParams):
     state_representation: str = None
+    rotating_salps: bool = False
 
 
 class Chain:

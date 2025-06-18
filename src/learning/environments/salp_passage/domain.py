@@ -57,14 +57,22 @@ class SalpPassageDomain(BaseScenario):
         self.max_n_agents = 24
         self.min_n_agents = 8
 
-        self.viewer_zoom = kwargs.pop("viewer_zoom", 1.00)
+        self.viewer_zoom = kwargs.pop("viewer_zoom", 2.0)
 
         # Agents
         self.n_agents = kwargs.pop("n_agents", self.min_n_agents)
         self.state_representation = kwargs.pop("state_representation", "local")
         self.agent_chains = [None for _ in range(batch_dim)]
+        self.rotating_salps = kwargs.pop("rotating_salps", False)
+
+        # Set a smaller world size for training like a fence
+        world_x_dim = self.n_agents / 4
+        world_y_dim = self.n_agents / 4
+
+        self.agent_starting_y = -world_y_dim + 0.5
 
         # Targets
+        self.target_starting_y = world_y_dim - 0.5
         self.target_chains = [None for _ in range(batch_dim)]
 
         if kwargs.pop("shuffle_agents_positions", False):
@@ -74,17 +82,15 @@ class SalpPassageDomain(BaseScenario):
         self.training = kwargs.pop("training", True)
 
         # Environment
-        self.n_passages = 1
-        self.passage_length = self.agent_joint_length * self.n_agents
-        self.passage_width = self.agent_radius * 5
-        if self.training:
-            # Set a smaller world size for training like a fence
-            self.world_x_dim = self.n_agents / 4
-            self.world_y_dim = self.n_agents / 4
-        else:
-            # Increase world size for evaluation, like removing the fence
-            self.world_x_dim = 10
-            self.world_y_dim = 10
+        self.passage_length = 0.2
+        self.passage_width = self.agent_joint_length * self.n_agents
+        self.n_passages = math.ceil(2 * world_x_dim / self.passage_length)
+        self.open_passage = random.randint(1, self.n_passages - 1)
+
+        self.passage_x_coordinate_list = [
+            (i * self.passage_length) + (-world_x_dim + self.passage_length / 2)
+            for i in range(0, self.n_passages)
+        ]
 
         # Reward Shaping
         self.frechet_shaping_factor = 1.0
@@ -98,8 +104,8 @@ class SalpPassageDomain(BaseScenario):
         # Make world
         world = World(
             batch_dim=batch_dim,
-            x_semidim=self.world_x_dim,
-            y_semidim=self.world_y_dim,
+            x_semidim=world_x_dim,
+            y_semidim=world_y_dim,
             device=device,
             substeps=15,
             collision_force=1500,
@@ -143,8 +149,8 @@ class SalpPassageDomain(BaseScenario):
                 anchor_a=(0, 0),
                 anchor_b=(0, 0),
                 dist=self.agent_joint_length,
-                rotate_a=True,
-                rotate_b=True,
+                rotate_a=self.rotating_salps,
+                rotate_b=self.rotating_salps,
                 collidable=False,
                 width=0,
             )
@@ -152,10 +158,8 @@ class SalpPassageDomain(BaseScenario):
             self.joints.append(joint)
 
         # Add landmarks
-        for i in range(
-            int((2 * world.x_semidim + 2 * self.agent_radius) // self.passage_length)
-        ):
-            removed = i < self.n_passages
+        for i in range(self.n_passages):
+            removed = i == self.open_passage
             passage = Landmark(
                 name=f"passage_{i}",
                 collide=not removed,
@@ -206,6 +210,23 @@ class SalpPassageDomain(BaseScenario):
             agent_rotation_angles, device=self.device
         ).unsqueeze(-1)
         target_rotation_angle = random.uniform(0, 2 * math.pi)
+
+        # Set passages
+        passages = self.get_passages()
+        for i, passage in enumerate(passages):
+            if not passage.collide:
+                passage.is_rendering[:] = False
+            passage.set_pos(
+                torch.tensor(
+                    [
+                        self.passage_x_coordinate_list[i],
+                        0.0,
+                    ],
+                    dtype=torch.float32,
+                    device=self.world.device,
+                ),
+                batch_index=None,
+            )
 
         if env_index is None:
             # Create new agent and target chains
@@ -373,7 +394,7 @@ class SalpPassageDomain(BaseScenario):
         chain = rotate_points(
             points=generate_target_points(
                 x=x_coord,
-                y=y_coord,
+                y=y_coord + self.agent_starting_y,
                 n_points=self.n_agents,
                 d_max=self.agent_joint_length,
                 theta_range=[
@@ -413,12 +434,37 @@ class SalpPassageDomain(BaseScenario):
 
         return chain
 
+    def interpolate(
+        self,
+        value,
+        source_min=-1,
+        source_max=1,
+        target_min=-torch.pi,
+        target_max=torch.pi,
+    ):
+        # Linear interpolation using PyTorch
+        return target_min + (value - source_min) / (source_max - source_min) * (
+            target_max - target_min
+        )
+
     def process_action(self, agent: Agent):
 
-        magnitude = agent.action.u[:, 0]
+        if self.rotating_salps:
+            magnitude = agent.action.u[:, 0]
 
-        # Set salp's rotation
-        agent.state.rot += agent.action.u[:, 1].unsqueeze(-1)
+            # Set salp's rotation
+            agent.state.rot += agent.action.u[:, 1].unsqueeze(-1)
+
+        else:
+            magnitude_pos = self.interpolate(
+                agent.action.u[:, 0], target_min=0, target_max=1
+            )
+
+            magnitude_neg = self.interpolate(
+                agent.action.u[:, 1], target_min=0, target_max=1
+            )
+
+            magnitude = magnitude_pos - magnitude_neg
 
         # Get heading vector
         agent_rot = agent.state.rot % (2 * torch.pi)
@@ -435,6 +481,11 @@ class SalpPassageDomain(BaseScenario):
     def get_targets(self):
         return [
             landmark for landmark in self.world.landmarks if "target" in landmark.name
+        ]
+
+    def get_passages(self):
+        return [
+            landmark for landmark in self.world.landmarks if "passage" in landmark.name
         ]
 
     def get_agent_chain_position(self):
