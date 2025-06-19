@@ -70,7 +70,7 @@ def train(
         checkpoint,
     )
 
-    # Checkpoint loading logic
+    # Create training data logging object
     training_data = {
         "steps": [],
         "dones": [],
@@ -82,6 +82,8 @@ def train(
         "last_episode_count": 0,
         "last_running_avg_rew": 0,
     }
+
+    # Checkpoint loading logic
     if checkpoint:
 
         checkpoint_path = dirs["models"] / "checkpoint"
@@ -105,10 +107,10 @@ def train(
     checkpoint_step = 0
     rmax = -1e6
 
-    # Log start time
-    start_time = time.time() + training_data["last_timestamp"]
-
     while global_step < params.n_total_steps:
+
+        # Log start time
+        start_time = time.time()
 
         episode_len = torch.zeros(env_config.n_envs, dtype=torch.int32, device=device)
         cum_rewards = torch.zeros(env_config.n_envs, dtype=torch.float32, device=device)
@@ -191,14 +193,10 @@ def train(
                 training_data["last_step_count"] = global_step
                 training_data["last_episode_count"] = total_episodes
                 training_data["last_running_avg_rew"] = running_avg_reward
-                training_data["last_timestamp"] = time.time() - start_time
+                training_data["last_timestamp"] = time.time()
 
         # Do training step
         learner.update()
-
-        print(
-            f"Step: {global_step}, Episodes: {total_episodes}, Running Avg Reward: {running_avg_reward}, Minutes {'{:.2f}'.format((time.time() - start_time) / 60)}"
-        )
 
         # Store best model if running average reward is higher than previous bestAdd commentMore actions
         if running_avg_reward > rmax:
@@ -230,5 +228,9 @@ def train(
             if total_episodes >= params.n_total_episodes:
                 print("Finished training")
                 break
+
+        print(
+            f"Step: {global_step}, Episodes: {total_episodes}, Running Avg Reward: {running_avg_reward}, Minutes {'{:.2f}'.format((sum(training_data["timestamps"])) / 60)}"
+        )
 
     writer.close()

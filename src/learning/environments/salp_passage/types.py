@@ -5,6 +5,8 @@ import torch
 
 @dataclass(frozen=True)
 class GlobalObservation:
+    # Passage positions
+    passage_pos: torch.Tensor
     # Menger_curvature
     curvature: torch.Tensor
 

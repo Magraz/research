@@ -2,14 +2,15 @@
 #  ProrokLab (https://www.proroklab.org/)
 #  All rights reserved.
 import typing
-from typing import Dict, List
+from typing import Callable, Dict, List
 
 import torch
 from torch import Tensor
 from vmas.simulator.joints import Joint
-from vmas.simulator.core import Agent, Landmark, Box, Sphere, World
+from vmas.simulator.core import Entity, Agent, Landmark, Box, Sphere, World
 from vmas.simulator.scenario import BaseScenario
 from vmas.simulator.utils import ScenarioUtils
+from vmas.simulator.sensors import Lidar
 
 from learning.environments.salp_passage.dynamics import SalpDynamics
 from learning.environments.salp_passage.utils import (
@@ -55,11 +56,12 @@ class SalpPassageDomain(BaseScenario):
         self.u_multiplier = 1.0
         self.target_radius = self.agent_radius / 2
         self.frechet_thresh = 0.95
-        self.max_n_agents = 24
         self.min_n_agents = 8
+        self.lidar_range = 0.5
+        self.lidar_rays = 2
+        self.open_passage_y = 100
 
         self.viewer_zoom = kwargs.pop("viewer_zoom", 1.45)
-
         # Agents
         self.n_agents = kwargs.pop("n_agents", self.min_n_agents)
         self.state_representation = kwargs.pop("state_representation", "local")
@@ -71,8 +73,8 @@ class SalpPassageDomain(BaseScenario):
         world_y_dim = self.n_agents / 4
 
         # Environment
-        self.passage_length = 0.2
         self.passage_width = self.agent_joint_length * self.n_agents
+        self.passage_length = 0.4 * self.n_agents / self.min_n_agents
         self.n_passages = math.ceil(2 * world_x_dim / self.passage_length)
 
         self.passage_x_coordinate_list = [
@@ -129,6 +131,9 @@ class SalpPassageDomain(BaseScenario):
             self.targets.append(target)
 
         # Add agents
+        entity_filter_targets: Callable[[Entity], bool] = lambda e: e.name.startswith(
+            "passage"
+        )
         self.agents = []
         for n_agent in range(self.n_agents):
             agent = Agent(
@@ -138,6 +143,19 @@ class SalpPassageDomain(BaseScenario):
                 dynamics=SalpDynamics(),
                 color=COLOR_LIST[n_agent],
                 u_multiplier=self.u_multiplier,
+                sensors=(
+                    [
+                        Lidar(
+                            world,
+                            n_rays=self.lidar_rays,
+                            max_range=self.lidar_range,
+                            entity_filter=entity_filter_targets,
+                            angle_start=0.5 * torch.pi,
+                            angle_end=1.5 * torch.pi,
+                            alpha=0.1,
+                        )
+                    ]
+                ),
             )
             world.add_agent(agent)
             self.agents.append(agent)
@@ -207,32 +225,45 @@ class SalpPassageDomain(BaseScenario):
         # Set passages
         self.open_passage = torch.randint(
             1, self.n_passages - 1, (self.world.batch_dim, 1), device=self.device
-        )
+        ).flatten()
 
         passages = self.get_passages()
 
-        for i, passage in enumerate(passages):
-
-            if self.open_passage[env_index] == i:
-                passage.is_rendering[:] = False
-                passage.collision_filter = lambda _: False
-            else:
-                passage.is_rendering[:] = True
-                passage.collision_filter = lambda _: True
-
-            passage.set_pos(
-                torch.tensor(
-                    [
-                        self.passage_x_coordinate_list[i],
-                        0.0,
-                    ],
-                    dtype=torch.float32,
-                    device=self.world.device,
-                ),
-                batch_index=env_index,
-            )
-
         if env_index is None:
+            # Set passage positions
+            for j, passage in enumerate(passages):
+
+                passage.is_rendering[:] = True
+
+                passage.set_pos(
+                    torch.tensor(
+                        [
+                            self.passage_x_coordinate_list[j],
+                            0.0,
+                        ],
+                        dtype=torch.float32,
+                        device=self.world.device,
+                    ),
+                    batch_index=None,
+                )
+
+                # Move open passage out of the world
+                indices = torch.where(self.open_passage == j)[0]
+
+                for idx in indices:
+                    passage.is_rendering[idx] = False
+                    passage.set_pos(
+                        torch.tensor(
+                            [
+                                self.passage_x_coordinate_list[j],
+                                self.open_passage_y,
+                            ],
+                            dtype=torch.float32,
+                            device=self.world.device,
+                        ),
+                        batch_index=idx,
+                    )
+
             # Create new agent and target chains
             self.agent_chains = [
                 self.create_agent_chain(
@@ -301,6 +332,39 @@ class SalpPassageDomain(BaseScenario):
             self.distance_shaping = dist_rew * self.distance_shaping_factor
 
         else:
+            # Set passage positions
+            for i, passage in enumerate(passages):
+
+                # Move open passage out of the world
+                if self.open_passage[env_index] == i:
+                    passage.is_rendering[env_index] = False
+                    passage.set_pos(
+                        torch.tensor(
+                            [
+                                self.passage_x_coordinate_list[i],
+                                self.open_passage_y,
+                            ],
+                            dtype=torch.float32,
+                            device=self.world.device,
+                        ),
+                        batch_index=env_index,
+                    )
+                else:
+                    passage.is_rendering[env_index] = True
+
+                    passage.set_pos(
+                        torch.tensor(
+                            [
+                                self.passage_x_coordinate_list[i],
+                                0.0,
+                            ],
+                            dtype=torch.float32,
+                            device=self.world.device,
+                        ),
+                        batch_index=env_index,
+                    )
+
+            # Create agent and target chains
             self.agent_chains[env_index] = self.create_agent_chain(
                 theta_min=0.0,
                 theta_max=0.0,
@@ -476,13 +540,23 @@ class SalpPassageDomain(BaseScenario):
 
     def get_targets(self):
         return [
-            landmark for landmark in self.world.landmarks if "target" in landmark.name
+            landmark
+            for landmark in self.world.landmarks
+            if landmark.name.startswith("target")
         ]
 
     def get_passages(self):
         return [
-            landmark for landmark in self.world.landmarks if "passage" in landmark.name
+            landmark
+            for landmark in self.world.landmarks
+            if landmark.name.startswith("passage")
         ]
+
+    def get_passages_positions(self):
+        passages = self.get_passages()
+        passage_pos = [p.state.pos for p in passages]
+
+        return torch.stack(passage_pos).transpose(1, 0).float()
 
     def get_agent_chain_position(self):
         agent_pos = [a.state.pos for a in self.world.agents]
@@ -541,115 +615,92 @@ class SalpPassageDomain(BaseScenario):
 
         # Agent specific
         a_pos_rel_2_t_centroid = (
-            agent.state.pos - self.global_observation.t_chain_centroid_pos
+            agent.state.pos - self.global_state.t_chain_centroid_pos
         )
 
-        a_vel_rel_2_centroid = (
-            agent.state.vel - self.global_observation.a_chain_centroid_vel
+        a_vel_rel_2_centroid = agent.state.vel - self.global_state.a_chain_centroid_vel
+
+        a_pos_rel_2_centroid = agent.state.pos - self.global_state.a_chain_centroid_pos
+
+        # Get agent information
+        is_first = agent == self.world.agents[0]
+        is_last = agent == self.world.agents[-1]
+
+        idx = self.world.agents.index(agent)
+
+        # Encode agent id
+        encoding_len = 6
+        encoded_idx = torch.zeros(
+            (self.world.batch_dim, encoding_len),
+            dtype=torch.float32,
+            device=self.device,
+        ) + binary_encode(idx, encoding_len)
+
+        # Get neighbor forces
+        neighbor_forces = torch.zeros(
+            (self.world.batch_dim, 4), dtype=torch.float32, device=self.device
+        )
+        if is_first:
+            neighbor_forces[:, 2:] = self.global_state.a_chain_all_forces[:, 1, :]
+        elif is_last:
+            neighbor_forces[:, :2] = self.global_state.a_chain_all_forces[:, -2, :]
+        else:
+            neighbor_forces = self.global_state.a_chain_all_forces[
+                :, idx - 1 : idx + 2 : 2, :
+            ].flatten(start_dim=1)
+
+        # Get distance to assigned position
+        a_pos_2_t_pos_err = (
+            self.global_state.t_chain_all_pos[:, idx, :]
+            - self.global_state.a_chain_all_pos[:, idx, :]
         )
 
-        a_pos_rel_2_centroid = (
-            agent.state.pos - self.global_observation.a_chain_centroid_pos
+        # Get distance to open passage
+        a_pos_2_passage_pos_err = (
+            self.global_state.passage_pos - self.global_state.a_chain_all_pos[:, idx, :]
         )
 
-        # Complete observation
-        match (scope):
-            case "global":
-                observation = torch.cat(
-                    [
-                        # Shape features
-                        torch.sin(self.global_observation.a_chain_internal_angles),
-                        torch.cos(self.global_observation.a_chain_internal_angles),
-                        self.global_observation.a_chain_internal_angles_speed,
-                        self.global_observation.curvature,
-                        # Whole body motion
-                        self.global_observation.a_chain_centroid_pos,
-                        self.global_observation.a_chain_centroid_vel,
-                        self.global_observation.a_chain_centroid_ang_pos,
-                        self.global_observation.a_chain_centroid_ang_vel,
-                        self.global_observation.total_force,
-                        self.global_observation.total_moment,
-                        # Target features
-                        self.global_observation.frechet_dist,
-                        self.global_observation.t_chain_centroid_pos
-                        - self.global_observation.a_chain_centroid_pos,
-                    ],
-                    dim=-1,
-                ).float()
-
-            case "local":
-                # Get agent information
-                is_first = agent == self.world.agents[0]
-                is_last = agent == self.world.agents[-1]
-
-                idx = self.world.agents.index(agent)
-
-                # Encode agent id
-                encoding_len = 6
-                encoded_idx = torch.zeros(
-                    (self.world.batch_dim, encoding_len),
-                    dtype=torch.float32,
-                    device=self.device,
-                ) + binary_encode(idx, encoding_len)
-
-                # Get neighbor forces
-                neighbor_forces = torch.zeros(
-                    (self.world.batch_dim, 4), dtype=torch.float32, device=self.device
-                )
-                if is_first:
-                    neighbor_forces[:, 2:] = self.global_observation.a_chain_all_forces[
-                        :, 1, :
-                    ]
-                elif is_last:
-                    neighbor_forces[:, :2] = self.global_observation.a_chain_all_forces[
-                        :, -2, :
-                    ]
-                else:
-                    neighbor_forces = self.global_observation.a_chain_all_forces[
-                        :, idx - 1 : idx + 2 : 2, :
-                    ].flatten(start_dim=1)
-
-                # Get distance to assigned position
-                a_pos_2_t_pos_err = (
-                    self.global_observation.t_chain_all_pos[:, idx, :]
-                    - self.global_observation.a_chain_all_pos[:, idx, :]
-                )
-
-                observation = torch.cat(
-                    [
-                        # Agent id
-                        encoded_idx,
-                        # Neighbor data
-                        torch.sin(
-                            self.global_observation.a_chain_relative_angles[:, idx, :]
-                        ),
-                        torch.cos(
-                            self.global_observation.a_chain_relative_angles[:, idx, :]
-                        ),
-                        self.global_observation.a_chain_relative_angles_speed[
-                            :, idx, :
-                        ],
-                        neighbor_forces,
-                        # Local data
-                        a_pos_rel_2_centroid,
-                        agent.state.pos,
-                        agent.state.vel,
-                        wrap_to_pi(agent.state.rot),
-                        agent.state.ang_vel,
-                        # Target data
-                        a_pos_rel_2_t_centroid,
-                        a_vel_rel_2_centroid,
-                        a_pos_2_t_pos_err,
-                    ],
-                    dim=-1,
-                ).float()
+        observation = torch.cat(
+            [
+                # Agent id
+                encoded_idx,
+                # Neighbor data
+                torch.sin(self.global_state.a_chain_relative_angles[:, idx, :]),
+                torch.cos(self.global_state.a_chain_relative_angles[:, idx, :]),
+                self.global_state.a_chain_relative_angles_speed[:, idx, :],
+                neighbor_forces,
+                # Local data
+                a_pos_rel_2_centroid,
+                agent.state.pos,
+                agent.state.vel,
+                wrap_to_pi(agent.state.rot),
+                agent.state.ang_vel,
+                # Target data
+                a_pos_rel_2_t_centroid,
+                a_vel_rel_2_centroid,
+                a_pos_2_t_pos_err,
+                # Passage data,
+                a_pos_2_passage_pos_err,
+                # Lidar data,
+                agent.sensors[0].measure(),
+            ],
+            dim=-1,
+        ).float()
 
         return observation
 
     def observation(self, agent: Agent):
         is_first = agent == self.world.agents[0]
+
         if is_first:
             # Calculate global state
+            passage_pos = self.get_passages_positions()
+            batch_indices = torch.arange(self.world.batch_dim)
+            open_passages = passage_pos[batch_indices, self.open_passage]
+            open_passages = torch.sub(
+                torch.tensor((0, self.open_passage_y)), open_passages
+            )
+
             agent_pos = self.get_agent_chain_position()
             target_pos = self.get_target_chain_position()
             a_chain_centroid_pos = agent_pos.mean(dim=1)
@@ -708,7 +759,8 @@ class SalpPassageDomain(BaseScenario):
             self.relative_angles_prev = relative_angles.clone()
 
             # Build global observation
-            self.global_observation = GlobalObservation(
+            self.global_state = GlobalObservation(
+                open_passages,
                 # Menger curvature
                 menger_curvature(agent_pos, self.agent_joint_length)
                 - menger_curvature(target_pos, self.agent_joint_length),
@@ -740,22 +792,6 @@ class SalpPassageDomain(BaseScenario):
                     aligned_agent_pos, aligned_target_pos
                 ).unsqueeze(-1),
             )
-
-            # print("\n")
-
-            # print(f"dtheta {dtheta[0]}")
-            # print(f"sin_dtheta {self.global_observation.a_chain_sin_dtheta[0]}")
-            # print(f"cos_dtheta {self.global_observation.a_chain_cos_dtheta[0]}")
-            # print(f"bend_speed {self.global_observation.a_chain_bend_speed[0]}")
-
-            # print(
-            #     f"centroid_ang_pos {self.global_observation.a_chain_centroid_ang_pos}"
-            # )
-            # print(
-            #     f"centroid_ang_vel {self.global_observation.a_chain_centroid_ang_vel}"
-            # )
-            # print(f"total_force {self.global_observation.total_force}")
-            # print(f"total_moment {self.global_observation.total_moment}")
 
         return self.agent_representation(agent, self.state_representation)
 
