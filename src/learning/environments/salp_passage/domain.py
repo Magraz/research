@@ -19,6 +19,7 @@ from learning.environments.salp_passage.utils import (
     generate_bending_curve,
     batch_discrete_frechet_distance,
     generate_random_coordinate_outside_box,
+    generate_random_coordinate_coordinate_inside_box,
     rotate_points,
     calculate_moment,
     internal_angles_xy,
@@ -57,7 +58,7 @@ class SalpPassageDomain(BaseScenario):
         self.max_n_agents = 24
         self.min_n_agents = 8
 
-        self.viewer_zoom = kwargs.pop("viewer_zoom", 2.0)
+        self.viewer_zoom = kwargs.pop("viewer_zoom", 1.45)
 
         # Agents
         self.n_agents = kwargs.pop("n_agents", self.min_n_agents)
@@ -69,10 +70,22 @@ class SalpPassageDomain(BaseScenario):
         world_x_dim = self.n_agents / 4
         world_y_dim = self.n_agents / 4
 
-        self.agent_starting_y = -world_y_dim + 0.5
+        # Environment
+        self.passage_length = 0.2
+        self.passage_width = self.agent_joint_length * self.n_agents
+        self.n_passages = math.ceil(2 * world_x_dim / self.passage_length)
+
+        self.passage_x_coordinate_list = [
+            (i * self.passage_length) + (-world_x_dim + self.passage_length / 2)
+            for i in range(0, self.n_passages)
+        ]
+
+        self.free_y_dim = world_y_dim - self.passage_width / 2
+
+        self.agent_starting_y = -world_y_dim + (self.free_y_dim / 2)
 
         # Targets
-        self.target_starting_y = world_y_dim - 0.5
+        self.target_starting_y = world_y_dim - (self.free_y_dim / 2)
         self.target_chains = [None for _ in range(batch_dim)]
 
         if kwargs.pop("shuffle_agents_positions", False):
@@ -80,17 +93,6 @@ class SalpPassageDomain(BaseScenario):
 
         # Check if we are training or evaluating
         self.training = kwargs.pop("training", True)
-
-        # Environment
-        self.passage_length = 0.2
-        self.passage_width = self.agent_joint_length * self.n_agents
-        self.n_passages = math.ceil(2 * world_x_dim / self.passage_length)
-        self.open_passage = random.randint(1, self.n_passages - 1)
-
-        self.passage_x_coordinate_list = [
-            (i * self.passage_length) + (-world_x_dim + self.passage_length / 2)
-            for i in range(0, self.n_passages)
-        ]
 
         # Reward Shaping
         self.frechet_shaping_factor = 1.0
@@ -159,14 +161,12 @@ class SalpPassageDomain(BaseScenario):
 
         # Add landmarks
         for i in range(self.n_passages):
-            removed = i == self.open_passage
             passage = Landmark(
                 name=f"passage_{i}",
-                collide=not removed,
+                collide=True,
                 movable=False,
                 shape=Box(length=self.passage_length, width=self.passage_width),
                 color=COLOR_MAP["RED"],
-                collision_filter=lambda e: not isinstance(e.shape, Box),
             )
             world.add_landmark(passage)
 
@@ -194,13 +194,6 @@ class SalpPassageDomain(BaseScenario):
         return world
 
     def reset_world_at(self, env_index: int = None):
-        joint_delta_x = self.agent_joint_length / 2
-        joint_delta_y = 0.0
-        agent_scale = 0.1
-        agent_offset = 0.0
-
-        target_offset = self.n_agents * self.agent_joint_length
-        target_scale = self.n_agents * self.agent_joint_length
 
         # Rotation params
         agent_rotation_angles = [
@@ -212,10 +205,21 @@ class SalpPassageDomain(BaseScenario):
         target_rotation_angle = random.uniform(0, 2 * math.pi)
 
         # Set passages
+        self.open_passage = torch.randint(
+            1, self.n_passages - 1, (self.world.batch_dim, 1), device=self.device
+        )
+
         passages = self.get_passages()
+
         for i, passage in enumerate(passages):
-            if not passage.collide:
+
+            if self.open_passage[env_index] == i:
                 passage.is_rendering[:] = False
+                passage.collision_filter = lambda _: False
+            else:
+                passage.is_rendering[:] = True
+                passage.collision_filter = lambda _: True
+
             passage.set_pos(
                 torch.tensor(
                     [
@@ -225,15 +229,13 @@ class SalpPassageDomain(BaseScenario):
                     dtype=torch.float32,
                     device=self.world.device,
                 ),
-                batch_index=None,
+                batch_index=env_index,
             )
 
         if env_index is None:
             # Create new agent and target chains
             self.agent_chains = [
                 self.create_agent_chain(
-                    offset=agent_offset,
-                    scale=agent_scale,
                     theta_min=0.0,
                     theta_max=0.0,
                     rotation_angle=agent_rotation_tensor[i],
@@ -243,8 +245,6 @@ class SalpPassageDomain(BaseScenario):
 
             self.target_chains = [
                 self.create_target_chain(
-                    offset=target_offset,
-                    scale=target_scale,
                     rotation_angle=target_rotation_angle,
                 )
                 for _ in range(self.world.batch_dim)
@@ -254,6 +254,7 @@ class SalpPassageDomain(BaseScenario):
             agent_chain_tensor = torch.stack(
                 [agent_chain for agent_chain in self.agent_chains]
             )
+
             for i, agent in enumerate(self.agents):
                 pos = agent_chain_tensor[:, i, :]
                 agent.set_pos(pos, batch_index=None)
@@ -262,17 +263,17 @@ class SalpPassageDomain(BaseScenario):
             target_chain_tensor = torch.stack(
                 [target_chain for target_chain in self.target_chains]
             )
+
             for i, target in enumerate(self.targets):
                 pos = target_chain_tensor[:, i, :]
                 target.set_pos(pos, batch_index=None)
 
-            joint_delta = torch.tensor(
-                (joint_delta_x, joint_delta_y), device=self.device
-            ).repeat(self.world.batch_dim, 1)
-
             for i, joint in enumerate(self.joints):
+                half_distance = (
+                    self.agents[i].state.pos - self.agents[i + 1].state.pos
+                ) / 2
                 joint.landmark.set_pos(
-                    self.agents[i].state.pos + joint_delta, batch_index=None
+                    self.agents[i].state.pos + half_distance, batch_index=None
                 )
 
             a_pos = self.get_agent_chain_position()
@@ -301,15 +302,11 @@ class SalpPassageDomain(BaseScenario):
 
         else:
             self.agent_chains[env_index] = self.create_agent_chain(
-                offset=agent_offset,
-                scale=agent_scale,
                 theta_min=0.0,
                 theta_max=0.0,
                 rotation_angle=agent_rotation_tensor[env_index],
             )
             self.target_chains[env_index] = self.create_target_chain(
-                offset=target_offset,
-                scale=target_scale,
                 rotation_angle=target_rotation_angle,
             )
 
@@ -322,13 +319,12 @@ class SalpPassageDomain(BaseScenario):
                 pos = self.target_chains[env_index][n_target]
                 target.set_pos(pos, batch_index=env_index)
 
-            joint_delta = torch.tensor(
-                (joint_delta_x, joint_delta_y), device=self.device
-            )
-
             for i, joint in enumerate(self.joints):
+                half_distance = (
+                    self.agents[i].state.pos - self.agents[i + 1].state.pos
+                ) / 2
                 joint.landmark.set_pos(
-                    self.agents[i].state.pos[env_index] + joint_delta,
+                    self.agents[i].state.pos[env_index] + half_distance[env_index],
                     batch_index=env_index,
                 )
 
@@ -382,19 +378,18 @@ class SalpPassageDomain(BaseScenario):
 
         return out_of_bounds
 
-    def create_agent_chain(
-        self, offset, scale, theta_min, theta_max, rotation_angle: float = 0.0
-    ):
-        x_coord, y_coord = generate_random_coordinate_outside_box(
-            offset,
-            scale,
-            1.0,
-            1.0,
+    def create_agent_chain(self, theta_min, theta_max, rotation_angle: float = 0.0):
+        x_coord, y_coord = generate_random_coordinate_coordinate_inside_box(
+            0.0,
+            self.agent_starting_y,
+            self.world.x_semidim - self.passage_width * 2,
+            self.free_y_dim - self.passage_width * 3,
         )
+
         chain = rotate_points(
             points=generate_target_points(
                 x=x_coord,
-                y=y_coord + self.agent_starting_y,
+                y=y_coord,
                 n_points=self.n_agents,
                 d_max=self.agent_joint_length,
                 theta_range=[
@@ -406,12 +401,13 @@ class SalpPassageDomain(BaseScenario):
         ).to(self.device)
         return chain
 
-    def create_target_chain(self, offset, scale, rotation_angle: float = 0.0):
-        x_coord, y_coord = generate_random_coordinate_outside_box(
-            offset,
-            scale,
-            1.0,
-            1.0,
+    def create_target_chain(self, rotation_angle: float = 0.0):
+
+        x_coord, y_coord = generate_random_coordinate_coordinate_inside_box(
+            0.0,
+            self.target_starting_y,
+            self.world.x_semidim - self.passage_width * 2,
+            self.free_y_dim - self.passage_width * 3,
         )
 
         n_bends = random.choice([0, 1])

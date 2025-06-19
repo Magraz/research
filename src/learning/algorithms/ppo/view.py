@@ -21,8 +21,8 @@ def view(
     # View parameters
     n_envs=1,
     n_agents_eval=8,
-    n_rollouts=10,
-    rollout_length=512,
+    n_rollouts=100,
+    rollout_length=1,
     seed=500,
     render=True,
 ):

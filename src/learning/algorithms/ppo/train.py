@@ -210,6 +210,11 @@ def train(
             rmax = running_avg_reward
             learner.save(dirs["models"] / "best_model")
 
+        # Log reward data with tensorboard
+        if writer is not None:
+            for reward in training_data["rewards_per_episode"]:
+                writer.add_scalar("Agent/rewards_per_episode", reward, total_episodes)
+
         # Store checkpoint
         if (
             global_step - checkpoint_step >= 10000
@@ -230,10 +235,5 @@ def train(
             if total_episodes >= params.n_total_episodes:
                 print("Finished training")
                 break
-
-        # Log reward data with tensorboard
-        if writer is not None:
-            for reward in training_data["rewards_per_episode"]:
-                writer.add_scalar("Agent/rewards_per_episode", reward, total_episodes)
 
     writer.close()

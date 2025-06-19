@@ -736,3 +736,14 @@ def generate_random_coordinate_outside_box(
         y_coord -= offset
 
     return np.float64(x_coord), np.float64(y_coord)
+
+
+def generate_random_coordinate_coordinate_inside_box(
+    offset_x: float, offset_y: float, x_boundary: float, y_boundary: float
+):
+
+    x_coord = random.uniform(-x_boundary, x_boundary) + offset_x
+
+    y_coord = random.uniform(-y_boundary, y_boundary) + offset_y
+
+    return np.float64(x_coord), np.float64(y_coord)
