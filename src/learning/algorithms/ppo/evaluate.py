@@ -27,8 +27,8 @@ def evaluate(
         1,
         device,
         env_config.environment,
-        env_config.n_agents,
         0,
+        n_agents=env_config.n_agents,
     )
 
     d_action = env.action_space.spaces[0].shape[0]
