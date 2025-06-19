@@ -8,4 +8,4 @@ SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 
 python3 ${SCRIPT_DIR}/run_trial.py --batch ${BATCH} --algorithm ${ALGORITHM} --environment ${ENVIRONMENT} --trial_id ${TRIAL_ID} --name ${EXP_NAME} --checkpoint
 
-echo "Finished Trial ${BATCH}_${EXP_NAME}_${TRIAL_ID}"
+echo "Finished trial ${BATCH}_${EXP_NAME}_${TRIAL_ID}"

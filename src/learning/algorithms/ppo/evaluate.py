@@ -102,7 +102,7 @@ def get_scalability_data(
             d_state,
             d_action,
         )
-        learner.load(dirs["model"] / "best_model")
+        learner.load(dirs["models"] / "best_model")
 
         # Set policy to evaluation mode
         learner.policy.eval()
