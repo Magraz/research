@@ -21,11 +21,6 @@ def train(
     dirs: dict,
     checkpoint: bool = False,
 ):
-    # Set optimal thread settings
-    n_threads = 1
-    torch.set_num_threads(n_threads)
-    torch.set_num_interop_threads(n_threads)
-    print(f"PyTorch using {torch.get_num_threads()} threads")
 
     # Set logger
     writer = SummaryWriter(dirs["logs"])
