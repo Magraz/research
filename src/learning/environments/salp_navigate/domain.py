@@ -79,8 +79,8 @@ class SalpNavigateDomain(BaseScenario):
             self.world_y_dim = self.n_agents / 4
         else:
             # Increase world size for evaluation, like removing the fence
-            self.world_x_dim = 10
-            self.world_y_dim = 10
+            self.world_x_dim = 32
+            self.world_y_dim = 32
 
         # Reward Shaping
         self.frechet_shaping_factor = 1.0
@@ -506,7 +506,9 @@ class SalpNavigateDomain(BaseScenario):
             goal_reached_rew += self.reached_goal_bonus * goal_reached_mask.int()
 
             # Mix all rewards
-            self.global_rew = self.distance_rew if self.training else f_rew
+            self.global_rew = (
+                self.distance_rew + goal_reached_rew if self.training else f_rew
+            )
 
         return self.global_rew
 
