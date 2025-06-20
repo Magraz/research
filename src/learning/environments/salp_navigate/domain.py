@@ -171,8 +171,7 @@ class SalpNavigateDomain(BaseScenario):
         return world
 
     def reset_world_at(self, env_index: int = None):
-        joint_delta_x = self.agent_joint_length / 2
-        joint_delta_y = 0.0
+
         agent_scale = 0.1
         agent_offset = 0.0
 
@@ -227,13 +226,12 @@ class SalpNavigateDomain(BaseScenario):
                 pos = target_chain_tensor[:, i, :]
                 target.set_pos(pos, batch_index=None)
 
-            joint_delta = torch.tensor(
-                (joint_delta_x, joint_delta_y), device=self.device
-            ).repeat(self.world.batch_dim, 1)
-
             for i, joint in enumerate(self.joints):
+                half_distance = (
+                    self.agents[i].state.pos - self.agents[i + 1].state.pos
+                ) / 2
                 joint.landmark.set_pos(
-                    self.agents[i].state.pos + joint_delta, batch_index=None
+                    self.agents[i].state.pos + half_distance, batch_index=None
                 )
 
             a_pos = self.get_agent_chain_position()
@@ -283,13 +281,12 @@ class SalpNavigateDomain(BaseScenario):
                 pos = self.target_chains[env_index][n_target]
                 target.set_pos(pos, batch_index=env_index)
 
-            joint_delta = torch.tensor(
-                (joint_delta_x, joint_delta_y), device=self.device
-            )
-
             for i, joint in enumerate(self.joints):
+                half_distance = (
+                    self.agents[i].state.pos - self.agents[i + 1].state.pos
+                ) / 2
                 joint.landmark.set_pos(
-                    self.agents[i].state.pos[env_index] + joint_delta,
+                    self.agents[i].state.pos[env_index] + half_distance[env_index],
                     batch_index=env_index,
                 )
 
