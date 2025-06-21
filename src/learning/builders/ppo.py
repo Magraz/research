@@ -7,13 +7,14 @@ from dataclasses import asdict
 ENVIRONMENT = EnvironmentEnum.VMAS_SALP_NAVIGATE
 BATCH_NAME = f"{ENVIRONMENT}_8a"
 EXPERIMENTS_LIST = [
-    "transformer_full",
-    "transformer_encoder",
-    "transformer_decoder",
-    "gat",
-    "gcn",
-    "graph_transformer",
     "mlp",
+    "transformer_full",
+    "gcn",
+    "gat",
+    "graph_transformer",
+    "gcn_full",
+    "gat_full",
+    "graph_transformer_full",
 ]
 DEVICE = "cpu"
 
