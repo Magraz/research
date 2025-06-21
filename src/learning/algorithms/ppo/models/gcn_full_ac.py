@@ -18,7 +18,7 @@ class ActorCritic(torch.nn.Module):
         d_action: int,
         device: str,
         hidden_dim=128,
-        graph_type="chain",
+        graph_type="full",
     ):
         super(ActorCritic, self).__init__()
 

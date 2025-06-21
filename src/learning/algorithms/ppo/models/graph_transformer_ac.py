@@ -7,6 +7,8 @@ from torch_geometric.nn import AttentionalAggregation
 from torch_geometric.nn import TransformerConv
 import matplotlib.pyplot as plt
 
+from learning.algorithms.ppo.models.utils import create_graph_batch
+
 
 class GraphTransformerLayer(nn.Module):
     def __init__(
@@ -50,15 +52,17 @@ class ActorCritic(nn.Module):
         d_state: int,
         d_action: int,
         device: str,
-        hidden_dim=64,
+        hidden_dim=128,
         n_layers=2,
         heads=2,
+        graph_type="chain",
     ):
         super(ActorCritic, self).__init__()
 
         self.n_agents_eval = n_agents_eval
         self.d_action = d_action
         self.device = device
+        self.graph_type = graph_type
 
         # Learnable action std
         self.log_action_std = nn.Parameter(
@@ -110,33 +114,8 @@ class ActorCritic(nn.Module):
             nn.Sequential(nn.Linear(hidden_dim, 128), nn.GELU(), nn.Linear(128, 1))
         )
 
-    def create_chain_graph_batch(self, x_tensor):
-        """Convert a batched tensor into a list of chain graphs with self-loops."""
-        graphs = []
-
-        for g in range(x_tensor.size(0)):
-            x = x_tensor[g]  # (n_nodes, feat_dim)
-            n_nodes = x.size(0)
-
-            # Chain edges: i <-> i+1
-            edges = [[i, i + 1] for i in range(n_nodes - 1)]
-            edges += [[i + 1, i] for i in range(n_nodes - 1)]
-
-            # Add self-loops (i -> i)
-            edges += [[i, i] for i in range(n_nodes)]
-
-            edge_index = (
-                torch.tensor(edges, dtype=torch.long, device=self.device)
-                .t()
-                .contiguous()
-            )  # (2, E)
-
-            graphs.append(Data(x=x, edge_index=edge_index))
-
-        return graphs
-
     def get_action_and_value(self, state):
-        graph_list = self.create_chain_graph_batch(state)
+        graph_list = create_graph_batch(state, self.graph_type, self.device)
         batched_graph = Batch.from_data_list(graph_list)
 
         x = self.forward(batched_graph)
@@ -222,7 +201,7 @@ class ActorCritic(nn.Module):
         return action_logprobs, value, dist_entropy
 
     def get_batched_graph(self, x):
-        graph_list = self.create_chain_graph_batch(x)
+        graph_list = create_graph_batch(x, self.graph_type, self.device)
         return Batch.from_data_list(graph_list)
 
 
@@ -234,13 +213,14 @@ if __name__ == "__main__":
     )
 
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
-
+    graph_type = "chain"
     model = ActorCritic(
         n_agents_train=8,
         n_agents_eval=8,
         d_state=18,
         d_action=2,
         device=device,
+        graph_type=graph_type,
     ).to(device)
 
     model.eval()
@@ -251,7 +231,7 @@ if __name__ == "__main__":
 
     # Test with toy data
     x = torch.randn(1, 8, 18).to(device)  # 8 nodes, 18-d features
-    graph_list = model.create_chain_graph_batch(x)
+    graph_list = create_graph_batch(x, model.graph_type, model.device)
     batched_graph = Batch.from_data_list(graph_list)
 
     # Forward pass with attention collection
@@ -282,7 +262,7 @@ if __name__ == "__main__":
     # Run model over multiple timesteps
     for t in range(100):
         x_t = torch.randn(1, 8, 18).to(device)
-        graph_list = model.create_chain_graph_batch(x_t)
+        graph_list = create_graph_batch(x_t, model.graph_type, model.device)
         batched_graph = Batch.from_data_list(graph_list)
 
         # Get attention weights
