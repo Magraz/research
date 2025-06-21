@@ -19,7 +19,6 @@ from learning.environments.salp_passage.utils import (
     generate_target_points,
     generate_bending_curve,
     batch_discrete_frechet_distance,
-    generate_random_coordinate_outside_box,
     generate_random_coordinate_coordinate_inside_box,
     rotate_points,
     calculate_moment,
@@ -57,9 +56,12 @@ class SalpPassageDomain(BaseScenario):
         self.target_radius = self.agent_radius / 2
         self.frechet_thresh = 0.95
         self.min_n_agents = 8
-        self.lidar_range = 0.5
+        self.lidar_range = 0.8
         self.lidar_rays = 2
         self.open_passage_y = 100
+
+        self.goal_reached_bonus = 1
+        self.collision_penalty = -1
 
         self.viewer_zoom = kwargs.pop("viewer_zoom", 1.45)
         # Agents
@@ -349,6 +351,7 @@ class SalpPassageDomain(BaseScenario):
                         ),
                         batch_index=env_index,
                     )
+
                 else:
                     passage.is_rendering[env_index] = True
 
@@ -567,13 +570,36 @@ class SalpPassageDomain(BaseScenario):
         target_pos = [t.state.pos for t in targets]
         return torch.stack(target_pos).transpose(1, 0).float()
 
+    def check_collisions(self):
+        passages = self.get_passages()
+        collision_tensor = torch.zeros(
+            self.world.batch_dim, device=self.device, dtype=torch.int
+        )
+        for agent in self.world.agents:
+            for i, passage in enumerate(passages):
+                overlap_mask = torch.ones(
+                    self.world.batch_dim, device=self.device, dtype=torch.int
+                )
+
+                neighbor_check = ~((self.open_passage - i).abs() == 1)
+
+                indices = torch.where(self.open_passage == i)[0]
+
+                overlap_mask[indices] = 0
+
+                collision_tensor += (
+                    self.world.is_overlapping(agent, passage).int()
+                    * overlap_mask
+                    * neighbor_check
+                )
+        return collision_tensor
+
     def reward(self, agent: Agent):
         is_first = agent == self.world.agents[0]
 
         if is_first:
 
-            # Calculate G
-
+            # Calculate rewards
             self.frechet_rew[:] = 0
             self.centroid_rew[:] = 0
             self.curvature_rew[:] = 0
@@ -600,8 +626,19 @@ class SalpPassageDomain(BaseScenario):
             goal_reached_mask = self.total_rew > self.frechet_thresh
             goal_reached_rew += self.reached_goal_bonus * goal_reached_mask.int()
 
+            # Check for collisions
+            has_collided = self.check_collisions()
+            collision_penalty = torch.zeros(
+                self.world.batch_dim, device=self.device, dtype=torch.float32
+            )
+            collision_penalty += self.collision_penalty * has_collided
+
             # Mix all rewards
-            self.global_rew = self.distance_rew if self.training else f_rew
+            self.global_rew = (
+                self.distance_rew + collision_penalty + goal_reached_rew
+                if self.training
+                else f_rew
+            )
 
         return self.global_rew
 
@@ -800,7 +837,8 @@ class SalpPassageDomain(BaseScenario):
         out_of_bounds = self.is_out_of_bounds(
             self.world.x_semidim, self.world.y_semidim
         )
-        return torch.logical_or(target_reached, out_of_bounds)
+        has_collided = self.check_collisions()
+        return target_reached | out_of_bounds | has_collided
 
     def info(self, agent: Agent) -> Dict[str, Tensor]:
         chain_pos = self.get_agent_chain_position()

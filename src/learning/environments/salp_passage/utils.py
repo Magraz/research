@@ -747,3 +747,18 @@ def generate_random_coordinate_coordinate_inside_box(
     y_coord = random.uniform(-y_boundary, y_boundary) + offset_y
 
     return np.float64(x_coord), np.float64(y_coord)
+
+
+def get_neighbors(my_list, index):
+    before = after = None
+    try:
+        before = my_list[index - 1]
+    except IndexError:
+        before = None
+
+    try:
+        after = my_list[index + 1]
+    except IndexError:
+        after = None
+
+    return before, after
