@@ -735,7 +735,8 @@ class SalpPassageDomain(BaseScenario):
             batch_indices = torch.arange(self.world.batch_dim)
             open_passages = passage_pos[batch_indices, self.open_passage]
             open_passages = torch.sub(
-                torch.tensor((0, self.open_passage_y)), open_passages
+                open_passages,
+                torch.tensor((0, self.open_passage_y)),
             )
 
             agent_pos = self.get_agent_chain_position()
