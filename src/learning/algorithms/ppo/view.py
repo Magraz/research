@@ -22,7 +22,7 @@ def view(
     n_envs=1,
     n_agents_eval=8,
     n_rollouts=100,
-    rollout_length=1,
+    rollout_length=512,
     seed=500,
     render=True,
 ):

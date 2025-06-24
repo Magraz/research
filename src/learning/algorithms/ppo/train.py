@@ -230,7 +230,7 @@ def train(
                 break
 
         print(
-            f"Step: {global_step}, Episodes: {total_episodes}, Running Avg Reward: {running_avg_reward}, Minutes {'{:.2f}'.format((sum(training_data["timestamps"])) / 60)}"
+            f"Step: {global_step}, Episodes: {total_episodes}, Running Avg Reward: {running_avg_reward}, Minutes {'{:.2f}'.format((sum(training_data['timestamps'])) / 60)}"
         )
 
     writer.close()
