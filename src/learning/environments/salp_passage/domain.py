@@ -693,6 +693,34 @@ class SalpPassageDomain(BaseScenario):
         )
 
         # Get distance to open passage
+        corner_1 = self.global_state.passage_pos + torch.tensor(
+            (-self.passage_width / 2, self.passage_length / 2)
+        )
+        corner_2 = self.global_state.passage_pos + torch.tensor(
+            (self.passage_width / 2, self.passage_length / 2)
+        )
+        corner_3 = self.global_state.passage_pos + torch.tensor(
+            (-self.passage_width / 2, -self.passage_length / 2)
+        )
+        corner_4 = self.global_state.passage_pos + torch.tensor(
+            (self.passage_width / 2, -self.passage_length / 2)
+        )
+        a_pos_2_passage_pos_err_1 = (
+            corner_1 - self.global_state.a_chain_all_pos[:, idx, :]
+        )
+
+        a_pos_2_passage_pos_err_2 = (
+            corner_2 - self.global_state.a_chain_all_pos[:, idx, :]
+        )
+
+        a_pos_2_passage_pos_err_3 = (
+            corner_3 - self.global_state.a_chain_all_pos[:, idx, :]
+        )
+
+        a_pos_2_passage_pos_err_4 = (
+            corner_4 - self.global_state.a_chain_all_pos[:, idx, :]
+        )
+
         a_pos_2_passage_pos_err = (
             self.global_state.passage_pos - self.global_state.a_chain_all_pos[:, idx, :]
         )
@@ -718,6 +746,10 @@ class SalpPassageDomain(BaseScenario):
                 a_pos_2_t_pos_err,
                 # Passage data,
                 a_pos_2_passage_pos_err,
+                a_pos_2_passage_pos_err_1,
+                a_pos_2_passage_pos_err_2,
+                a_pos_2_passage_pos_err_3,
+                a_pos_2_passage_pos_err_4,
                 # Lidar data,
                 agent.sensors[0].measure(),
             ],
