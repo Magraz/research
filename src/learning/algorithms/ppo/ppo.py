@@ -286,6 +286,7 @@ class PPO:
             shuffle=True,
             pin_memory=True,
             persistent_workers=True,
+            num_workers=4,
         )
 
         # Load model into GPU for training
