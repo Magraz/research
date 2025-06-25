@@ -12,7 +12,7 @@ def process_state(
                 case "global":
                     return state[0]
 
-                case "local":
+                case "local" | "reduced":
                     state = torch.stack(state).transpose(1, 0).flatten(start_dim=1)
 
                     return state
@@ -30,7 +30,7 @@ def process_state(
             | "graph_transformer_full"
         ):
             match (representation):
-                case "local":
+                case "local" | "reduced":
                     state = torch.stack(state).transpose(1, 0)
                     return state
 
@@ -45,7 +45,7 @@ def get_state_dim(obs_shape, state_representation: str, model: str, n_agents: in
                 case "global":
                     return obs_shape
 
-                case "local":
+                case "local" | "reduced":
                     return obs_shape * n_agents
 
         case (
@@ -61,5 +61,5 @@ def get_state_dim(obs_shape, state_representation: str, model: str, n_agents: in
             | "graph_transformer_full"
         ):
             match (state_representation):
-                case "local":
+                case "local" | "reduced":
                     return obs_shape
