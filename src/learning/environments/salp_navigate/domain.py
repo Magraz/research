@@ -530,6 +530,41 @@ class SalpNavigateDomain(BaseScenario):
             agent.state.pos - self.global_observation.a_chain_centroid_pos
         )
 
+        # Get agent information
+        is_first = agent == self.world.agents[0]
+        is_last = agent == self.world.agents[-1]
+
+        idx = self.world.agents.index(agent)
+
+        # Encode agent id
+        encoding_len = 6
+        encoded_idx = torch.zeros(
+            (self.world.batch_dim, encoding_len),
+            dtype=torch.float32,
+            device=self.device,
+        ) + binary_encode(idx, encoding_len)
+
+        # Get neighbor forces
+        neighbor_forces = torch.zeros(
+            (self.world.batch_dim, 4), dtype=torch.float32, device=self.device
+        )
+        if is_first:
+            neighbor_forces[:, 2:] = self.global_observation.a_chain_all_forces[:, 1, :]
+        elif is_last:
+            neighbor_forces[:, :2] = self.global_observation.a_chain_all_forces[
+                :, -2, :
+            ]
+        else:
+            neighbor_forces = self.global_observation.a_chain_all_forces[
+                :, idx - 1 : idx + 2 : 2, :
+            ].flatten(start_dim=1)
+
+        # Get distance to assigned position
+        a_pos_2_t_pos_err = (
+            self.global_observation.t_chain_all_pos[:, idx, :]
+            - self.global_observation.a_chain_all_pos[:, idx, :]
+        )
+
         # Complete observation
         match (scope):
             case "global":
@@ -556,42 +591,6 @@ class SalpNavigateDomain(BaseScenario):
                 ).float()
 
             case "local":
-                # Get agent information
-                is_first = agent == self.world.agents[0]
-                is_last = agent == self.world.agents[-1]
-
-                idx = self.world.agents.index(agent)
-
-                # Encode agent id
-                encoding_len = 6
-                encoded_idx = torch.zeros(
-                    (self.world.batch_dim, encoding_len),
-                    dtype=torch.float32,
-                    device=self.device,
-                ) + binary_encode(idx, encoding_len)
-
-                # Get neighbor forces
-                neighbor_forces = torch.zeros(
-                    (self.world.batch_dim, 4), dtype=torch.float32, device=self.device
-                )
-                if is_first:
-                    neighbor_forces[:, 2:] = self.global_observation.a_chain_all_forces[
-                        :, 1, :
-                    ]
-                elif is_last:
-                    neighbor_forces[:, :2] = self.global_observation.a_chain_all_forces[
-                        :, -2, :
-                    ]
-                else:
-                    neighbor_forces = self.global_observation.a_chain_all_forces[
-                        :, idx - 1 : idx + 2 : 2, :
-                    ].flatten(start_dim=1)
-
-                # Get distance to assigned position
-                a_pos_2_t_pos_err = (
-                    self.global_observation.t_chain_all_pos[:, idx, :]
-                    - self.global_observation.a_chain_all_pos[:, idx, :]
-                )
 
                 observation = torch.cat(
                     [
@@ -617,6 +616,24 @@ class SalpNavigateDomain(BaseScenario):
                         # Target data
                         a_pos_rel_2_t_centroid,
                         a_vel_rel_2_centroid,
+                        a_pos_2_t_pos_err,
+                    ],
+                    dim=-1,
+                ).float()
+
+            case "reduced":
+
+                observation = torch.cat(
+                    [
+                        # Local data
+                        agent.state.pos,
+                        agent.state.vel,
+                        wrap_to_pi(agent.state.rot),
+                        agent.state.ang_vel,
+                        a_pos_rel_2_centroid,
+                        a_vel_rel_2_centroid,
+                        # Target data
+                        a_pos_rel_2_t_centroid,
                         a_pos_2_t_pos_err,
                     ],
                     dim=-1,
