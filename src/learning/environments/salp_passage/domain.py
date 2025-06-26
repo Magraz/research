@@ -61,6 +61,8 @@ class SalpPassageDomain(BaseScenario):
         self.open_passage_y = 100
 
         self.goal_reached_bonus = 1
+        self.passage_entrance_bonus = 1
+        self.passage_exit_bonus = 1
         self.collision_penalty = -1
 
         self.viewer_zoom = kwargs.pop("viewer_zoom", 1.45)
@@ -194,6 +196,8 @@ class SalpPassageDomain(BaseScenario):
         self.reached_goal_bonus = 1
         self.global_rew = torch.zeros(batch_dim, device=device, dtype=torch.float32)
         self.centroid_rew = self.global_rew.clone()
+        self.pass_entrance_rew = self.global_rew.clone()
+        self.pass_exit_rew = self.global_rew.clone()
         self.frechet_rew = self.global_rew.clone()
         self.curvature_rew = self.global_rew.clone()
         self.distance_rew = self.global_rew.clone()
@@ -230,6 +234,15 @@ class SalpPassageDomain(BaseScenario):
         ).flatten()
 
         passages = self.get_passages()
+
+        # Set passages
+        self.passage_entrance_pos = torch.zeros(
+            (self.world.batch_dim, 2), device=self.device
+        )
+
+        self.passage_exit_pos = torch.zeros(
+            (self.world.batch_dim, 2), device=self.device
+        )
 
         if env_index is None:
             # Set passage positions
