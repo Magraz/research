@@ -65,6 +65,13 @@ class SalpPassageDomain(BaseScenario):
         self.passage_exit_bonus = 1
         self.collision_penalty = -1
 
+        self.pass_entrance_checkpoint = torch.zeros(
+            (batch_dim), device=device, dtype=torch.bool
+        )
+        self.pass_exit_checkpoint = torch.zeros(
+            (batch_dim), device=device, dtype=torch.bool
+        )
+
         self.viewer_zoom = kwargs.pop("viewer_zoom", 1.45)
         # Agents
         self.n_agents = kwargs.pop("n_agents", self.min_n_agents)
@@ -103,6 +110,8 @@ class SalpPassageDomain(BaseScenario):
         # Reward Shaping
         self.frechet_shaping_factor = 1.0
         self.centroid_shaping_factor = 1.0
+        self.passage_entrance_factor = 1.0
+        self.passage_exit_factor = 1.0
         self.curvature_shaping_factor = 1.0
         self.distance_shaping_factor = 1.0
 
@@ -245,6 +254,14 @@ class SalpPassageDomain(BaseScenario):
         )
 
         if env_index is None:
+            # Reset checkpoints
+            self.pass_entrance_checkpoint = torch.zeros(
+                (self.world.batch_dim), device=self.device, dtype=torch.bool
+            )
+            self.pass_exit_checkpoint = torch.zeros(
+                (self.world.batch_dim), device=self.device, dtype=torch.bool
+            )
+
             # Set passage positions
             for j, passage in enumerate(passages):
 
@@ -277,6 +294,14 @@ class SalpPassageDomain(BaseScenario):
                             device=self.world.device,
                         ),
                         batch_index=idx,
+                    )
+
+                    self.passage_entrance_pos[idx] = passage.state.pos[
+                        idx
+                    ] + torch.tensor((0.0, -100 - self.passage_width / 2))
+
+                    self.passage_exit_pos[idx] = passage.state.pos[idx] + torch.tensor(
+                        (0.0, -100 + self.passage_width / 2)
                     )
 
             # Create new agent and target chains
@@ -336,6 +361,12 @@ class SalpPassageDomain(BaseScenario):
 
             f_dist, _ = calculate_frechet_reward(a_pos, t_pos)
             c_dist, _ = calculate_centroid_reward(a_pos.mean(dim=1), t_pos.mean(dim=1))
+            pen_dist, _ = calculate_centroid_reward(
+                a_pos.mean(dim=1), self.passage_entrance_pos
+            )
+            pex_dist, _ = calculate_centroid_reward(
+                a_pos.mean(dim=1), self.passage_exit_pos
+            )
             curvature = calculate_curvature_reward(
                 a_pos, t_pos, self.agent_joint_length
             )
@@ -343,10 +374,16 @@ class SalpPassageDomain(BaseScenario):
 
             self.frechet_shaping = f_dist * self.frechet_shaping_factor
             self.centroid_shaping = c_dist * self.centroid_shaping_factor
+            self.passage_entrance_shaping = pen_dist * self.passage_entrance_factor
+            self.passage_exit_shaping = pex_dist * self.passage_exit_factor
             self.curvature_shaping = curvature * self.curvature_shaping_factor
             self.distance_shaping = dist_rew * self.distance_shaping_factor
 
         else:
+            # Reset checkpoints
+            self.pass_entrance_checkpoint[env_index] = 0
+            self.pass_exit_checkpoint[env_index] = 0
+
             # Set passage positions
             for i, passage in enumerate(passages):
 
@@ -364,6 +401,14 @@ class SalpPassageDomain(BaseScenario):
                         ),
                         batch_index=env_index,
                     )
+
+                    self.passage_entrance_pos[env_index] = passage.state.pos[
+                        env_index
+                    ] + torch.tensor((0.0, -100 - self.passage_width / 2))
+
+                    self.passage_exit_pos[env_index] = passage.state.pos[
+                        env_index
+                    ] + torch.tensor((0.0, -100 + self.passage_width / 2))
 
                 else:
                     passage.is_rendering[env_index] = True
@@ -426,6 +471,14 @@ class SalpPassageDomain(BaseScenario):
 
             f_dist, _ = calculate_frechet_reward(a_pos, t_pos)
             c_dist, _ = calculate_centroid_reward(a_pos.mean(dim=1), t_pos.mean(dim=1))
+
+            pen_dist, _ = calculate_centroid_reward(
+                a_pos.mean(dim=1), self.passage_entrance_pos
+            )
+            pex_dist, _ = calculate_centroid_reward(
+                a_pos.mean(dim=1), self.passage_exit_pos
+            )
+
             curvature = calculate_curvature_reward(
                 a_pos, t_pos, self.agent_joint_length
             )
@@ -436,6 +489,12 @@ class SalpPassageDomain(BaseScenario):
             )
             self.centroid_shaping[env_index] = (
                 c_dist[env_index] * self.centroid_shaping_factor
+            )
+            self.passage_entrance_shaping[env_index] = (
+                pen_dist[env_index] * self.passage_entrance_factor
+            )
+            self.passage_exit_shaping[env_index] = (
+                pen_dist[env_index] * self.passage_exit_factor
             )
             self.curvature_shaping[env_index] = (
                 curvature[env_index] * self.curvature_shaping_factor
@@ -615,6 +674,8 @@ class SalpPassageDomain(BaseScenario):
             # Calculate rewards
             self.frechet_rew[:] = 0
             self.centroid_rew[:] = 0
+            self.pass_entrance_rew[:] = 0
+            self.pass_exit_rew[:] = 0
             self.curvature_rew[:] = 0
             self.distance_rew[:] = 0
 
@@ -627,6 +688,36 @@ class SalpPassageDomain(BaseScenario):
             dist_shaping = dist_rew * self.distance_shaping_factor
             self.distance_rew = dist_shaping - self.distance_shaping
             self.distance_shaping = dist_shaping
+
+            # Passage entrance reward
+            pen_dist, _ = calculate_centroid_reward(
+                agent_pos.mean(dim=1), self.passage_entrance_pos
+            )
+            passage_entrance_shaping = pen_dist * self.passage_entrance_factor
+            self.pass_entrance_rew += (
+                passage_entrance_shaping - self.passage_entrance_shaping
+            )
+            self.passage_entrance_shaping = passage_entrance_shaping
+
+            # Check if the agent has passed the entrance checkpoint
+            pass_entrance_mask = pen_dist > -0.5
+            self.pass_entrance_checkpoint = (
+                self.pass_entrance_checkpoint | pass_entrance_mask
+            )
+            self.pass_entrance_rew *= ~self.pass_entrance_checkpoint
+
+            # Passage exit reward
+            pex_dist, _ = calculate_centroid_reward(
+                agent_pos.mean(dim=1), self.passage_exit_pos
+            )
+            passage_exit_shaping = pex_dist * self.passage_exit_factor
+            self.pass_exit_rew += passage_entrance_shaping - self.passage_exit_shaping
+            self.passage_exit_shaping = passage_exit_shaping
+
+            # Check if the agent has passed the exit checkpoint
+            pass_exit_mask = pex_dist > -0.5
+            self.pass_exit_checkpoint = self.pass_exit_checkpoint | pass_exit_mask
+            self.pass_exit_rew *= ~self.pass_exit_checkpoint
 
             # Frechet reward
             _, f_rew = calculate_frechet_reward(agent_pos, target_pos)
@@ -648,7 +739,11 @@ class SalpPassageDomain(BaseScenario):
 
             # Mix all rewards
             self.global_rew = (
-                self.distance_rew + collision_penalty + goal_reached_rew
+                self.distance_rew
+                + collision_penalty
+                + goal_reached_rew
+                + self.pass_exit_rew
+                + self.pass_entrance_rew
                 if self.training
                 else f_rew
             )
@@ -738,6 +833,13 @@ class SalpPassageDomain(BaseScenario):
             self.global_state.passage_pos - self.global_state.a_chain_all_pos[:, idx, :]
         )
 
+        a_pos_2_pen_pos_err = (
+            self.passage_entrance_pos - self.global_state.a_chain_all_pos[:, idx, :]
+        )
+        a_pos_2_pex_pos_err = (
+            self.passage_exit_pos - self.global_state.a_chain_all_pos[:, idx, :]
+        )
+
         observation = torch.cat(
             [
                 # Agent id
@@ -758,11 +860,9 @@ class SalpPassageDomain(BaseScenario):
                 a_vel_rel_2_centroid,
                 a_pos_2_t_pos_err,
                 # Passage data,
+                a_pos_2_pen_pos_err,
+                a_pos_2_pex_pos_err,
                 a_pos_2_passage_pos_err,
-                a_pos_2_passage_pos_err_1,
-                a_pos_2_passage_pos_err_2,
-                a_pos_2_passage_pos_err_3,
-                a_pos_2_passage_pos_err_4,
                 # Lidar data,
                 agent.sensors[0].measure(),
             ],
