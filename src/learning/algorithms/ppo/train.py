@@ -18,6 +18,7 @@ def train(
     exp_config: Experiment,
     env_config: EnvironmentParams,
     device: str,
+    trial_id: str,
     dirs: dict,
     checkpoint: bool = False,
 ):
@@ -29,10 +30,16 @@ def train(
     params = Params(**exp_config.params)
 
     # Set seeds
-    np.random.seed(params.random_seed)
-    random.seed(params.random_seed)
-    torch.manual_seed(params.random_seed)
-    torch.cuda.manual_seed(params.random_seed)
+
+    random_seed = params.random_seeds[0]
+
+    if trial_id.isdigit():
+        random_seed = params.random_seeds[int(trial_id)]
+
+    np.random.seed(random_seed)
+    random.seed(random_seed)
+    torch.manual_seed(random_seed)
+    torch.cuda.manual_seed(random_seed)
 
     # Create environment
     n_envs = env_config.n_envs
@@ -44,7 +51,7 @@ def train(
         n_agents=n_agents,
         device=device,
         env_name=env_config.environment,
-        seed=params.random_seed,
+        seed=random_seed,
     )
 
     # Set state and action dimensions

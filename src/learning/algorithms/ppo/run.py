@@ -19,6 +19,7 @@ class PPO_Runner:
     ):
         # Directories
         self.device = device
+        self.trial_id = trial_id
         self.batch_dir = batch_dir
         self.trial_dir = trials_dir / trial_id
         self.logs_dir = self.trial_dir / "logs"
@@ -56,6 +57,7 @@ class PPO_Runner:
             exp_config,
             env_config,
             self.device,
+            self.trial_id,
             self.dirs,
             self.checkpoint,
         )

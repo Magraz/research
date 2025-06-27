@@ -1,3 +1,6 @@
+#parallel bash train.sh salp_navigate_24a ppo salp_navigate frech ::: gcn gat graph_transformer gcn_full gat_full graph_transformer_full transformer_full mlp
+#parallel bash train.sh salp_navigate_24a ppo salp_navigate :: $(seq 0 11) ::: gcn gat graph_transformer gcn_full gat_full graph_transformer_full transformer_full mlp
+
 BATCH=${1}
 ALGORITHM=${2}
 ENVIRONMENT=${3}

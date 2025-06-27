@@ -16,7 +16,7 @@ class Params:
 
     lr_critic: float
     lr_actor: float
-    random_seed: int
+    random_seeds: list
     grad_clip: float
     ent_coef: float
     std_coef: float
