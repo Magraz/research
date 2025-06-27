@@ -114,6 +114,11 @@ def train(
     checkpoint_step = 0
     rmax = -1e6
 
+    # Check if we are done before starting
+    if total_episodes >= params.n_total_episodes:
+        print("Finished training before starting")
+        return
+
     while global_step < params.n_total_steps:
 
         # Log start time
