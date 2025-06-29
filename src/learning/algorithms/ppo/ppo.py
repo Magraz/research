@@ -284,9 +284,6 @@ class PPO:
             dataset,
             batch_size=self.minibatch_size,
             shuffle=True,
-            pin_memory=True,
-            persistent_workers=True,
-            num_workers=1,
         )
 
         # Load model into GPU for training
