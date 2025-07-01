@@ -54,7 +54,7 @@ class SalpPassageDomain(BaseScenario):
         self.agent_min_angle = -45
         self.u_multiplier = 1.0
         self.target_radius = self.agent_radius / 2
-        self.frechet_thresh = 0.95
+        self.frechet_thresh = 0.85
         self.min_n_agents = 8
         self.lidar_range = 0.8
         self.lidar_rays = 2
@@ -690,32 +690,32 @@ class SalpPassageDomain(BaseScenario):
             self.distance_shaping = dist_shaping
 
             # Passage entrance reward
-            pen_dist, _ = calculate_centroid_reward(
+            self.pen_dist, _ = calculate_centroid_reward(
                 agent_pos.mean(dim=1), self.passage_entrance_pos
             )
-            passage_entrance_shaping = pen_dist * self.passage_entrance_factor
+            passage_entrance_shaping = self.pen_dist * self.passage_entrance_factor
             self.pass_entrance_rew += (
                 passage_entrance_shaping - self.passage_entrance_shaping
             )
             self.passage_entrance_shaping = passage_entrance_shaping
 
             # Check if the agent has passed the entrance checkpoint
-            pass_entrance_mask = pen_dist > -0.5
+            pass_entrance_mask = self.pen_dist > -0.4
             self.pass_entrance_checkpoint = (
                 self.pass_entrance_checkpoint | pass_entrance_mask
             )
             self.pass_entrance_rew *= ~self.pass_entrance_checkpoint
 
             # Passage exit reward
-            pex_dist, _ = calculate_centroid_reward(
+            self.pex_dist, _ = calculate_centroid_reward(
                 agent_pos.mean(dim=1), self.passage_exit_pos
             )
-            passage_exit_shaping = pex_dist * self.passage_exit_factor
+            passage_exit_shaping = self.pex_dist * self.passage_exit_factor
             self.pass_exit_rew += passage_entrance_shaping - self.passage_exit_shaping
             self.passage_exit_shaping = passage_exit_shaping
 
             # Check if the agent has passed the exit checkpoint
-            pass_exit_mask = pex_dist > -0.5
+            pass_exit_mask = self.pex_dist > -0.4
             self.pass_exit_checkpoint = self.pass_exit_checkpoint | pass_exit_mask
             self.pass_exit_rew *= ~self.pass_exit_checkpoint
 
@@ -744,8 +744,6 @@ class SalpPassageDomain(BaseScenario):
                 + goal_reached_rew
                 + self.pass_exit_rew
                 + self.pass_entrance_rew
-                if self.training
-                else f_rew
             )
 
         return self.global_rew
@@ -989,7 +987,14 @@ class SalpPassageDomain(BaseScenario):
     def info(self, agent: Agent) -> Dict[str, Tensor]:
         chain_pos = self.get_agent_chain_position()
         target_pos = self.get_target_chain_position()
-        return {"target_pose": (target_pos), "chain_pose": (chain_pos)}
+        return {
+            "target_pose": (target_pos),
+            "chain_pose": (chain_pos),
+            "pen_dist": self.pen_dist,
+            "pex_dist": self.pex_dist,
+            "pen_rew": self.pass_entrance_rew,
+            "pex_rew": self.pass_exit_rew,
+        }
 
     def extra_render(self, env_index: int = 0) -> "List[Geom]":
         from vmas.simulator import rendering
