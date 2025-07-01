@@ -149,9 +149,9 @@ if __name__ == "__main__":
     graph_type = "chain"
 
     model = ActorCritic(
-        n_agents_train=4,
-        n_agents_eval=4,
-        d_state=18,
+        n_agents_train=8,
+        n_agents_eval=8,
+        d_state=24,
         d_action=2,
         device=device,
         graph_type=graph_type,

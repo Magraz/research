@@ -15,7 +15,7 @@ from learning.algorithms.td3.train import TD3_Trainer
 
 from learning.algorithms.ippo.train import IPPO_Trainer
 
-from learning.algorithms.manual.control import ManualControl
+# from learning.algorithms.manual.control import ManualControl
 
 from learning.algorithms.types import AlgorithmEnum
 
@@ -134,20 +134,20 @@ def run_algorithm(
                 video_name=f"{experiment_name}_{trial_id}",
             )
 
-        case AlgorithmEnum.NONE:
-            exp_config = None
+        # case AlgorithmEnum.NONE:
+        #     exp_config = None
 
-            runner = ManualControl(
-                device="cpu",
-                batch_dir=batch_dir,
-                trials_dir=Path(batch_dir).parents[1]
-                / "results"
-                / batch_name
-                / experiment_name,
-                trial_id=trial_id,
-                trial_name=Path(exp_file).stem,
-                video_name=f"{experiment_name}_{trial_id}",
-            )
+        #     runner = ManualControl(
+        #         device="cpu",
+        #         batch_dir=batch_dir,
+        #         trials_dir=Path(batch_dir).parents[1]
+        #         / "results"
+        #         / batch_name
+        #         / experiment_name,
+        #         trial_id=trial_id,
+        #         trial_name=Path(exp_file).stem,
+        #         video_name=f"{experiment_name}_{trial_id}",
+        #     )
 
     if view:
         runner.view(

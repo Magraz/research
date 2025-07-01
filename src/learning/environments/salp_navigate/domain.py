@@ -463,8 +463,8 @@ class SalpNavigateDomain(BaseScenario):
             target_pos = self.get_target_chain_position()
 
             # Distance reward
-            dist_rew = calculate_distance_reward(agent_pos, target_pos)
-            dist_shaping = dist_rew * self.distance_shaping_factor
+            self.raw_dist_rew = calculate_distance_reward(agent_pos, target_pos)
+            dist_shaping = self.raw_dist_rew * self.distance_shaping_factor
             self.distance_rew = dist_shaping - self.distance_shaping
             self.distance_shaping = dist_shaping
 
@@ -495,17 +495,15 @@ class SalpNavigateDomain(BaseScenario):
             # self.centroid_shaping = centroid_shaping
 
             # Get reward for reaching the goal
-            self.total_rew = f_rew
+            self.raw_frech_rew = f_rew
             goal_reached_rew = torch.zeros(
                 self.world.batch_dim, device=self.device, dtype=torch.float32
             )
-            goal_reached_mask = self.total_rew > self.frechet_thresh
+            goal_reached_mask = self.raw_frech_rew > self.frechet_thresh
             goal_reached_rew += self.reached_goal_bonus * goal_reached_mask.int()
 
             # Mix all rewards
-            self.global_rew = (
-                self.distance_rew + goal_reached_rew if self.training else f_rew
-            )
+            self.global_rew = self.distance_rew + goal_reached_rew
 
         return self.global_rew
 
@@ -755,7 +753,7 @@ class SalpNavigateDomain(BaseScenario):
         return self.agent_representation(agent, self.state_representation)
 
     def done(self):
-        target_reached = self.total_rew > self.frechet_thresh
+        target_reached = self.raw_frech_rew > self.frechet_thresh
         out_of_bounds = self.is_out_of_bounds(
             self.world.x_semidim, self.world.y_semidim
         )
@@ -764,7 +762,12 @@ class SalpNavigateDomain(BaseScenario):
     def info(self, agent: Agent) -> Dict[str, Tensor]:
         chain_pos = self.get_agent_chain_position()
         target_pos = self.get_target_chain_position()
-        return {"target_pose": (target_pos), "chain_pose": (chain_pos)}
+        return {
+            "target_pose": (target_pos),
+            "chain_pose": (chain_pos),
+            "frechet_rew": self.raw_frech_rew,
+            "distance_rew": self.raw_dist_rew,
+        }
 
     def extra_render(self, env_index: int = 0) -> "List[Geom]":
         from vmas.simulator import rendering

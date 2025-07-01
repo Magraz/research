@@ -30,7 +30,6 @@ def train(
     params = Params(**exp_config.params)
 
     # Set seeds
-
     random_seed = params.random_seeds[0]
 
     if trial_id.isdigit():

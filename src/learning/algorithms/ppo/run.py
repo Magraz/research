@@ -70,5 +70,6 @@ class PPO_Runner:
             exp_config,
             env_config,
             self.device,
+            self.trial_id,
             self.dirs,
         )

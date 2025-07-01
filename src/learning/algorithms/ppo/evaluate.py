@@ -16,13 +16,16 @@ def evaluate(
     exp_config: Experiment,
     env_config: EnvironmentParams,
     device: str,
+    trial_id: str,
     dirs: dict,
 ):
 
     params = Params(**exp_config.params)
 
+    random_seeds = [56, 948, 8137, 6347, 1998]
+
     # Create environment to get dimension data
-    env = create_env(
+    dummy_env = create_env(
         dirs["batch"],
         1,
         device,
@@ -31,24 +34,24 @@ def evaluate(
         n_agents=env_config.n_agents,
     )
 
-    d_action = env.action_space.spaces[0].shape[0]
+    d_action = dummy_env.action_space.spaces[0].shape[0]
     d_state = get_state_dim(
-        env.observation_space.spaces[0].shape[0],
+        dummy_env.observation_space.spaces[0].shape[0],
         env_config.state_representation,
         exp_config.model,
         env_config.n_agents,
     )
 
-    get_attention_data(
-        exp_config,
-        env_config,
-        params,
-        device,
-        dirs,
-        env_config.n_agents,
-        d_state,
-        d_action,
-    )
+    # get_attention_data(
+    #     exp_config,
+    #     env_config,
+    #     params,
+    #     device,
+    #     dirs,
+    #     env_config.n_agents,
+    #     d_state,
+    #     d_action,
+    # )
 
     get_scalability_data(
         exp_config,
@@ -56,6 +59,7 @@ def evaluate(
         params,
         device,
         dirs,
+        random_seeds[trial_id],
         env_config.n_agents,
         d_state,
         d_action,
@@ -69,15 +73,15 @@ def get_scalability_data(
     device: Path,
     dirs: dict,
     # Parameters for scalability experiment
+    seed: int,
     n_agents: int,
     d_state: int,
     d_action: int,
     n_rollouts: int = 50,
     extra_agents: int = 64,
-    seed=1998,
 ):
     n_agents_list = list(range(4, extra_agents + 1, 4))
-    data = {n_agents: [] for n_agents in n_agents_list}
+    data = {n_agents: {} for n_agents in n_agents_list}
 
     for i, n_agents in enumerate(n_agents_list):
 
@@ -88,7 +92,7 @@ def get_scalability_data(
             device,
             env_config.environment,
             seed,
-            training=False,
+            training=True,
             n_agents=n_agents,
         )
 
@@ -108,9 +112,13 @@ def get_scalability_data(
         learner.policy.eval()
 
         rewards = []
+        distance_rewards = []
+        frechet_rewards = []
         episode_count = 0
         state = env.reset()
         cumulative_rewards = torch.zeros(n_rollouts, dtype=torch.float32, device=device)
+        cum_dist_rewards = torch.zeros(n_rollouts, dtype=torch.float32, device=device)
+        cum_frech_rewards = torch.zeros(n_rollouts, dtype=torch.float32, device=device)
         episode_len = torch.zeros(n_rollouts, dtype=torch.int32, device=device)
 
         for step in range(0, params.n_max_steps_per_episode):
@@ -136,9 +144,11 @@ def get_scalability_data(
             # Turn action tensor into list of tensors with shape (n_env, action_dim)
             action_tensor_list = torch.unbind(action_tensor)
 
-            state, reward, done, _ = env.step(action_tensor_list)
+            state, reward, done, info = env.step(action_tensor_list)
 
-            cumulative_rewards = reward[0]
+            cumulative_rewards += reward[0]
+            cum_frech_rewards = info[0]["frechet_rew"]
+            cum_dist_rewards = info[0]["distance_rew"]
 
             episode_len += torch.ones(n_rollouts, dtype=torch.int32, device=device)
 
@@ -157,6 +167,8 @@ def get_scalability_data(
                 for idx in indices:
                     # Log data when episode is done
                     rewards.append(cumulative_rewards[idx].item())
+                    distance_rewards.append(cum_dist_rewards[idx].item())
+                    frechet_rewards.append(cum_frech_rewards[idx].item())
 
                     # Reset vars, and increase counters
                     state = env.reset_at(index=idx)
@@ -167,7 +179,9 @@ def get_scalability_data(
             if episode_count >= n_rollouts:
                 break
 
-        data[n_agents] = rewards
+        data[n_agents]["rewards"] = rewards
+        data[n_agents]["dist_rewards"] = distance_rewards
+        data[n_agents]["frech_rewards"] = frechet_rewards
 
     # Store environment
     with open(dirs["logs"] / "evaluation.dat", "wb") as f:
