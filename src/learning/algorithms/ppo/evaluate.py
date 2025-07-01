@@ -59,7 +59,7 @@ def evaluate(
         params,
         device,
         dirs,
-        random_seeds[trial_id],
+        random_seeds[int(trial_id)],
         env_config.n_agents,
         d_state,
         d_action,
@@ -182,6 +182,8 @@ def get_scalability_data(
         data[n_agents]["rewards"] = rewards
         data[n_agents]["dist_rewards"] = distance_rewards
         data[n_agents]["frech_rewards"] = frechet_rewards
+
+        print(f"Done evaluating {n_agents}")
 
     # Store environment
     with open(dirs["logs"] / "evaluation.dat", "wb") as f:
