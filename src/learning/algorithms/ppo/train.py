@@ -111,11 +111,12 @@ def train(
     total_episodes = training_data["last_episode_count"]
     running_avg_reward = training_data["last_running_avg_rew"]
     checkpoint_step = 0
+    checkpoint_episode = total_episodes
     rmax = -1e6
 
     # Check if we are done before starting
     if total_episodes >= params.n_total_episodes:
-        print("Finished training before starting")
+        print(f"Training was already finished at {total_episodes}")
         return
 
     while global_step < params.n_total_steps:
@@ -219,7 +220,17 @@ def train(
             for reward in training_data["rewards_per_episode"]:
                 writer.add_scalar("Agent/rewards_per_episode", reward, total_episodes)
 
-        # Store checkpoint
+        # Store model checkpoint per 5000 episodes
+        episodes_since_last_checkpoint = total_episodes - checkpoint_episode
+        episodes_to_checkpoint = 5000
+        if episodes_since_last_checkpoint >= episodes_to_checkpoint:
+            # Save checkpoint
+            checkpoint_name = (
+                episodes_since_last_checkpoint // episodes_to_checkpoint
+            ) * episodes_to_checkpoint
+            learner.save(dirs["models"] / f"checkpoint_{checkpoint_name}")
+
+        # Store full checkpoint
         if (
             global_step - checkpoint_step >= 10000
         ) or total_episodes >= params.n_total_episodes:
@@ -235,6 +246,7 @@ def train(
                 dill.dump(env, f)
 
             checkpoint_step = global_step
+            checkpoint_episode = total_episodes
 
             if total_episodes >= params.n_total_episodes:
                 print("Finished training")
