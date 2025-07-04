@@ -694,7 +694,7 @@ class SalpPassageDomain(BaseScenario):
                 agent_pos.mean(dim=1), self.passage_entrance_pos
             )
             passage_entrance_shaping = self.pen_dist * self.passage_entrance_factor
-            self.pass_entrance_rew += (
+            self.pass_entrance_rew = (
                 passage_entrance_shaping - self.passage_entrance_shaping
             )
             self.passage_entrance_shaping = passage_entrance_shaping
@@ -711,7 +711,7 @@ class SalpPassageDomain(BaseScenario):
                 agent_pos.mean(dim=1), self.passage_exit_pos
             )
             passage_exit_shaping = self.pex_dist * self.passage_exit_factor
-            self.pass_exit_rew += passage_entrance_shaping - self.passage_exit_shaping
+            self.pass_exit_rew = passage_exit_shaping - self.passage_exit_shaping
             self.passage_exit_shaping = passage_exit_shaping
 
             # Check if the agent has passed the exit checkpoint
