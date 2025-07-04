@@ -24,7 +24,7 @@ def train(
 ):
 
     # Set logger
-    writer = SummaryWriter(dirs["logs"])
+    # writer = SummaryWriter(dirs["logs"])
 
     # Set params
     params = Params(**exp_config.params)
@@ -72,7 +72,7 @@ def train(
         n_envs,
         d_state,
         d_action,
-        writer,
+        None,
         checkpoint,
     )
 
@@ -216,9 +216,9 @@ def train(
             learner.save(dirs["models"] / "best_model")
 
         # Log reward data with tensorboard
-        if writer is not None:
-            for reward in training_data["rewards_per_episode"]:
-                writer.add_scalar("Agent/rewards_per_episode", reward, total_episodes)
+        # if writer is not None:
+        #     for reward in training_data["rewards_per_episode"]:
+        #         writer.add_scalar("Agent/rewards_per_episode", reward, total_episodes)
 
         # Store model checkpoint per 5000 episodes
         episodes_since_last_checkpoint = total_episodes - checkpoint_episode
@@ -256,4 +256,4 @@ def train(
             f"Step: {global_step}, Episodes: {total_episodes}, Running Avg Reward: {running_avg_reward}, Minutes {'{:.2f}'.format((sum(training_data['timestamps'])) / 60)}"
         )
 
-    writer.close()
+    #writer.close()

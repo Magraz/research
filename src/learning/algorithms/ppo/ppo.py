@@ -181,7 +181,7 @@ class PPO:
         # Logging params
         self.total_epochs = 0
 
-        if self.checkpoint:
+        if self.checkpoint and self.writer is not None:
             # Load epoch count
             path = self.writer.log_dir / "tensorboard.dat"
             if path.is_file():
@@ -378,9 +378,10 @@ class PPO:
                     self.total_epochs += 1
 
         # Store epoch count
-        with open(self.writer.log_dir / "tensorboard.dat", "wb") as f:
-            log_data_dict = {"total_epochs": self.total_epochs}
-            dill.dump(log_data_dict, f)
+        if self.writer is not None:
+            with open(self.writer.log_dir / "tensorboard.dat", "wb") as f:
+                log_data_dict = {"total_epochs": self.total_epochs}
+                dill.dump(log_data_dict, f)
 
         # Load model back to cpu to collect rollouts
         self.policy.to(self.device)
