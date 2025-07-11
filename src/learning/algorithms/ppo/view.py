@@ -20,11 +20,11 @@ def view(
     dirs: dict,
     # View parameters
     n_envs=1,
-    n_agents_eval=8,
-    n_rollouts=100,
+    n_agents_eval=32,
+    n_rollouts=3,
     rollout_length=512,
-    seed=500,
-    render=True,
+    seed=2,
+    render=False,
 ):
 
     params = Params(**exp_config.params)
@@ -101,16 +101,15 @@ def view(
             info_list.append(info[0])
 
             r.append(reward[0].item())
-            R = reward[0].item()
+            R = info[0]["frechet_rew"].item()  # reward[0].item()
 
-            if render:
-                frame = env.render(
-                    mode="rgb_array",
-                    agent_index_focus=None,  # Can give the camera an agent index to focus on
-                    visualize_when_rgb=True,
-                )
+            frame = env.render(
+                mode="rgb_array",
+                agent_index_focus=None,  # Can give the camera an agent index to focus on
+                visualize_when_rgb=render,
+            )
 
-                frame_list.append(frame)
+            frame_list.append(frame)
 
             if torch.any(done):
                 print("DONE")
@@ -125,9 +124,8 @@ def view(
     with open(dirs["logs"] / f"test_rollouts_info_{n_agents_eval}.dat", "wb") as f:
         dill.dump(info_list, f)
 
-    if render:
-        save_video(
-            str(dirs["videos"] / f"view_{n_agents_eval}"),
-            frame_list,
-            fps=1 / env.scenario.world.dt,
-        )
+    save_video(
+        str(dirs["videos"] / f"view_{n_agents_eval}"),
+        frame_list,
+        fps=1 / env.scenario.world.dt,
+    )
