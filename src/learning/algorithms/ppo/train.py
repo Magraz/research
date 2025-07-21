@@ -104,8 +104,8 @@ def train(
                 training_data = dill.load(data_file)
 
             # Load env up to checkpoint
-            with open(dirs["models"] / "env.dat", "rb") as env_file:
-                env = dill.load(env_file)
+            # with open(dirs["models"] / "env.dat", "rb") as env_file:
+            #     env = dill.load(env_file)
 
     # Setup loop variables
     global_step = training_data["last_step_count"]
@@ -123,7 +123,7 @@ def train(
     while global_step < params.n_total_steps:
 
         # Log start time
-        start_time = training_data["last_timestamp"]
+        start_time = time.time()
 
         episode_len = torch.zeros(env_config.n_envs, dtype=torch.int32, device=device)
         cum_rewards = torch.zeros(env_config.n_envs, dtype=torch.float32, device=device)
