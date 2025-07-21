@@ -5,11 +5,9 @@ from dataclasses import dataclass
 @dataclass
 class EnvironmentParams:
     environment: str = None
-    map_size: tuple[int] = None
-    observation_size: int = 0
-    action_size: int = 0
     n_envs: int = 1
     n_agents: int = 1
+    state_representation: str = None
 
 
 class EnvironmentEnum(StrEnum):

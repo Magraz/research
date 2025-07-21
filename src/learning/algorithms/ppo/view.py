@@ -20,11 +20,11 @@ def view(
     dirs: dict,
     # View parameters
     n_envs=1,
-    n_agents_eval=32,
+    n_agents_eval=2,
     n_rollouts=3,
     rollout_length=512,
     seed=2,
-    render=False,
+    render=True,
 ):
 
     params = Params(**exp_config.params)
@@ -64,14 +64,13 @@ def view(
 
     frame_list = []
     info_list = []
-    rollout_r_average = []
+    total_rew_per_rollout = []
 
     for i in range(n_rollouts):
 
         done = False
         state = env.reset()
-        R = 0
-        r = []
+        rew = 0
 
         for t in range(0, rollout_length):
 
@@ -100,8 +99,7 @@ def view(
 
             info_list.append(info[0])
 
-            r.append(reward[0].item())
-            R = info[0]["frechet_rew"].item()  # reward[0].item()
+            rew += reward[0].item()
 
             frame = env.render(
                 mode="rgb_array",
@@ -115,11 +113,11 @@ def view(
                 print("DONE")
                 break
 
-        rollout_r_average.append(R)
+        total_rew_per_rollout.append(rew)
 
-        print(f"TOTAL RETURN: {R}")
+        print(f"TOTAL RETURN: {rew}")
 
-    print(f"MEAN RETURN OVER {n_rollouts}: {mean(rollout_r_average)}")
+    print(f"MEAN RETURN OVER {n_rollouts}: {mean(total_rew_per_rollout)}")
 
     with open(dirs["logs"] / f"test_rollouts_info_{n_agents_eval}.dat", "wb") as f:
         dill.dump(info_list, f)

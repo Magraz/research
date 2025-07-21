@@ -83,7 +83,8 @@ def train(
         "episodes": [],
         "timestamps": [],
         "rewards_per_episode": [],
-        "last_timestamp": 0,
+        "reset_count": 1,
+        "last_timestamp": time.time(),
         "last_step_count": 0,
         "last_episode_count": 0,
         "last_running_avg_rew": 0,
@@ -122,12 +123,14 @@ def train(
     while global_step < params.n_total_steps:
 
         # Log start time
-        start_time = time.time()
+        start_time = training_data["last_timestamp"]
 
         episode_len = torch.zeros(env_config.n_envs, dtype=torch.int32, device=device)
         cum_rewards = torch.zeros(env_config.n_envs, dtype=torch.float32, device=device)
 
-        state = env.reset()
+        # Move random seed to checkpoint by calling reset multiple times
+        for _ in range(training_data["reset_count"]):
+            state = env.reset()
 
         # Collect batch of data stepping by n_envs
         for _ in range(0, params.batch_size, env_config.n_envs):
@@ -185,6 +188,7 @@ def train(
 
                     # Log data when episode is done
                     training_data["rewards_per_episode"].append(r)
+                    training_data["reset_count"] += 1
 
                     running_avg_reward = (
                         0.99 * running_avg_reward + 0.01 * r
@@ -241,9 +245,9 @@ def train(
             with open(dirs["logs"] / "train.dat", "wb") as f:
                 dill.dump(training_data, f)
 
-            # Store environment
-            with open(dirs["models"] / "env.dat", "wb") as f:
-                dill.dump(env, f)
+            # # Store environment
+            # with open(dirs["models"] / "env.dat", "wb") as f:
+            #     dill.dump(env, f)
 
             checkpoint_step = global_step
             checkpoint_episode = total_episodes
@@ -256,4 +260,4 @@ def train(
             f"Step: {global_step}, Episodes: {total_episodes}, Running Avg Reward: {running_avg_reward}, Minutes {'{:.2f}'.format((sum(training_data['timestamps'])) / 60)}"
         )
 
-    #writer.close()
+    # writer.close()
