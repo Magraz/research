@@ -85,7 +85,7 @@ class SalpPassageDomain(BaseScenario):
 
         # Environment
         self.passage_width = self.agent_joint_length * self.n_agents
-        self.passage_length = 0.4 * self.n_agents / self.min_n_agents
+        self.passage_length = 1.1 * self.agent_joint_length * self.n_agents
         self.n_passages = math.ceil(2 * world_x_dim / self.passage_length)
 
         self.passage_x_coordinate_list = [
