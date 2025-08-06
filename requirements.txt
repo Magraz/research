@@ -11,3 +11,5 @@ PyYAML
 nbconvert
 av
 dill
+'gymnasium[box2d]' 
+pygame
