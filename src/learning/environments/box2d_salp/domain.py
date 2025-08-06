@@ -101,9 +101,14 @@ class SalpChainEnv(gym.Env):
 
     def step(self, actions):
         for idx, agent in enumerate(self.agents):
-            force = float(actions[idx]) * 10.0
-            self.applied_forces[idx] = [0.0, force]  # Store the force vector
-            agent.ApplyForceToCenter((0.0, force), True)
+            force_x = float(actions[idx][0]) * 10.0  # X component
+            force_y = float(actions[idx][1]) * 10.0  # Y component
+
+            # Store the 2D force vector for visualization
+            self.applied_forces[idx] = [force_x, force_y]
+
+            # Apply 2D force to agent
+            agent.ApplyForceToCenter((force_x, force_y), True)
 
         self.world.Step(self.time_step, 6, 2)
 
@@ -339,13 +344,13 @@ class SalpChainEnv(gym.Env):
         pygame.draw.rect(self.screen, (0, 0, 0), right_rect)
 
     def _draw_force_vectors(self):
-        """Draw force vectors for each agent"""
+        """Draw force vectors for each agent with enhanced 2D visualization"""
         for idx, (body, force) in enumerate(zip(self.agents, self.applied_forces)):
             # Get agent center position in screen coordinates
             center_x = body.position.x * self.scale
             center_y = self.screen_size[1] - body.position.y * self.scale
 
-            # Calculate force vector end point
+            # Calculate force vector magnitude
             force_magnitude = np.linalg.norm(force)
             if force_magnitude > 0.1:  # Only draw if force is significant
                 # Scale the force vector for visibility
@@ -358,11 +363,22 @@ class SalpChainEnv(gym.Env):
                 start_pos = (int(center_x), int(center_y))
                 end_pos = (int(end_x), int(end_y))
 
+                # Use thicker line for stronger forces
+                line_width = max(1, int(force_magnitude * 0.5))
+
                 # Draw main force line (thicker, colored by agent)
-                pygame.draw.line(self.screen, COLORS_LIST[idx], start_pos, end_pos, 1)
+                pygame.draw.line(
+                    self.screen,
+                    COLORS_LIST[idx % len(COLORS_LIST)],
+                    start_pos,
+                    end_pos,
+                    line_width,
+                )
 
                 # Draw arrowhead
-                self._draw_arrowhead(start_pos, end_pos, COLORS_LIST[idx])
+                self._draw_arrowhead(
+                    start_pos, end_pos, COLORS_LIST[idx % len(COLORS_LIST)]
+                )
 
     def _draw_arrowhead(self, start_pos, end_pos, color):
         """Draw an arrowhead at the end of a force vector"""
