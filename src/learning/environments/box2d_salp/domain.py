@@ -29,7 +29,7 @@ class SalpChainEnv(gym.Env):
             low=-1, high=1, shape=(self.n_agents, 2), dtype=np.float32
         )
         self.observation_space = spaces.Box(
-            low=-np.inf, high=np.inf, shape=(self.n_agents, 4), dtype=np.float32
+            low=-np.inf, high=np.inf, shape=(self.n_agents, 12), dtype=np.float32
         )
 
         self.world = b2World(gravity=(0, 0))
@@ -59,6 +59,9 @@ class SalpChainEnv(gym.Env):
         # Add force tracking
         self.applied_forces = np.zeros((self.n_agents, 2), dtype=np.float32)
         self.force_scale = 2.0  # Scale factor for visualizing forces
+
+        # Add joint limit parameter
+        self.max_joints_per_agent = 2
 
     def _create_chain(self):
         self.agents.clear()
@@ -99,63 +102,6 @@ class SalpChainEnv(gym.Env):
                 self.joints.append(joint)
             previous_body = body
 
-    def step(self, actions):
-        for idx, agent in enumerate(self.agents):
-            force_x = float(actions[idx][0]) * 10.0  # X component
-            force_y = float(actions[idx][1]) * 10.0  # Y component
-
-            # Store the 2D force vector for visualization
-            self.applied_forces[idx] = [force_x, force_y]
-
-            # Apply 2D force to agent
-            agent.ApplyForceToCenter((force_x, force_y), True)
-
-        self.world.Step(self.time_step, 6, 2)
-
-        # For testing joints
-        if self.step_count == 50:
-            self._break_joint(self.joints[(self.n_agents // 2) - 1])
-
-        if self.step_count > 110:
-            self._join_on_proximity()
-
-        # The observation
-        obs = np.array(
-            [
-                [a.position.x, a.position.y, a.linearVelocity.x, a.linearVelocity.y]
-                for a in self.agents
-            ],
-            dtype=np.float32,
-        )
-
-        reward = -np.linalg.norm(obs[:, :2] - np.array([10, 10]))
-        terminated, truncated = False, False
-
-        self.step_count += 1
-
-        return obs, reward, terminated, truncated, {}
-
-    def reset(self, seed=None, options=None):
-        super().reset(seed=seed)
-
-        for body in self.agents:
-            self.world.DestroyBody(body)
-
-        self._create_chain()
-
-        obs = np.array(
-            [
-                [a.position.x, a.position.y, a.linearVelocity.x, a.linearVelocity.y]
-                for a in self.agents
-            ],
-            dtype=np.float32,
-        )
-
-        if self.render_mode == "human":
-            self.render()
-
-        return obs, {}
-
     def _render_agents_as_circles(self):
         for idx, body in enumerate(self.agents):
             # Get circle position and radius
@@ -189,46 +135,6 @@ class SalpChainEnv(gym.Env):
 
                 pygame.draw.polygon(self.screen, COLORS_LIST[idx], vertices)
 
-    def render(self):
-        if self.render_mode != "human":
-            return
-
-        if self.screen is None:
-            pygame.init()
-            self.screen = pygame.display.set_mode(self.screen_size)
-            pygame.display.set_caption("Salp Chain Simulation")
-            self.clock = pygame.time.Clock()
-
-        self.screen.fill((255, 255, 255))
-
-        # Draw boundary walls correctly positioned
-        self._draw_boundary_walls()
-
-        # Draw agents
-        self._render_agents_as_circles()
-
-        # Draw joints accurately using anchor points
-        for joint in self.joints:
-            anchor_a = joint.anchorA * self.scale
-            anchor_b = joint.anchorB * self.scale
-
-            # Adjust for pygame's inverted y-axis
-            p1 = (anchor_a[0], self.screen_size[1] - anchor_a[1])
-            p2 = (anchor_b[0], self.screen_size[1] - anchor_b[1])
-
-            # Draw the joint line (pivot-to-pivot)
-            pygame.draw.line(self.screen, (0, 0, 0), p1, p2, width=3)
-
-            # Optionally, draw pivot points explicitly
-            pygame.draw.circle(self.screen, (255, 0, 0), p1, radius=5)  # pivot on bodyA
-            pygame.draw.circle(self.screen, (0, 0, 255), p2, radius=5)  # pivot on bodyB
-
-        # Draw force vectors
-        self._draw_force_vectors()
-
-        pygame.display.flip()
-        self.clock.tick(self.metadata["render_fps"])
-
     def _create_joint(self, bodyA, bodyB, anchor):
         joint_def = b2RevoluteJointDef(
             bodyA=bodyA, bodyB=bodyB, anchor=anchor, collideConnected=False
@@ -251,13 +157,31 @@ class SalpChainEnv(gym.Env):
             if reaction_force_mag > 50.0:
                 self._break_joint(joint)
 
-    def _join_on_proximity(self):
+    def _join_on_proximity(self, min_distance: int = 1.5):
         for i, bodyA in enumerate(self.agents):
+            # Check if bodyA has reached its joint limit
+            if self._count_joints_for_agent(bodyA) >= self.max_joints_per_agent:
+                continue
+
             for bodyB in self.agents[i + 1 :]:
+                # Check if bodyB has reached its joint limit
+                if self._count_joints_for_agent(bodyB) >= self.max_joints_per_agent:
+                    continue
+
                 dist = (bodyA.position - bodyB.position).length
-                if dist < 1.0 and not self._bodies_connected(bodyA, bodyB):
+                if dist < min_distance and not self._bodies_connected(bodyA, bodyB):
                     anchor = (bodyA.position + bodyB.position) / 2
                     self._create_joint(bodyA, bodyB, anchor)
+                    # Break after creating one joint to avoid creating multiple joints in one step
+                    break
+
+    def _count_joints_for_agent(self, agent):
+        """Count how many joints an agent is currently part of"""
+        count = 0
+        for joint in self.joints:
+            if joint.bodyA == agent or joint.bodyB == agent:
+                count += 1
+        return count
 
     def _bodies_connected(self, bodyA, bodyB):
         # Check if bodies are already connected
@@ -420,6 +344,146 @@ class SalpChainEnv(gym.Env):
             (int(right_x), int(right_y)),
         ]
         pygame.draw.polygon(self.screen, color, arrow_points)
+
+    def _get_observation(self):
+        # Get all agent states as a matrix
+        all_states = np.array(
+            [
+                [a.position.x, a.position.y, a.linearVelocity.x, a.linearVelocity.y]
+                for a in self.agents
+            ],
+            dtype=np.float32,
+        )
+
+        # Build adjacency matrix for connections
+        adjacency = np.zeros((self.n_agents, self.n_agents), dtype=bool)
+        for joint in self.joints:
+            idx_a = self.agents.index(joint.bodyA)
+            idx_b = self.agents.index(joint.bodyB)
+            adjacency[idx_a, idx_b] = True
+            adjacency[idx_b, idx_a] = True
+
+        # For each agent, get connected agents' states
+        observations = []
+        for i in range(self.n_agents):
+            # Own state
+            own_state = all_states[i]
+
+            # Get indices of connected agents
+            connected_indices = np.where(adjacency[i])[0]
+
+            # Get connected states and pad/truncate
+            if len(connected_indices) == 0:
+                connected_states = np.zeros(
+                    self.max_joints_per_agent * 4, dtype=np.float32
+                )
+            else:
+                connected_states = all_states[connected_indices].flatten()
+                # Pad or truncate to fixed size
+                target_size = self.max_joints_per_agent * 4
+                if len(connected_states) < target_size:
+                    connected_states = np.pad(
+                        connected_states, (0, target_size - len(connected_states))
+                    )
+                else:
+                    connected_states = connected_states[:target_size]
+
+            # Combine own state with connected states
+            agent_obs = np.concatenate([own_state, connected_states])
+            observations.append(agent_obs)
+
+        return np.array(observations, dtype=np.float32)
+
+    def reset(self, seed=None, options=None):
+        super().reset(seed=seed)
+
+        for body in self.agents:
+            self.world.DestroyBody(body)
+
+        self._create_chain()
+
+        obs = np.array(
+            [
+                [a.position.x, a.position.y, a.linearVelocity.x, a.linearVelocity.y]
+                for a in self.agents
+            ],
+            dtype=np.float32,
+        )
+
+        if self.render_mode == "human":
+            self.render()
+
+        return obs, {}
+
+    def step(self, actions):
+        for idx, agent in enumerate(self.agents):
+            force_x = float(actions[idx][0]) * 10.0  # X component
+            force_y = float(actions[idx][1]) * 10.0  # Y component
+
+            # Store the 2D force vector for visualization
+            self.applied_forces[idx] = [force_x, force_y]
+
+            # Apply 2D force to agent
+            agent.ApplyForceToCenter((force_x, force_y), True)
+
+        self.world.Step(self.time_step, 6, 2)
+
+        # For testing joints
+        if self.step_count == 50:
+            self._break_joint(self.joints[(self.n_agents // 2) - 1])
+
+        if self.step_count > 200:
+            self._join_on_proximity()
+
+        # The observation
+        obs = self._get_observation()
+
+        reward = -np.linalg.norm(obs[:, :2] - np.array([10, 10]))
+        terminated, truncated = False, False
+
+        self.step_count += 1
+
+        return obs, reward, terminated, truncated, {}
+
+    def render(self):
+        if self.render_mode != "human":
+            return
+
+        if self.screen is None:
+            pygame.init()
+            self.screen = pygame.display.set_mode(self.screen_size)
+            pygame.display.set_caption("Salp Chain Simulation")
+            self.clock = pygame.time.Clock()
+
+        self.screen.fill((255, 255, 255))
+
+        # Draw boundary walls correctly positioned
+        self._draw_boundary_walls()
+
+        # Draw agents
+        self._render_agents_as_circles()
+
+        # Draw joints accurately using anchor points
+        for joint in self.joints:
+            anchor_a = joint.anchorA * self.scale
+            anchor_b = joint.anchorB * self.scale
+
+            # Adjust for pygame's inverted y-axis
+            p1 = (anchor_a[0], self.screen_size[1] - anchor_a[1])
+            p2 = (anchor_b[0], self.screen_size[1] - anchor_b[1])
+
+            # Draw the joint line (pivot-to-pivot)
+            pygame.draw.line(self.screen, (0, 0, 0), p1, p2, width=3)
+
+            # Optionally, draw pivot points explicitly
+            pygame.draw.circle(self.screen, (255, 0, 0), p1, radius=5)  # pivot on bodyA
+            pygame.draw.circle(self.screen, (0, 0, 255), p2, radius=5)  # pivot on bodyB
+
+        # Draw force vectors
+        self._draw_force_vectors()
+
+        pygame.display.flip()
+        self.clock.tick(self.metadata["render_fps"])
 
     def close(self):
         if self.screen:
