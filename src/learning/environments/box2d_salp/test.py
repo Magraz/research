@@ -1,10 +1,10 @@
 from learning.environments.box2d_salp.domain import SalpChainEnv
 import numpy as np
 
-env = SalpChainEnv(render_mode="human", n_agents=8)
+env = SalpChainEnv(render_mode="human", n_agents=20)
 obs, _ = env.reset()
 
-for step in range(500):
+for step in range(5000):
     # if step < 100:
     #     # Push agents in different directions with 2D forces
     #     action = np.array(
@@ -33,7 +33,6 @@ for step in range(500):
     obs, reward, terminated, truncated, info = env.step(action)
     env.render()
 
-    if step % 100 == 0:
-        print(f"Step {step}: Action shape = {action.shape}")
+    print(f"Step {step}: Reward = {reward}")
 
 env.close()

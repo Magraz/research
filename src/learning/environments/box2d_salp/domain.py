@@ -10,7 +10,11 @@ from Box2D import (
     b2CircleShape,
 )
 
-from learning.environments.box2d_salp.utils import COLORS_LIST
+from learning.environments.box2d_salp.utils import (
+    COLORS_LIST,
+    get_scatter_positions,
+    UnionFind,
+)
 
 AGENT_CATEGORY = 0x0001  # Binary: 0001
 BOUNDARY_CATEGORY = 0x0002  # Binary: 0010
@@ -19,17 +23,20 @@ BOUNDARY_CATEGORY = 0x0002  # Binary: 0010
 class SalpChainEnv(gym.Env):
     metadata = {"render_modes": ["human"], "render_fps": 30}
 
-    def __init__(self, render_mode=None, n_agents=8):
+    def __init__(self, render_mode=None, n_agents=12):
         super().__init__()
 
         self.n_agents = n_agents
         self.render_mode = render_mode
 
+        # Add joint limit parameter
+        self.max_joints_per_agent = 2
+
         self.action_space = spaces.Box(
             low=-1, high=1, shape=(self.n_agents, 2), dtype=np.float32
         )
         self.observation_space = spaces.Box(
-            low=-np.inf, high=np.inf, shape=(self.n_agents, 12), dtype=np.float32
+            low=-np.inf, high=np.inf, shape=(self.n_agents, 16), dtype=np.float32
         )
 
         self.world = b2World(gravity=(0, 0))
@@ -63,11 +70,24 @@ class SalpChainEnv(gym.Env):
         # Add joint limit parameter
         self.max_joints_per_agent = 2
 
-    def _create_chain(self):
-        self.agents.clear()
-        self.joints.clear()
+        # Add parameters for nearest neighbor detection
+        self.neighbor_detection_range = 3.0  # Maximum range to detect neighbors
 
-        previous_body = None
+        # Initialize Union-Find for tracking connected agents
+        self.union_find = UnionFind(n_agents)
+
+    def _update_union_find(self):
+        """Update the Union-Find structure based on current joints"""
+        # Reset Union-Find
+        self.union_find = UnionFind(self.n_agents)
+
+        # Add all current joints
+        for joint in self.joints:
+            idx_a = self.agents.index(joint.bodyA)
+            idx_b = self.agents.index(joint.bodyB)
+            self.union_find.union(idx_a, idx_b)
+
+    def _create_agents(self, positions):
         for i in range(self.n_agents):
             fixture_def = b2FixtureDef(
                 # shape=b2PolygonShape(box=(0.3, 0.5)),
@@ -84,23 +104,32 @@ class SalpChainEnv(gym.Env):
             )
 
             body = self.world.CreateDynamicBody(
-                position=(10 + i * 1.5, 10),
+                position=positions[i],
                 fixtures=fixture_def,
             )
 
             self.agents.append(body)
 
+    def _create_sequential_joints(self):
+        """
+        Creates joints one after the other in self.agents order
+        """
+        previous_body = None
+        for body in self.agents:
             if previous_body:
-                joint = self.world.CreateJoint(
-                    b2RevoluteJointDef(
-                        bodyA=previous_body,
-                        bodyB=body,
-                        anchor=previous_body.worldCenter + (0.75, 0),
-                        collideConnected=True,
-                    )
-                )
-                self.joints.append(joint)
+                self._create_joint(self, bodyA=previous_body, bodyB=body)
             previous_body = body
+
+    def _create_chain(self):
+        self.agents.clear()
+        self.joints.clear()
+
+        positions = get_scatter_positions(
+            self.world_width, self.world_height, self.n_agents
+        )
+
+        self._create_agents(positions)
+        # self._create_sequential_joints()
 
     def _render_agents_as_circles(self):
         for idx, body in enumerate(self.agents):
@@ -135,17 +164,22 @@ class SalpChainEnv(gym.Env):
 
                 pygame.draw.polygon(self.screen, COLORS_LIST[idx], vertices)
 
-    def _create_joint(self, bodyA, bodyB, anchor):
+    def _create_joint(self, bodyA, bodyB):
+        anchor = (bodyA.position + bodyB.position) / 2
         joint_def = b2RevoluteJointDef(
-            bodyA=bodyA, bodyB=bodyB, anchor=anchor, collideConnected=False
+            bodyA=bodyA, bodyB=bodyB, anchor=anchor, collideConnected=True
         )
         joint = self.world.CreateJoint(joint_def)
         self.joints.append(joint)
         return joint
 
     def _break_joint(self, joint):
+        """Modified to update Union-Find when joints are broken"""
         self.world.DestroyJoint(joint)
         self.joints.remove(joint)
+
+        # Update Union-Find after breaking a joint
+        self._update_union_find()
 
     def _break_on_reaction_force(self):
         # Example logic to break/create joints dynamically
@@ -157,23 +191,31 @@ class SalpChainEnv(gym.Env):
             if reaction_force_mag > 50.0:
                 self._break_joint(joint)
 
-    def _join_on_proximity(self, min_distance: int = 1.5):
+    def _join_on_proximity(self, min_distance: float = 1.5):
+        """Efficient version using Union-Find"""
+        # Update Union-Find structure
+        self._update_union_find()
+
         for i, bodyA in enumerate(self.agents):
-            # Check if bodyA has reached its joint limit
             if self._count_joints_for_agent(bodyA) >= self.max_joints_per_agent:
                 continue
 
-            for bodyB in self.agents[i + 1 :]:
-                # Check if bodyB has reached its joint limit
+            for j, bodyB in enumerate(self.agents[i + 1 :], i + 1):
                 if self._count_joints_for_agent(bodyB) >= self.max_joints_per_agent:
                     continue
 
+                # Check if already connected using Union-Find
+                if self.union_find.connected(i, j):
+                    continue
+
                 dist = (bodyA.position - bodyB.position).length
-                if dist < min_distance and not self._bodies_connected(bodyA, bodyB):
-                    anchor = (bodyA.position + bodyB.position) / 2
-                    self._create_joint(bodyA, bodyB, anchor)
-                    # Break after creating one joint to avoid creating multiple joints in one step
-                    break
+                if dist < min_distance:
+                    joint = self._create_joint(bodyA, bodyB)
+                    if joint:
+                        # Update Union-Find immediately
+                        self.union_find.union(i, j)
+                        print(f"Created joint between agent {i} and agent {j}")
+                        break
 
     def _count_joints_for_agent(self, agent):
         """Count how many joints an agent is currently part of"""
@@ -345,6 +387,73 @@ class SalpChainEnv(gym.Env):
         ]
         pygame.draw.polygon(self.screen, color, arrow_points)
 
+    def _draw_neighbor_detection_ranges(self):
+        """Draw detection ranges for debugging"""
+        for idx, body in enumerate(self.agents):
+            center_x = body.position.x * self.scale
+            center_y = self.screen_size[1] - body.position.y * self.scale
+            radius = self.neighbor_detection_range * self.scale
+
+            # Draw detection range circle (semi-transparent)
+            pygame.draw.circle(
+                self.screen,
+                (200, 200, 200, 50),  # Light gray with transparency
+                (int(center_x), int(center_y)),
+                int(radius),
+                1,  # Thin outline
+            )
+
+    def _get_nearest_non_connected_agent_relative(self, agent_idx, all_states):
+        """
+        Find the nearest non-connected agent and return relative state information
+
+        Returns:
+            numpy array: [relative_x, relative_y, relative_vx, relative_vy, distance]
+        """
+        agent_position = all_states[agent_idx][:2]
+        agent_velocity = all_states[agent_idx][2:4]
+
+        # Update Union-Find to get current connected components
+        self._update_union_find()
+
+        # Find which agents are in the same connected component
+        current_component_root = self.union_find.find(agent_idx)
+
+        min_distance = float("inf")
+        nearest_relative_state = None
+
+        for other_idx in range(self.n_agents):
+            if other_idx == agent_idx:
+                continue
+
+            # Check if this agent is in the same connected component
+            other_component_root = self.union_find.find(other_idx)
+            if current_component_root == other_component_root:
+                continue  # Skip agents in the same chain
+
+            # Calculate distance and relative information
+            other_position = all_states[other_idx][:2]
+            other_velocity = all_states[other_idx][2:4]
+
+            relative_position = other_position - agent_position
+            relative_velocity = other_velocity - agent_velocity
+            distance = np.linalg.norm(relative_position)
+
+            # Check if within range and closer than previous candidates
+            if distance <= self.neighbor_detection_range and distance < min_distance:
+                min_distance = distance
+                nearest_relative_state = np.concatenate(
+                    [relative_position, relative_velocity, [distance]]
+                )
+
+        # Return relative state or zeros if no neighbor found
+        if nearest_relative_state is not None:
+            return nearest_relative_state
+        else:
+            return np.zeros(
+                5, dtype=np.float32
+            )  # [rel_x, rel_y, rel_vx, rel_vy, distance]
+
     def _get_observation(self):
         # Get all agent states as a matrix
         all_states = np.array(
@@ -388,11 +497,81 @@ class SalpChainEnv(gym.Env):
                 else:
                     connected_states = connected_states[:target_size]
 
+            # Get nearest non-connected agent
+            nearest_neighbor_state = self._get_nearest_non_connected_agent_relative(
+                i, all_states
+            )
+
             # Combine own state with connected states
-            agent_obs = np.concatenate([own_state, connected_states])
+            agent_obs = np.concatenate(
+                [own_state, connected_states, nearest_neighbor_state]
+            )
             observations.append(agent_obs)
 
         return np.array(observations, dtype=np.float32)
+
+    def _get_chain_size_reward(self):
+        """Calculate reward based on the largest connected component of agents"""
+        largest_component_size = self._find_largest_connected_component()
+
+        # Normalize by total number of agents to get a value between 0 and 1
+        normalized_reward = largest_component_size / self.n_agents
+
+        # Scale the reward (adjust multiplier as needed)
+        reward = normalized_reward * 100.0  # Scale to make reward more significant
+
+        return reward
+
+    def _find_largest_connected_component(self):
+        """
+        Find the size of the largest connected component using graph traversal
+        Returns the number of agents in the largest connected group
+        """
+        if not self.joints:
+            return 1  # If no joints, largest component is 1 agent
+
+        # Build adjacency list from joints
+        adjacency_list = {i: [] for i in range(self.n_agents)}
+
+        for joint in self.joints:
+            idx_a = self.agents.index(joint.bodyA)
+            idx_b = self.agents.index(joint.bodyB)
+            adjacency_list[idx_a].append(idx_b)
+            adjacency_list[idx_b].append(idx_a)
+
+        visited = set()
+        largest_component_size = 0
+
+        # Find all connected components using DFS
+        for agent_idx in range(self.n_agents):
+            if agent_idx not in visited:
+                # Start DFS from this unvisited agent
+                component_size = self._dfs_component_size(
+                    agent_idx, adjacency_list, visited
+                )
+                largest_component_size = max(largest_component_size, component_size)
+
+        return largest_component_size
+
+    def _dfs_component_size(self, start_idx, adjacency_list, visited):
+        """
+        Depth-first search to find the size of a connected component
+        """
+        stack = [start_idx]
+        component_size = 0
+
+        while stack:
+            current_idx = stack.pop()
+            if current_idx not in visited:
+                visited.add(current_idx)
+                component_size += 1
+
+                # Add all connected agents to the stack
+                for neighbor_idx in adjacency_list[current_idx]:
+                    if neighbor_idx not in visited:
+                        stack.append(neighbor_idx)
+
+        return component_size
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
@@ -430,7 +609,8 @@ class SalpChainEnv(gym.Env):
 
         # For testing joints
         if self.step_count == 50:
-            self._break_joint(self.joints[(self.n_agents // 2) - 1])
+            if self.joints != []:
+                self._break_joint(self.joints[(self.n_agents // 2) - 1])
 
         if self.step_count > 200:
             self._join_on_proximity()
@@ -438,7 +618,7 @@ class SalpChainEnv(gym.Env):
         # The observation
         obs = self._get_observation()
 
-        reward = -np.linalg.norm(obs[:, :2] - np.array([10, 10]))
+        reward = self._get_chain_size_reward()
         terminated, truncated = False, False
 
         self.step_count += 1
@@ -462,6 +642,9 @@ class SalpChainEnv(gym.Env):
 
         # Draw agents
         self._render_agents_as_circles()
+
+        # Draw neighbor detection ranges (optional, for debugging)
+        # self._draw_neighbor_detection_ranges()
 
         # Draw joints accurately using anchor points
         for joint in self.joints:
