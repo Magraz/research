@@ -1,7 +1,7 @@
 from learning.environments.box2d_salp.domain import SalpChainEnv
 import numpy as np
 
-env = SalpChainEnv(render_mode="human", n_agents=20)
+env = SalpChainEnv(render_mode="human", n_agents=10)
 obs, _ = env.reset()
 
 for step in range(5000):

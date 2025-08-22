@@ -36,7 +36,7 @@ class SalpChainEnv(gym.Env):
             low=-1, high=1, shape=(self.n_agents, 2), dtype=np.float32
         )
         self.observation_space = spaces.Box(
-            low=-np.inf, high=np.inf, shape=(self.n_agents, 16), dtype=np.float32
+            low=-np.inf, high=np.inf, shape=(self.n_agents, 17), dtype=np.float32
         )
 
         self.world = b2World(gravity=(0, 0))
@@ -214,7 +214,6 @@ class SalpChainEnv(gym.Env):
                     if joint:
                         # Update Union-Find immediately
                         self.union_find.union(i, j)
-                        print(f"Created joint between agent {i} and agent {j}")
                         break
 
     def _count_joints_for_agent(self, agent):
@@ -518,9 +517,11 @@ class SalpChainEnv(gym.Env):
         normalized_reward = largest_component_size / self.n_agents
 
         # Scale the reward (adjust multiplier as needed)
-        reward = normalized_reward * 100.0  # Scale to make reward more significant
+        reward = normalized_reward * 1.0  # Scale to make reward more significant
 
-        return reward
+        terminated = self.n_agents == largest_component_size
+
+        return reward, terminated
 
     def _find_largest_connected_component(self):
         """
@@ -581,13 +582,7 @@ class SalpChainEnv(gym.Env):
 
         self._create_chain()
 
-        obs = np.array(
-            [
-                [a.position.x, a.position.y, a.linearVelocity.x, a.linearVelocity.y]
-                for a in self.agents
-            ],
-            dtype=np.float32,
-        )
+        obs = self._get_observation()
 
         if self.render_mode == "human":
             self.render()
@@ -618,8 +613,9 @@ class SalpChainEnv(gym.Env):
         # The observation
         obs = self._get_observation()
 
-        reward = self._get_chain_size_reward()
         terminated, truncated = False, False
+
+        reward, terminated = self._get_chain_size_reward()
 
         self.step_count += 1
 
@@ -644,7 +640,7 @@ class SalpChainEnv(gym.Env):
         self._render_agents_as_circles()
 
         # Draw neighbor detection ranges (optional, for debugging)
-        # self._draw_neighbor_detection_ranges()
+        self._draw_neighbor_detection_ranges()
 
         # Draw joints accurately using anchor points
         for joint in self.joints:

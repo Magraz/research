@@ -1,175 +1,179 @@
-import os
 import torch
-
-
-from learning.environments.types import EnvironmentParams
-from learning.environments.create_env import create_env
-from learning.algorithms.ippo.ippo import IPPO
-from learning.algorithms.ppo.types import Experiment, Params
-
 import numpy as np
-import pickle as pkl
-from pathlib import Path
-from dataclasses import make_dataclass
+import matplotlib.pyplot as plt
+from collections import defaultdict
+from learning.environments.box2d_salp.domain import SalpChainEnv
+from learning.algorithms.ippo.ippo import PPOAgent
+import pickle  # Add this import at the top of the file
 
-from vmas.simulator.utils import save_video
 
-
-class IPPO_Trainer:
-    def __init__(
-        self,
-        device: str,
-        batch_dir: Path,
-        trials_dir: Path,
-        trial_id: int,
-        trial_name: str,
-        video_name: str,
-    ):
-        # Directories
+class IPPOTrainer:
+    def __init__(self, env_config, ppo_config, device="cpu"):
         self.device = device
-        self.batch_dir = batch_dir
-        self.trials_dir = trials_dir
-        self.trial_name = trial_name
-        self.trial_id = trial_id
-        self.video_name = video_name
-        self.trial_folder_name = "_".join(("trial", str(self.trial_id)))
-        self.trial_dir = self.trials_dir / self.trial_folder_name
-        self.logs_dir = self.trial_dir / "logs"
-        self.models_dir = self.trial_dir / "models"
+        self.env_config = env_config
+        self.ppo_config = ppo_config
 
-        # Create directories
-        self.models_dir.mkdir(parents=True, exist_ok=True)
+        # Create environment
+        self.env = SalpChainEnv(**env_config)
 
-    def train(
-        self,
-        exp_config: Experiment,
-        env_config: EnvironmentParams,
-    ):
-        env = create_env(
-            self.batch_dir,
-            env_config.n_envs,
-            device=self.device,
-            env_name=env_config.environment,
-        )
+        # Create independent PPO agents
+        state_dim = self.env.observation_space.shape[1]  # 17 features per agent
+        action_dim = self.env.action_space.shape[1]  # 2 actions per agent
 
-        # Set params
-        params = Params(**exp_config.params)
+        self.agents = []
+        for i in range(self.env.n_agents):
+            agent = PPOAgent(
+                state_dim=state_dim, action_dim=action_dim, device=device, **ppo_config
+            )
+            self.agents.append(agent)
 
-        params.device = self.device
-        params.log_filename = self.logs_dir
-        params.n_agents = env.n_agents
+        # Training statistics
+        self.episode_rewards = []
+        self.episode_lengths = []
+        self.training_stats = defaultdict(list)
 
-        learner = IPPO(params)
-        step = 0
-        rmax = -1e10
-        running_avg_reward = 0
-        data = []
-        idx = 0
+    def collect_trajectory(self, max_steps=1000):
+        obs, _ = self.env.reset()
+        episode_reward = 0
+        step_count = 0
 
-        # Start training loop
-        while step < params.N_steps:
+        for step in range(max_steps):
+            # Get actions from all agents
+            actions = []
+            log_probs = []
+            values = []
 
-            for j in range(params.N_batch):
-                idx += 1
-                done = False
-                state = env.reset()
-                R = torch.zeros(env_config.n_envs)
+            for i, agent in enumerate(self.agents):
+                action, log_prob, value = agent.get_action(obs[i])
+                actions.append(action)
+                log_probs.append(log_prob)
+                values.append(value)
 
-                episode_data = []
+            # Step environment
+            next_obs, reward, terminated, truncated, info = self.env.step(
+                np.array(actions)
+            )
 
-                while not done:
-                    step += 1
+            # Store transitions for all agents
+            for i, agent in enumerate(self.agents):
+                agent.store_transition(
+                    state=obs[i],
+                    action=actions[i],
+                    reward=reward,  # Global reward shared by all agents
+                    log_prob=log_probs[i],
+                    value=values[i],
+                    done=terminated or truncated,
+                )
 
-                    # Process action and step in environment
-                    action = torch.clamp(
-                        torch.stack(learner.act(state)), min=-1.0, max=1.0
+            obs = next_obs
+            episode_reward += reward
+            step_count += 1
+
+            if terminated or truncated:
+                break
+
+        # Get final values for advantage computation
+        final_values = []
+        for i, agent in enumerate(self.agents):
+            _, _, final_value = agent.get_action(obs[i])
+            final_values.append(final_value)
+
+        return episode_reward, step_count, final_values
+
+    def train_episode(self):
+        # Collect trajectory
+        episode_reward, episode_length, final_values = self.collect_trajectory()
+
+        # Update all agents
+        update_stats = {}
+        for i, (agent, final_value) in enumerate(zip(self.agents, final_values)):
+            stats = agent.update(next_value=final_value)
+            for key, value in stats.items():
+                if f"agent_{i}_{key}" not in update_stats:
+                    update_stats[f"agent_{i}_{key}"] = []
+                update_stats[f"agent_{i}_{key}"].append(value)
+
+        # Store episode statistics
+        self.episode_rewards.append(episode_reward)
+        self.episode_lengths.append(episode_length)
+
+        # Store training statistics
+        for key, values in update_stats.items():
+            self.training_stats[key].extend(values)
+
+        return episode_reward, episode_length
+
+    def train(self, num_episodes=1000, log_every=10):
+        print(f"Starting training for {num_episodes} episodes...")
+        print(f"State dimension: {self.env.observation_space.shape[1]}")
+        print(f"Action dimension: {self.env.action_space.shape[1]}")
+        print(f"Number of agents: {self.env.n_agents}")
+
+        for episode in range(num_episodes):
+            episode_reward, episode_length = self.train_episode()
+
+            # Logging
+            if episode % log_every == 0:
+                avg_reward = np.mean(self.episode_rewards[-log_every:])
+                avg_length = np.mean(self.episode_lengths[-log_every:])
+
+                print(
+                    f"Episode {episode:4d} | "
+                    f"Avg Reward: {avg_reward:8.2f} | "
+                    f"Avg Length: {avg_length:6.1f} | "
+                )
+
+        print("Training completed!")
+
+    def render_episode(self, max_steps=1000):
+        obs, _ = self.env.reset()
+
+        for step in range(max_steps):
+            # Get actions from all agents (deterministic)
+            actions = []
+            for i, agent in enumerate(self.agents):
+                with torch.no_grad():
+                    state_tensor = (
+                        torch.FloatTensor(obs[i]).unsqueeze(0).to(self.device)
                     )
+                    action_mean, _, _ = agent.network.forward(state_tensor)
+                    action = torch.tanh(action_mean).cpu().numpy()[0]
+                    actions.append(action)
 
-                    action = action.reshape(
-                        env.n_agents, env_config.n_envs, env_config.action_size
-                    )
+            # Step environment
+            obs, reward, terminated, truncated, info = self.env.step(np.array(actions))
+            self.env.render()
 
-                    action_tensor_list = [agent for agent in action]
-                    state, reward, done, _ = env.step(action_tensor_list)
+            if terminated or truncated:
+                break
 
-                    # Store transition
-                    # episode_data.append((state, action, reward, done))
-
-                    learner.add_reward_terminal(reward, done)
-
-                    R += reward[0]
-
-                # Append episode summary instead of per-step data
-                data.append(R.tolist()[0])
-
-                print(step, R)
-
-                running_avg_reward = (
-                    0.99 * running_avg_reward + 0.01 * R if step > 0 else R
-                )
-
-            if running_avg_reward > rmax:
-                print(f"New best reward: {running_avg_reward} at step {step}")
-                rmax = running_avg_reward
-                learner.save(self.models_dir / "best_model")
-
-            if step % 10000 == 0:
-                learner.save(self.models_dir / f"checkpoint_{step}")
-
-            if idx % 2 == 0:
-                with open(self.models_dir / "data.dat", "wb") as f:
-                    pkl.dump(data, f)
-
-            learner.train()
-
-    def view(self, exp_config: Experiment, env_config: EnvironmentParams):
-
-        env = create_env(
-            self.batch_dir, 1, device=self.device, env_name=env_config.environment
+    def save_agents(self, filepath):
+        torch.save(
+            {
+                "agents": [agent.network.state_dict() for agent in self.agents],
+                "config": self.ppo_config,
+                "env_config": self.env_config,
+            },
+            filepath,
         )
+        print(f"Agents saved to {filepath}")
 
-        # Set params
-        params = Params(**exp_config.params)
+    def load_agents(self, filepath):
+        checkpoint = torch.load(filepath, map_location=self.device)
 
-        params.device = self.device
-        params.n_agents = 1
+        for i, agent in enumerate(self.agents):
+            agent.network.load_state_dict(checkpoint["agents"][i])
 
-        learner = IPPO(params)
-        learner.load(self.models_dir / "best_model")
+        print(f"Agents loaded from {filepath}")
 
-        frame_list = []
+    def save_training_stats(self, filepath):
+        """Save the training statistics to a file."""
+        with open(filepath, "wb") as f:
+            pickle.dump(self.training_stats, f)
+        print(f"Training statistics saved to {filepath}")
 
-        n_rollouts = 3
-
-        for i in range(n_rollouts):
-            done = False
-            state = env.reset()
-            R = torch.zeros(env.n_agents)
-            r = []
-            while not done:
-
-                action = torch.clamp(
-                    torch.stack(learner.act_deterministic(state)), min=-1.0, max=1.0
-                )
-
-                action = action.reshape(env.n_agents, 1, env_config.action_size)
-
-                action_tensor_list = [agent for agent in action]
-                state, reward, done, _ = env.step(action_tensor_list)
-
-                r.append(reward)
-                R += reward[0]
-
-                frame = env.render(
-                    mode="rgb_array",
-                    agent_index_focus=None,  # Can give the camera an agent index to focus on
-                    visualize_when_rgb=True,
-                )
-
-                frame_list.append(frame)
-
-            print(f"TOTAL RETURN: {R}")
-            print(f"MAX {max(r)}")
-            print(f"MIN {min(r)}")
-
-        save_video(self.video_name, frame_list, fps=1 / env.scenario.world.dt)
+    def load_training_stats(self, filepath):
+        """Load the training statistics from a file."""
+        with open(filepath, "rb") as f:
+            self.training_stats = pickle.load(f)
+        print(f"Training statistics loaded from {filepath}")
