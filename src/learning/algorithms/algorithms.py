@@ -6,14 +6,13 @@ from pathlib import Path
 from learning.algorithms.ccea.train import CCEA_Trainer
 from learning.algorithms.ccea.types import Experiment as CCEA_Experiment
 
-from learning.algorithms.ppo_parallel.run import PPO_Parallel_Runner
-
 from learning.algorithms.ppo.run import PPO_Runner
 from learning.algorithms.ppo.types import Experiment as PPO_Experiment
 
 from learning.algorithms.td3.train import TD3_Trainer
 
-from learning.algorithms.ippo.train import IPPO_Trainer
+from learning.algorithms.ippo.run import IPPO_Runner
+from learning.algorithms.ippo.types import Experiment as IPPO_Experiment
 
 # from learning.algorithms.manual.control import ManualControl
 
@@ -56,6 +55,9 @@ def run_algorithm(
         case EnvironmentEnum.VMAS_BALANCE | EnvironmentEnum.VMAS_BUZZ_WIRE:
             env_config = EnvironmentParams(**env_dict)
 
+        case EnvironmentEnum.BOX2D_SALP:
+            env_config = EnvironmentParams(**env_dict)
+
     env_config.environment = environment
 
     # Load experiment config
@@ -81,9 +83,9 @@ def run_algorithm(
             )
 
         case AlgorithmEnum.IPPO:
-            exp_config = PPO_Experiment(**exp_dict)
-            runner = IPPO_Trainer(
-                device="cpu",
+            exp_config = IPPO_Experiment(**exp_dict)
+            runner = IPPO_Runner(
+                device=exp_config.device,
                 batch_dir=batch_dir,
                 trials_dir=Path(batch_dir).parents[1]
                 / "results"
@@ -97,19 +99,6 @@ def run_algorithm(
         case AlgorithmEnum.PPO:
             exp_config = PPO_Experiment(**exp_dict)
             runner = PPO_Runner(
-                device=exp_config.device,
-                batch_dir=batch_dir,
-                trials_dir=Path(batch_dir).parents[1]
-                / "results"
-                / batch_name
-                / experiment_name,
-                trial_id=trial_id,
-                checkpoint=checkpoint,
-            )
-
-        case AlgorithmEnum.PPO_PARALLEL:
-            exp_config = PPO_Experiment(**exp_dict)
-            runner = PPO_Parallel_Runner(
                 device=exp_config.device,
                 batch_dir=batch_dir,
                 trials_dir=Path(batch_dir).parents[1]

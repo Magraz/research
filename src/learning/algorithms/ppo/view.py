@@ -20,10 +20,10 @@ def view(
     dirs: dict,
     # View parameters
     n_envs=1,
-    n_agents_eval=2,
+    n_agents_eval=4,
     n_rollouts=3,
     rollout_length=512,
-    seed=2,
+    seed=150,
     render=True,
 ):
 

@@ -1,5 +1,6 @@
 import torch
-from learning.algorithms.ippo.train import IPPOTrainer
+from learning.algorithms.ippo.trainer import IPPOTrainer
+
 
 def main():
     # Device configuration
@@ -32,8 +33,6 @@ def main():
     print("\nTesting trained agents...")
     trainer.render_episode()
     trainer.env.close()
-
-    
 
 
 if __name__ == "__main__":

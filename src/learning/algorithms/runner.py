@@ -1,13 +1,8 @@
-from learning.environments.types import EnvironmentParams
-from learning.algorithms.ppo_parallel.types import Experiment
-from learning.algorithms.ppo_parallel.train import train
-from learning.algorithms.ppo_parallel.view import view
-from learning.algorithms.ppo_parallel.evaluate import evaluate
-
 from pathlib import Path
+import torch
 
 
-class PPO_Parallel_Runner:
+class Runner:
     def __init__(
         self,
         device: str,
@@ -18,6 +13,7 @@ class PPO_Parallel_Runner:
     ):
         # Directories
         self.device = device
+        self.trial_id = trial_id
         self.batch_dir = batch_dir
         self.trial_dir = trials_dir / trial_id
         self.logs_dir = self.trial_dir / "logs"
@@ -40,26 +36,17 @@ class PPO_Parallel_Runner:
         # Checkpoint loading
         self.checkpoint = checkpoint
 
-    def train(
-        self,
-        exp_config: Experiment,
-        env_config: EnvironmentParams,
-    ):
-        train(
-            exp_config,
-            env_config,
-            self.device,
-            self.dirs,
-            self.checkpoint,
-        )
+        # Set optimal thread settings
+        n_threads = 1
+        torch.set_num_threads(n_threads)
+        torch.set_num_interop_threads(n_threads)
+        print(f"PyTorch using {torch.get_num_threads()} threads")
 
-    def view(self, exp_config: Experiment, env_config: EnvironmentParams):
-        view(exp_config, env_config, self.device, self.dirs)
+    def train(self):
+        pass
 
-    def evaluate(self, exp_config: Experiment, env_config: EnvironmentParams):
-        evaluate(
-            exp_config,
-            env_config,
-            self.device,
-            self.dirs,
-        )
+    def view(self):
+        pass
+
+    def evaluate(self):
+        pass

@@ -1,47 +1,45 @@
-import torch
-from learning.algorithms.ippo.train import IPPOTrainer
+from learning.environments.types import EnvironmentParams
+from learning.algorithms.ppo.types import Experiment
+from learning.algorithms.ippo.train import train
+from learning.algorithms.ppo.view import view
+from learning.algorithms.ppo.evaluate import evaluate
+from learning.algorithms.runner import Runner
+from pathlib import Path
 
 
-def main():
-    # Device configuration
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
+class IPPO_Runner(Runner):
+    def __init__(
+        self,
+        device: str,
+        batch_dir: Path,
+        trials_dir: Path,
+        trial_id: str,
+        checkpoint: bool,
+    ):
+        super().__init__(device, batch_dir, trials_dir, trial_id, checkpoint)
 
-    # Environment configuration
-    env_config = {
-        "render_mode": None,  # Set to "human" for visual training
-        "n_agents": 10,
-    }
+    def train(
+        self,
+        exp_config: Experiment,
+        env_config: EnvironmentParams,
+    ):
+        train(
+            exp_config,
+            env_config,
+            self.device,
+            self.trial_id,
+            self.dirs,
+            self.checkpoint,
+        )
 
-    # PPO configuration
-    ppo_config = {
-        "lr": 3e-4,
-        "gamma": 0.99,
-        "gae_lambda": 0.95,
-        "clip_epsilon": 0.2,
-        "value_coef": 0.5,
-        "entropy_coef": 0.01,
-    }
+    def view(self, exp_config: Experiment, env_config: EnvironmentParams):
+        view(exp_config, env_config, self.device, self.dirs)
 
-    # Create trainer
-    trainer = IPPOTrainer(env_config, ppo_config, device)
-
-    # Train
-    trainer.train(
-        num_episodes=2000,
-        log_every=50,
-    )
-    trainer.save_training_stats("training_stats.pkl")
-
-    # Save trained agents
-    trainer.save_agents("trained_ppo_agents.pth")
-
-    # Test trained agents with rendering
-    print("\nTesting trained agents...")
-    trainer.env.render_mode = "human"
-    trainer.render_episode()
-    trainer.env.close()
-
-
-if __name__ == "__main__":
-    main()
+    def evaluate(self, exp_config: Experiment, env_config: EnvironmentParams):
+        evaluate(
+            exp_config,
+            env_config,
+            self.device,
+            self.trial_id,
+            self.dirs,
+        )
