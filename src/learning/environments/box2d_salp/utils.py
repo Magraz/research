@@ -1,4 +1,8 @@
 import numpy as np
+from Box2D import b2ContactListener
+
+AGENT_CATEGORY = 0x0001  # Binary: 0001
+BOUNDARY_CATEGORY = 0x0002  # Binary: 0010
 
 COLORS_LIST = [
     # Primary colors
@@ -69,6 +73,31 @@ class UnionFind:
 
     def connected(self, x, y):
         return self.find(x) == self.find(y)
+
+
+class BoundaryContactListener(b2ContactListener):
+    """Contact listener to detect collisions between agents and boundaries"""
+
+    def __init__(self):
+        super().__init__()
+        self.boundary_collision = False
+
+    def BeginContact(self, contact):
+        # Check if this is a collision between an agent and boundary
+        fixture_a, fixture_b = contact.fixtureA, contact.fixtureB
+
+        category_a = fixture_a.filterData.categoryBits
+        category_b = fixture_b.filterData.categoryBits
+
+        # Check if one fixture is an agent and the other is a boundary
+        if (category_a == AGENT_CATEGORY and category_b == BOUNDARY_CATEGORY) or (
+            category_b == AGENT_CATEGORY and category_a == BOUNDARY_CATEGORY
+        ):
+            self.boundary_collision = True
+
+    def reset(self):
+        """Reset collision flag"""
+        self.boundary_collision = False
 
 
 def get_linear_positions(n_agents):

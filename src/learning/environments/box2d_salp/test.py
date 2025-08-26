@@ -1,7 +1,7 @@
 from learning.environments.box2d_salp.domain import SalpChainEnv
 import numpy as np
 
-env = SalpChainEnv(render_mode="human", n_agents=10)
+env = SalpChainEnv(render_mode="human", n_agents=6)
 obs, _ = env.reset()
 
 for step in range(5000):
@@ -34,5 +34,9 @@ for step in range(5000):
     env.render()
 
     print(f"Step {step}: Reward = {reward}")
+
+    # if terminated == True:
+    #     print("TERMINATED")
+    #     break
 
 env.close()

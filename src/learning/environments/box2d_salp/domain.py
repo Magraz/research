@@ -2,6 +2,8 @@ import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
 import pygame
+import math
+
 from Box2D import (
     b2World,
     b2PolygonShape,
@@ -12,18 +14,18 @@ from Box2D import (
 
 from learning.environments.box2d_salp.utils import (
     COLORS_LIST,
-    get_scatter_positions,
+    AGENT_CATEGORY,
+    BOUNDARY_CATEGORY,
     UnionFind,
+    BoundaryContactListener,
+    get_scatter_positions,
 )
-
-AGENT_CATEGORY = 0x0001  # Binary: 0001
-BOUNDARY_CATEGORY = 0x0002  # Binary: 0010
 
 
 class SalpChainEnv(gym.Env):
     metadata = {"render_modes": ["human"], "render_fps": 30}
 
-    def __init__(self, render_mode=None, n_agents=12):
+    def __init__(self, render_mode=None, n_agents=6):
         super().__init__()
 
         self.n_agents = n_agents
@@ -35,8 +37,9 @@ class SalpChainEnv(gym.Env):
         self.action_space = spaces.Box(
             low=-1, high=1, shape=(self.n_agents, 2), dtype=np.float32
         )
+
         self.observation_space = spaces.Box(
-            low=-np.inf, high=np.inf, shape=(self.n_agents, 17), dtype=np.float32
+            low=-np.inf, high=np.inf, shape=(self.n_agents, 16), dtype=np.float32
         )
 
         self.world = b2World(gravity=(0, 0))
@@ -45,6 +48,10 @@ class SalpChainEnv(gym.Env):
 
         self.agents = []
         self.joints = []
+
+        # Add contact listener
+        self.contact_listener = BoundaryContactListener()
+        self.world.contactListener = self.contact_listener
 
         # Boundary parameters (customize as needed)
         self.world_width = 40
@@ -69,6 +76,9 @@ class SalpChainEnv(gym.Env):
 
         # Add joint limit parameter
         self.max_joints_per_agent = 2
+
+        # Add sector sensing threshold
+        self.sector_sensor_radius = 5.0
 
         # Add parameters for nearest neighbor detection
         self.neighbor_detection_range = 3.0  # Maximum range to detect neighbors
@@ -181,16 +191,6 @@ class SalpChainEnv(gym.Env):
         # Update Union-Find after breaking a joint
         self._update_union_find()
 
-    def _break_on_reaction_force(self):
-        # Example logic to break/create joints dynamically
-        for joint in self.joints[:]:
-            reaction_force = joint.GetReactionForce(1.0 / self.time_step)
-            reaction_force_mag = reaction_force.length
-
-            # Break joint if force exceeds threshold
-            if reaction_force_mag > 50.0:
-                self._break_joint(joint)
-
     def _join_on_proximity(self, min_distance: float = 1.5):
         """Efficient version using Union-Find"""
         # Update Union-Find structure
@@ -223,15 +223,6 @@ class SalpChainEnv(gym.Env):
             if joint.bodyA == agent or joint.bodyB == agent:
                 count += 1
         return count
-
-    def _bodies_connected(self, bodyA, bodyB):
-        # Check if bodies are already connected
-        for joint in self.joints:
-            if (joint.bodyA == bodyA and joint.bodyB == bodyB) or (
-                joint.bodyA == bodyB and joint.bodyB == bodyA
-            ):
-                return True
-        return False
 
     def _create_boundary(self, width, height, thickness):
         """Create boundary walls that agents can collide with"""
@@ -402,6 +393,101 @@ class SalpChainEnv(gym.Env):
                 1,  # Thin outline
             )
 
+    def _draw_density_sensors(self):
+        """Draw density sensors for each agent as sector outlines with text values"""
+        # Initialize font if not already done
+        if not hasattr(self, "sensor_font"):
+            pygame.font.init()
+            self.sensor_font = pygame.font.SysFont("Arial", 12)
+
+        for idx, agent in enumerate(self.agents):
+            # Get agent position in screen coordinates
+            center_x = agent.position.x * self.scale
+            center_y = self.screen_size[1] - agent.position.y * self.scale
+
+            # Get sensor values
+            densities = self._calculate_density_sensors(idx, self.sector_sensor_radius)
+            sensor_radius = 5.0 * self.scale  # Radius of detection circle
+
+            # Define sector angles
+            sector_angles = [
+                (0, 90),  # top-right
+                (90, 180),  # top-left
+                (180, 270),  # bottom-left
+                (270, 360),  # bottom-right
+            ]
+
+            # Draw each sector outline
+            for sector, (start_angle, end_angle) in enumerate(sector_angles):
+                # Line thickness based on density (thicker = higher density)
+                density = min(densities[sector], 3.0) / 3.0  # Normalize to 0-1
+                line_thickness = max(1, int(1 + 3 * density))  # 1-4 pixels thick
+
+                # Calculate arc points to draw lines from center to arc edges
+                start_rad = math.radians(start_angle)
+                end_rad = math.radians(end_angle)
+
+                # Starting point on the arc
+                start_x = center_x + sensor_radius * math.cos(start_rad)
+                start_y = center_y - sensor_radius * math.sin(start_rad)
+
+                # Ending point on the arc
+                end_x = center_x + sensor_radius * math.cos(end_rad)
+                end_y = center_y - sensor_radius * math.sin(end_rad)
+
+                # Draw lines from center to arc edges
+                pygame.draw.line(
+                    self.screen,
+                    (0, 0, 255),  # Blue color
+                    (int(center_x), int(center_y)),
+                    (int(start_x), int(start_y)),
+                    line_thickness,
+                )
+
+                pygame.draw.line(
+                    self.screen,
+                    (0, 0, 255),  # Blue color
+                    (int(center_x), int(center_y)),
+                    (int(end_x), int(end_y)),
+                    line_thickness,
+                )
+
+                # Draw the arc connecting the two points
+                pygame.draw.arc(
+                    self.screen,
+                    (0, 0, 255),  # Blue color
+                    pygame.Rect(
+                        int(center_x - sensor_radius),
+                        int(center_y - sensor_radius),
+                        int(sensor_radius * 2),
+                        int(sensor_radius * 2),
+                    ),
+                    start_rad,
+                    end_rad,
+                    line_thickness,  # Line width based on density
+                )
+
+                # Calculate text position at the middle of the sector
+                mid_angle = math.radians((start_angle + end_angle) / 2)
+                text_distance = (
+                    sensor_radius * 0.7
+                )  # Position text at 70% of the radius
+                text_x = center_x + text_distance * math.cos(mid_angle)
+                text_y = center_y - text_distance * math.sin(mid_angle)
+
+                # Format the density value (2 decimal places)
+                density_text = f"{densities[sector]:.2f}"
+
+                # Render the text
+                text_surface = self.sensor_font.render(density_text, True, (0, 0, 0))
+                text_rect = text_surface.get_rect(center=(int(text_x), int(text_y)))
+
+                # Draw text with white background for better visibility
+                pygame.draw.rect(
+                    self.screen, (255, 255, 255, 180), text_rect.inflate(4, 4)
+                )
+                self.screen.blit(text_surface, text_rect)
+
     def _get_nearest_non_connected_agent_relative(self, agent_idx, all_states):
         """
         Find the nearest non-connected agent and return relative state information
@@ -497,14 +583,17 @@ class SalpChainEnv(gym.Env):
                     connected_states = connected_states[:target_size]
 
             # Get nearest non-connected agent
-            nearest_neighbor_state = self._get_nearest_non_connected_agent_relative(
-                i, all_states
+            # nearest_neighbor_state = self._get_nearest_non_connected_agent_relative(
+            #     i, all_states
+            # )
+
+            # Calculate density sensors
+            density_sensors = self._calculate_density_sensors(
+                i, self.sector_sensor_radius
             )
 
-            # Combine own state with connected states
-            agent_obs = np.concatenate(
-                [own_state, connected_states, nearest_neighbor_state]
-            )
+            # Combine all observations
+            agent_obs = np.concatenate([own_state, connected_states, density_sensors])
             observations.append(agent_obs)
 
         return np.array(observations, dtype=np.float32)
@@ -574,6 +663,74 @@ class SalpChainEnv(gym.Env):
 
         return component_size
 
+    def _calculate_density_sensors(self, agent_idx, sensor_radius):
+        """
+        Calculate density of agents in four sectors around an agent.
+        Returns a vector of 4 values representing density in each sector:
+        [top-right, top-left, bottom-left, bottom-right]
+
+        Ignores agents that are connected to this agent via joints.
+
+        Args:
+            agent_idx: Index of the agent to calculate sensors for
+            sensor_radius: Radius of the detection circle
+
+        Returns:
+            numpy array: 4-element vector with density values for each sector
+        """
+        agent_pos = np.array(
+            [self.agents[agent_idx].position.x, self.agents[agent_idx].position.y]
+        )
+
+        # Make sure the Union-Find structure is up to date
+        self._update_union_find()
+
+        # Find the root component of the current agent
+        agent_component = self.union_find.find(agent_idx)
+
+        # Initialize densities for the 4 sectors
+        densities = np.zeros(4, dtype=np.float32)
+
+        # Check each other agent
+        for other_idx, other_agent in enumerate(self.agents):
+            if other_idx == agent_idx:
+                continue  # Skip self
+
+            # Skip connected agents using UnionFind (much more efficient)
+            if self.union_find.connected(agent_idx, other_idx):
+                continue
+
+            other_pos = np.array([other_agent.position.x, other_agent.position.y])
+            relative_pos = other_pos - agent_pos
+
+            # Calculate distance
+            distance = np.linalg.norm(relative_pos)
+
+            # Skip if outside sensor radius
+            if distance > sensor_radius:
+                continue
+
+            # Determine sector (0: top-right, 1: top-left, 2: bottom-left, 3: bottom-right)
+            sector = 0
+            if relative_pos[0] < 0:  # Left side
+                if relative_pos[1] >= 0:  # Top-left
+                    sector = 1
+                else:  # Bottom-left
+                    sector = 2
+            else:  # Right side
+                if relative_pos[1] < 0:  # Bottom-right
+                    sector = 3
+                # else it's already sector 0 (top-right)
+
+            # Calculate density contribution (inverse square of distance)
+            # Add a small epsilon to avoid division by zero
+            density_value = 1.0 / (distance * distance + 0.1)
+
+            # Add to appropriate sector
+            densities[sector] += density_value
+
+        return densities
+
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
 
@@ -581,6 +738,9 @@ class SalpChainEnv(gym.Env):
             self.world.DestroyBody(body)
 
         self._create_chain()
+
+        # Reset contact listener
+        self.contact_listener.reset()
 
         obs = self._get_observation()
 
@@ -602,22 +762,25 @@ class SalpChainEnv(gym.Env):
 
         self.world.Step(self.time_step, 6, 2)
 
-        # For testing joints
-        if self.step_count == 50:
-            if self.joints != []:
-                self._break_joint(self.joints[(self.n_agents // 2) - 1])
+        self._join_on_proximity()
 
-        if self.step_count > 200:
-            self._join_on_proximity()
+        # Check for boundary collisions
+        if self.contact_listener.boundary_collision:
+            terminated = True
+            reward = -10.0  # Negative reward for boundary collision
+        else:
+            # The normal reward calculation
+            reward, terminated = self._get_chain_size_reward()
 
         # The observation
         obs = self._get_observation()
 
-        terminated, truncated = False, False
-
-        reward, terminated = self._get_chain_size_reward()
+        truncated = False
 
         self.step_count += 1
+
+        # Reset collision flag for next step
+        self.contact_listener.reset()
 
         return obs, reward, terminated, truncated, {}
 
@@ -640,7 +803,9 @@ class SalpChainEnv(gym.Env):
         self._render_agents_as_circles()
 
         # Draw neighbor detection ranges (optional, for debugging)
-        self._draw_neighbor_detection_ranges()
+        # self._draw_neighbor_detection_ranges()
+
+        self._draw_density_sensors()  # Add this before or after drawing agents
 
         # Draw joints accurately using anchor points
         for joint in self.joints:
