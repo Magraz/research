@@ -34,13 +34,25 @@ class SalpChainEnv(gym.Env):
         # Add joint limit parameter
         self.max_joints_per_agent = 2
 
-        self.action_space = spaces.Box(
-            low=-1, high=1, shape=(self.n_agents, 2), dtype=np.float32
+        self.action_space = spaces.Dict(
+            {
+                "movement": spaces.Box(
+                    low=-1, high=1, shape=(self.n_agents, 2), dtype=np.float32
+                ),
+                "link_openness": spaces.MultiDiscrete(
+                    [2] * self.n_agents
+                ),  # Each agent has a 0/1 choice
+            }
         )
 
         self.observation_space = spaces.Box(
             low=-np.inf, high=np.inf, shape=(self.n_agents, 16), dtype=np.float32
         )
+
+        # Add a field to track link openness for each agent
+        self.link_openness = np.ones(
+            self.n_agents, dtype=np.int8
+        )  # Default to open (1)
 
         self.world = b2World(gravity=(0, 0))
         self.time_step = 1.0 / 60.0
@@ -142,16 +154,26 @@ class SalpChainEnv(gym.Env):
         # self._create_sequential_joints()
 
     def _render_agents_as_circles(self):
+        # Define colors for open and closed agents
+        OPEN_COLOR = (50, 200, 50)  # Green for agents open to links
+        CLOSED_COLOR = (200, 50, 50)  # Red for agents closed to links
+
         for idx, body in enumerate(self.agents):
             # Get circle position and radius
             center_x = body.position.x * self.scale
             center_y = self.screen_size[1] - body.position.y * self.scale
             radius = body.fixtures[0].shape.radius * self.scale  # Get radius from shape
 
+            # Choose color based on link_openness
+            if self.link_openness[idx] == 1:
+                color = OPEN_COLOR  # Open to links
+            else:
+                color = CLOSED_COLOR  # Closed to links
+
             # Draw filled circle
             pygame.draw.circle(
                 self.screen,
-                COLORS_LIST[idx % len(COLORS_LIST)],
+                color,
                 (int(center_x), int(center_y)),
                 int(radius),
             )
@@ -164,6 +186,25 @@ class SalpChainEnv(gym.Env):
                 int(radius),
                 2,  # Outline thickness
             )
+
+            # Optionally add a visual indicator on top of the circle
+            if self.link_openness[idx] == 1:
+                # Draw a small plus sign for open agents
+                line_length = radius * 0.5
+                pygame.draw.line(
+                    self.screen,
+                    (255, 255, 255),
+                    (int(center_x - line_length), int(center_y)),
+                    (int(center_x + line_length), int(center_y)),
+                    3,  # Line thickness
+                )
+                pygame.draw.line(
+                    self.screen,
+                    (255, 255, 255),
+                    (int(center_x), int(center_y - line_length)),
+                    (int(center_x), int(center_y + line_length)),
+                    3,  # Line thickness
+                )
 
     def _render_agents_as_boxes(self):
         for idx, body in enumerate(self.agents):
@@ -192,16 +233,26 @@ class SalpChainEnv(gym.Env):
         self._update_union_find()
 
     def _join_on_proximity(self, min_distance: float = 1.5):
-        """Efficient version using Union-Find"""
+        """Efficient version using Union-Find that respects linking preferences"""
         # Update Union-Find structure
         self._update_union_find()
 
         for i, bodyA in enumerate(self.agents):
+            # Skip if this agent has reached its joint limit
             if self._count_joints_for_agent(bodyA) >= self.max_joints_per_agent:
                 continue
 
+            # Skip if this agent is not open to being linked to
+            if self.link_openness[i] == 0:
+                continue
+
             for j, bodyB in enumerate(self.agents[i + 1 :], i + 1):
+                # Skip if other agent has reached its joint limit
                 if self._count_joints_for_agent(bodyB) >= self.max_joints_per_agent:
+                    continue
+
+                # Skip if other agent is not open to being linked to
+                if self.link_openness[j] == 0:
                     continue
 
                 # Check if already connected using Union-Find
@@ -560,19 +611,39 @@ class SalpChainEnv(gym.Env):
         # For each agent, get connected agents' states
         observations = []
         for i in range(self.n_agents):
-            # Own state
+            # Own state (absolute)
             own_state = all_states[i]
 
             # Get indices of connected agents
             connected_indices = np.where(adjacency[i])[0]
 
-            # Get connected states and pad/truncate
+            # Get connected states relative to this agent and pad/truncate
             if len(connected_indices) == 0:
                 connected_states = np.zeros(
                     self.max_joints_per_agent * 4, dtype=np.float32
                 )
             else:
-                connected_states = all_states[connected_indices].flatten()
+                # Get states of connected agents
+                connected_absolute_states = all_states[connected_indices]
+
+                # Calculate relative positions and velocities
+                # For each connected agent: [x_rel, y_rel, vx_rel, vy_rel]
+                connected_relative_states = np.zeros_like(connected_absolute_states)
+
+                for j, conn_idx in enumerate(connected_indices):
+                    # Relative position = connected position - agent position
+                    connected_relative_states[j, 0:2] = (
+                        connected_absolute_states[j, 0:2] - own_state[0:2]
+                    )
+
+                    # Relative velocity = connected velocity - agent velocity
+                    connected_relative_states[j, 2:4] = (
+                        connected_absolute_states[j, 2:4] - own_state[2:4]
+                    )
+
+                # Flatten the relative states
+                connected_states = connected_relative_states.flatten()
+
                 # Pad or truncate to fixed size
                 target_size = self.max_joints_per_agent * 4
                 if len(connected_states) < target_size:
@@ -582,17 +653,12 @@ class SalpChainEnv(gym.Env):
                 else:
                     connected_states = connected_states[:target_size]
 
-            # Get nearest non-connected agent
-            # nearest_neighbor_state = self._get_nearest_non_connected_agent_relative(
-            #     i, all_states
-            # )
-
             # Calculate density sensors
             density_sensors = self._calculate_density_sensors(
                 i, self.sector_sensor_radius
             )
 
-            # Combine all observations
+            # Combine all observations: own absolute state + connected relative states + density sensors
             agent_obs = np.concatenate([own_state, connected_states, density_sensors])
             observations.append(agent_obs)
 
@@ -739,6 +805,9 @@ class SalpChainEnv(gym.Env):
 
         self._create_chain()
 
+        # Reset link_openness to all open
+        self.link_openness = np.ones(self.n_agents, dtype=np.int8)
+
         # Reset contact listener
         self.contact_listener.reset()
 
@@ -750,9 +819,17 @@ class SalpChainEnv(gym.Env):
         return obs, {}
 
     def step(self, actions):
+        # Unpack movement and link_openness actions
+        movement_actions = actions["movement"]
+        link_openness_actions = actions["link_openness"]
+
+        # Update link_openness state
+        self.link_openness = link_openness_actions
+
+        # Apply movement forces as before
         for idx, agent in enumerate(self.agents):
-            force_x = float(actions[idx][0]) * 10.0  # X component
-            force_y = float(actions[idx][1]) * 10.0  # Y component
+            force_x = float(movement_actions[idx][0]) * 10.0  # X component
+            force_y = float(movement_actions[idx][1]) * 10.0  # Y component
 
             # Store the 2D force vector for visualization
             self.applied_forces[idx] = [force_x, force_y]

@@ -1,7 +1,16 @@
 from learning.environments.box2d_salp.domain import SalpChainEnv
 import numpy as np
 
-env = SalpChainEnv(render_mode="human", n_agents=6)
+
+def biased_sample(env, zero_prob=1.0):
+    """Sample from action space with biased link_openness"""
+    action = env.action_space.sample()
+    random_values = np.random.random(env.n_agents)
+    action["link_openness"] = (random_values > zero_prob).astype(np.int8)
+    return action
+
+
+env = SalpChainEnv(render_mode="human", n_agents=12)
 obs, _ = env.reset()
 
 for step in range(5000):
@@ -28,7 +37,9 @@ for step in range(5000):
     #     )
 
     # Random 2D actions
-    action = env.action_space.sample()
+    # action = env.action_space.sample()
+
+    action = biased_sample(env)
 
     obs, reward, terminated, truncated, info = env.step(action)
     env.render()
