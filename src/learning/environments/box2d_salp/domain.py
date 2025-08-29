@@ -885,10 +885,10 @@ class SalpChainEnv(gym.Env):
         # Check for detachments before applying forces
         self._process_detachments()
 
-        # Apply movement forces as before
+        # Apply movement forces
         for idx, agent in enumerate(self.agents):
-            force_x = float(movement_actions[idx][0]) * 10.0  # X component
-            force_y = float(movement_actions[idx][1]) * 10.0  # Y component
+            force_x = float(movement_actions[idx].squeeze()[0]) * 10.0  # X component
+            force_y = float(movement_actions[idx].squeeze()[1]) * 10.0  # Y component
 
             # Store the 2D force vector for visualization
             self.applied_forces[idx] = [force_x, force_y]
@@ -961,7 +961,7 @@ class SalpChainEnv(gym.Env):
             pygame.draw.circle(self.screen, (0, 0, 255), p2, radius=5)  # pivot on bodyB
 
         # Draw force vectors
-        self._draw_force_vectors()
+        # self._draw_force_vectors()
 
         pygame.display.flip()
         self.clock.tick(self.metadata["render_fps"])

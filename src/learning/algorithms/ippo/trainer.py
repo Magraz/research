@@ -214,6 +214,8 @@ class IPPOTrainer:
     def render_episode(self, max_steps=1000):
         obs, _ = self.env.reset()
 
+        cumulative_reward = 0
+
         for step in range(max_steps):
             # Get actions from all agents (deterministic)
             actions = []
@@ -237,7 +239,13 @@ class IPPOTrainer:
             if self.using_dict_action:
                 env_actions = {}
                 for key in actions[0].keys():
-                    env_actions[key] = np.array([a[key] for a in actions])
+                    # Move tensors to CPU before converting to numpy
+                    env_actions[key] = np.array(
+                        [
+                            a[key].cpu().numpy() if torch.is_tensor(a[key]) else a[key]
+                            for a in actions
+                        ]
+                    )
             else:
                 env_actions = np.array(actions)
 
@@ -245,7 +253,10 @@ class IPPOTrainer:
             obs, reward, terminated, truncated, info = self.env.step(env_actions)
             self.env.render()
 
+            cumulative_reward += reward
+
             if terminated or truncated:
+                print(f"REWARD: {cumulative_reward}")
                 break
 
     def save_agents(self, filepath):

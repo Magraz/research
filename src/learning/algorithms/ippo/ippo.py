@@ -52,25 +52,56 @@ class PPOAgent:
         self.values = []
         self.dones = []
 
-    def get_action(self, state):
+    def get_action(self, state, deterministic=False):
+        """
+        Get action from the policy with optional deterministic behavior.
+
+        Args:
+            state: The current state
+            deterministic: If True, use mean action without sampling
+
+        Returns:
+            action, log_prob, value
+        """
         with torch.no_grad():
             state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
-            action, log_prob, value = self.network.get_action(state_tensor)
 
-            # Handle dictionary actions
-            if isinstance(action, dict):
-                # Convert each tensor in the dictionary to numpy
-                numpy_action = {}
-                for key, tensor in action.items():
-                    numpy_action[key] = tensor.cpu().numpy()[0]
-                return numpy_action, log_prob.cpu().item(), value.cpu().item()
-            else:
-                # Original behavior for tensor actions
-                return (
-                    action.cpu().numpy()[0],
-                    log_prob.cpu().item(),
-                    value.cpu().item(),
+            # Check if we have a dict action space
+            if hasattr(self, "action_space") and hasattr(self.action_space, "spaces"):
+                # For Dict action spaces, use the network's get_action method
+                # which should have a deterministic parameter
+                return self.network.get_action(
+                    state_tensor, deterministic=deterministic
                 )
+            else:
+                # For simple action spaces
+                action_mean, action_log_std, value = self.network(state_tensor)
+
+                # Use mean action directly if deterministic
+                if deterministic:
+                    action = torch.tanh(action_mean)
+                else:
+                    action_std = torch.exp(action_log_std)
+                    normal = torch.distributions.Normal(action_mean, action_std)
+                    action = torch.tanh(normal.sample())
+
+                # Calculate log probability
+                log_prob = self._calculate_log_prob(action_mean, action_log_std, action)
+
+                # Convert to numpy
+                if isinstance(action, dict):
+                    # Handle dict actions
+                    numpy_action = {}
+                    for key, tensor in action.items():
+                        numpy_action[key] = tensor.cpu().numpy()[0]
+                    return numpy_action, log_prob.cpu().item(), value.cpu().item()
+                else:
+                    # Handle tensor actions
+                    return (
+                        action.cpu().numpy()[0],
+                        log_prob.cpu().item(),
+                        value.cpu().item(),
+                    )
 
     def store_transition(self, state, action, reward, log_prob, value, done):
         self.states.append(state)
