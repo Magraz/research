@@ -36,10 +36,7 @@ def train(
     trainer = IPPOTrainer(env_config, ppo_config, device)
 
     # Train
-    trainer.train(
-        num_episodes=2000,
-        log_every=50,
-    )
+    trainer.train()
     trainer.save_training_stats(dirs["logs"] / "training_stats.pkl")
 
     # Save trained agents

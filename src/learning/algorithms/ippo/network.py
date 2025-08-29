@@ -1,73 +1,201 @@
 import torch
 import torch.nn as nn
-from torch.distributions import Normal
+import torch.nn.functional as F
+import numpy as np
+from typing import Tuple
+import math
 
 
+# To this:
 class PPONetwork(nn.Module):
-    def __init__(self, state_dim, action_dim, hidden_dim=64):
+    """Actor-critic network that supports Dict action spaces with movement, link_openness, and detach components."""
+
+    def __init__(self, obs_dim, action_space, hidden_dim=64):
         super(PPONetwork, self).__init__()
+        self.action_space = action_space
 
-        # Shared layers
-        self.shared = nn.Sequential(
-            nn.Linear(state_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-        )
+        # Check if we're dealing with a Dict action space
+        self.is_dict_action = hasattr(action_space, "spaces")
 
-        # Actor head (policy network)
-        self.actor_mean = nn.Linear(hidden_dim, action_dim)
-        self.actor_logstd = nn.Parameter(torch.zeros(action_dim))
+        # Shared feature extraction
+        self.feature_layer1 = nn.Linear(obs_dim, hidden_dim)
+        self.feature_layer2 = nn.Linear(hidden_dim, hidden_dim)
 
-        # Critic head (value network)
-        self.critic = nn.Linear(hidden_dim, 1)
+        if self.is_dict_action:
+            # Movement action (continuous 2D)
+            movement_dim = action_space["movement"].shape[-1]
+            self.movement_mean = nn.Linear(hidden_dim, movement_dim)
+            self.movement_log_std = nn.Parameter(torch.zeros(1, movement_dim))
 
-        # Initialize weights
-        self.apply(self._init_weights)
+            # Link openness action (discrete binary)
+            self.link_openness_logits = nn.Linear(hidden_dim, 1)  # Single binary output
 
-    def _init_weights(self, m):
-        if isinstance(m, nn.Linear):
-            torch.nn.init.orthogonal_(m.weight, 0.01)
-            torch.nn.init.constant_(m.bias, 0.0)
+            # Detach action (continuous scalar)
+            self.detach_mean = nn.Linear(hidden_dim, action_space["detach"].shape[-1])
+            self.detach_log_std = nn.Parameter(
+                torch.zeros(1, action_space["detach"].shape[-1])
+            )
+        else:
+            # Legacy support for simple Box action space
+            action_dim = action_space.shape[-1]
+            self.action_mean = nn.Linear(hidden_dim, action_dim)
+            self.action_log_std = nn.Parameter(torch.zeros(1, action_dim))
 
-    def forward(self, state):
-        shared_features = self.shared(state)
+        # Value function
+        self.value = nn.Linear(hidden_dim, 1)
 
-        # Actor outputs
-        action_mean = self.actor_mean(shared_features)
-        action_std = torch.exp(self.actor_logstd.expand_as(action_mean))
+    def forward(self, x):
+        # Shared feature extraction
+        x = F.relu(self.feature_layer1(x))
+        x = F.relu(self.feature_layer2(x))
 
-        # Critic output
-        value = self.critic(shared_features)
+        if self.is_dict_action:
+            # Movement action distribution
+            movement_mean = self.movement_mean(x)
+            movement_log_std = self.movement_log_std.expand_as(movement_mean)
 
-        return action_mean, action_std, value
+            # Link openness logits
+            link_openness_logits = self.link_openness_logits(x)
 
-    def get_action(self, state):
-        action_mean, action_std, value = self.forward(state)
+            # Detach action distribution
+            detach_mean = torch.sigmoid(self.detach_mean(x))  # Bound to [0,1]
+            detach_log_std = self.detach_log_std.expand_as(detach_mean)
 
-        # Create normal distribution
-        dist = Normal(action_mean, action_std)
+            value = self.value(x)
+            return {
+                "movement": (movement_mean, movement_log_std),
+                "link_openness": link_openness_logits,
+                "detach": (detach_mean, detach_log_std),
+            }, value
+        else:
+            # Legacy support
+            action_mean = self.action_mean(x)
+            action_log_std = self.action_log_std.expand_as(action_mean)
+            value = self.value(x)
+            return action_mean, action_log_std, value
 
-        # Sample action
-        action = dist.sample()
-        log_prob = dist.log_prob(action).sum(dim=-1)
+    def get_action(self, state, deterministic=False):
+        with torch.no_grad():
+            if self.is_dict_action:
+                action_params, value = self.forward(state)
 
-        # Clamp action to [-1, 1]
-        action = torch.tanh(action)
+                # Movement action (continuous)
+                movement_mean, movement_log_std = action_params["movement"]
+                if deterministic:
+                    movement = movement_mean
+                else:
+                    movement_std = torch.exp(movement_log_std)
+                    movement = torch.normal(movement_mean, movement_std)
 
-        return action, log_prob, value
+                # Link openness (discrete binary)
+                link_logits = action_params["link_openness"]
+                link_probs = torch.sigmoid(link_logits)  # Convert to probability
+                if deterministic:
+                    link_openness = (link_probs > 0.5).int()
+                else:
+                    link_openness = torch.bernoulli(link_probs).int()
+
+                # Detach action (continuous in [0,1])
+                detach_mean, detach_log_std = action_params["detach"]
+                if deterministic:
+                    detach = detach_mean
+                else:
+                    detach_std = torch.exp(detach_log_std)
+                    detach = torch.clamp(
+                        torch.normal(detach_mean, detach_std), 0.0, 1.0
+                    )
+
+                action = {
+                    "movement": movement,
+                    "link_openness": link_openness,
+                    "detach": detach,
+                }
+
+                # Calculate log probability
+                log_prob = self._get_log_prob(action, action_params)
+
+                return action, log_prob, value
+            else:
+                # Legacy support
+                action_mean, action_log_std, value = self.forward(state)
+                if deterministic:
+                    action = action_mean
+                else:
+                    action_std = torch.exp(action_log_std)
+                    action = torch.normal(action_mean, action_std)
+
+                action_log_prob = self._get_legacy_log_prob(
+                    action, action_mean, action_log_std
+                )
+
+                return action, action_log_prob, value
 
     def evaluate_action(self, state, action):
-        action_mean, action_std, value = self.forward(state)
+        if self.is_dict_action:
+            action_params, value = self.forward(state)
+            log_prob = self._get_log_prob(action, action_params)
+            entropy = self._get_entropy(action_params)
+            return log_prob, value, entropy
+        else:
+            # Legacy support
+            action_mean, action_log_std, value = self.forward(state)
+            action_log_prob = self._get_legacy_log_prob(
+                action, action_mean, action_log_std
+            )
+            action_std = torch.exp(action_log_std)
+            entropy = 0.5 + 0.5 * math.log(2 * math.pi) + torch.log(action_std)
+            entropy = entropy.sum(-1)
+            return action_log_prob, value, entropy
 
-        # Create distribution
-        dist = Normal(action_mean, action_std)
+    def _get_log_prob(self, action, action_params):
+        """Calculate combined log probability for all action components"""
+        # Movement log prob
+        movement_mean, movement_log_std = action_params["movement"]
+        movement_std = torch.exp(movement_log_std)
+        movement_dist = torch.distributions.Normal(movement_mean, movement_std)
+        movement_log_prob = movement_dist.log_prob(action["movement"]).sum(-1)
 
-        # Calculate log probability
-        unbounded_action = torch.atanh(torch.clamp(action, -0.999, 0.999))
-        log_prob = dist.log_prob(unbounded_action).sum(dim=-1)
+        # Link openness log prob (binary)
+        link_logits = action_params["link_openness"]
+        link_dist = torch.distributions.Bernoulli(logits=link_logits.squeeze(-1))
+        link_log_prob = link_dist.log_prob(action["link_openness"].float().squeeze(-1))
 
-        # Calculate entropy
-        entropy = dist.entropy().sum(dim=-1)
+        # Detach log prob
+        detach_mean, detach_log_std = action_params["detach"]
+        detach_std = torch.exp(detach_log_std)
+        detach_dist = torch.distributions.Normal(detach_mean, detach_std)
+        detach_log_prob = detach_dist.log_prob(action["detach"]).sum(-1)
 
-        return log_prob, value, entropy
+        # Combined log probability
+        return movement_log_prob + link_log_prob + detach_log_prob
+
+    def _get_entropy(self, action_params):
+        """Calculate combined entropy for all action components"""
+        # Movement entropy
+        movement_mean, movement_log_std = action_params["movement"]
+        movement_std = torch.exp(movement_log_std)
+        movement_dist = torch.distributions.Normal(movement_mean, movement_std)
+        movement_entropy = movement_dist.entropy().sum(-1)
+
+        # Link openness entropy
+        link_logits = action_params["link_openness"]
+        link_dist = torch.distributions.Bernoulli(logits=link_logits.squeeze(-1))
+        link_entropy = link_dist.entropy()
+
+        # Detach entropy
+        detach_mean, detach_log_std = action_params["detach"]
+        detach_std = torch.exp(detach_log_std)
+        detach_dist = torch.distributions.Normal(detach_mean, detach_std)
+        detach_entropy = detach_dist.entropy().sum(-1)
+
+        return movement_entropy + link_entropy + detach_entropy
+
+    def _get_legacy_log_prob(self, action, action_mean, action_log_std):
+        """Legacy support for simple Box action spaces"""
+        action_std = torch.exp(action_log_std)
+        action_log_prob = -0.5 * (
+            ((action - action_mean) / (action_std + 1e-8)) ** 2
+            + 2 * action_log_std
+            + math.log(2 * math.pi)
+        )
+        return action_log_prob.sum(-1)

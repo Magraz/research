@@ -39,7 +39,13 @@ for step in range(5000):
     # Random 2D actions
     # action = env.action_space.sample()
 
-    action = biased_sample(env)
+    # action = biased_sample(env)
+
+    action = {
+        "movement": np.random.uniform(-1, 1, size=(env.n_agents, 2)),
+        "link_openness": np.random.randint(0, 2, size=env.n_agents),
+        "detach": np.random.uniform(0, 1, size=env.n_agents),
+    }
 
     obs, reward, terminated, truncated, info = env.step(action)
     env.render()

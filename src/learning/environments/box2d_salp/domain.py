@@ -34,6 +34,7 @@ class SalpChainEnv(gym.Env):
         # Add joint limit parameter
         self.max_joints_per_agent = 2
 
+        # Update action space to include detach action
         self.action_space = spaces.Dict(
             {
                 "movement": spaces.Box(
@@ -42,17 +43,15 @@ class SalpChainEnv(gym.Env):
                 "link_openness": spaces.MultiDiscrete(
                     [2] * self.n_agents
                 ),  # Each agent has a 0/1 choice
+                "detach": spaces.Box(
+                    low=0, high=1, shape=(self.n_agents,), dtype=np.float32
+                ),  # Detach desire from 0 to 1
             }
         )
 
         self.observation_space = spaces.Box(
             low=-np.inf, high=np.inf, shape=(self.n_agents, 16), dtype=np.float32
         )
-
-        # Add a field to track link openness for each agent
-        self.link_openness = np.ones(
-            self.n_agents, dtype=np.int8
-        )  # Default to open (1)
 
         self.world = b2World(gravity=(0, 0))
         self.time_step = 1.0 / 60.0
@@ -97,6 +96,16 @@ class SalpChainEnv(gym.Env):
 
         # Initialize Union-Find for tracking connected agents
         self.union_find = UnionFind(n_agents)
+
+        # Add a field to track link openness for each agent
+        self.link_openness = np.ones(
+            self.n_agents, dtype=np.int8
+        )  # Default to open (1)
+
+        # Add a field to track detach values for each agent
+        self.detach_values = np.zeros(
+            self.n_agents, dtype=np.float32
+        )  # Default to 0 (no desire to detach)
 
     def _update_union_find(self):
         """Update the Union-Find structure based on current joints"""
@@ -187,7 +196,26 @@ class SalpChainEnv(gym.Env):
                 2,  # Outline thickness
             )
 
-            # Optionally add a visual indicator on top of the circle
+            # Visualize detach value as a red ring that grows with detach value
+            detach_value = self.detach_values[idx]
+            if detach_value > 0.1:  # Only show if significant
+                # Calculate ring thickness based on detach value
+                ring_thickness = int(3 * detach_value)  # 0 to 3 pixels thick
+
+                # Calculate ring color (get more red as detach increases)
+                ring_red = min(255, int(150 + 105 * detach_value))  # 150-255
+                ring_color = (ring_red, 50, 50)
+
+                # Draw detach ring
+                pygame.draw.circle(
+                    self.screen,
+                    ring_color,
+                    (int(center_x), int(center_y)),
+                    int(radius * 0.7),  # Inner ring
+                    ring_thickness,  # Thickness varies with detach value
+                )
+
+            # Draw plus sign for open agents
             if self.link_openness[idx] == 1:
                 # Draw a small plus sign for open agents
                 line_length = radius * 0.5
@@ -243,6 +271,7 @@ class SalpChainEnv(gym.Env):
                 continue
 
             # Skip if this agent is not open to being linked to
+            # Use scalar comparison to avoid array comparison issues
             if self.link_openness[i] == 0:
                 continue
 
@@ -797,6 +826,27 @@ class SalpChainEnv(gym.Env):
 
         return densities
 
+    def _process_detachments(self, detach_threshold=0.90):
+        """Check for agents that want to detach from their connections"""
+        # Create a list of joints to remove (we can't modify self.joints while iterating)
+        joints_to_remove = []
+
+        for joint in self.joints:
+            # Find the indices of connected agents
+            idx_a = self.agents.index(joint.bodyA)
+            idx_b = self.agents.index(joint.bodyB)
+
+            # Check if both agents want to detach
+            if (
+                self.detach_values[idx_a] > detach_threshold
+                and self.detach_values[idx_b] > detach_threshold
+            ):
+                joints_to_remove.append(joint)
+
+        # Remove the joints outside the loop
+        for joint in joints_to_remove:
+            self._break_joint(joint)
+
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
 
@@ -807,6 +857,9 @@ class SalpChainEnv(gym.Env):
 
         # Reset link_openness to all open
         self.link_openness = np.ones(self.n_agents, dtype=np.int8)
+
+        # Reset detach values to all zero
+        self.detach_values = np.zeros(self.n_agents, dtype=np.float32)
 
         # Reset contact listener
         self.contact_listener.reset()
@@ -819,12 +872,18 @@ class SalpChainEnv(gym.Env):
         return obs, {}
 
     def step(self, actions):
-        # Unpack movement and link_openness actions
+        # Unpack movement, link_openness, and detach actions
         movement_actions = actions["movement"]
         link_openness_actions = actions["link_openness"]
+        detach_actions = actions["detach"]
 
-        # Update link_openness state
-        self.link_openness = link_openness_actions
+        # Update link_openness and detach states - ensure we get scalar values
+        # Convert to flat numpy array if needed
+        self.link_openness = np.array(link_openness_actions).flatten()
+        self.detach_values = np.array(detach_actions).flatten()
+
+        # Check for detachments before applying forces
+        self._process_detachments()
 
         # Apply movement forces as before
         for idx, agent in enumerate(self.agents):
@@ -837,6 +896,7 @@ class SalpChainEnv(gym.Env):
             # Apply 2D force to agent
             agent.ApplyForceToCenter((force_x, force_y), True)
 
+        # Rest of the step method remains the same
         self.world.Step(self.time_step, 6, 2)
 
         self._join_on_proximity()

@@ -11,7 +11,8 @@ class PPOAgent:
     def __init__(
         self,
         state_dim,
-        action_dim,
+        action_dim=None,  # Make optional
+        action_space=None,  # Add action_space parameter
         lr=3e-4,
         gamma=0.99,
         gae_lambda=0.95,
@@ -20,9 +21,7 @@ class PPOAgent:
         entropy_coef=0.01,
         device="cpu",
     ):
-
         self.state_dim = state_dim
-        self.action_dim = action_dim
         self.gamma = gamma
         self.gae_lambda = gae_lambda
         self.clip_epsilon = clip_epsilon
@@ -30,8 +29,16 @@ class PPOAgent:
         self.entropy_coef = entropy_coef
         self.device = device
 
-        # Create network and optimizer
-        self.network = PPONetwork(state_dim, action_dim).to(device)
+        # Handle both Dict action spaces and regular action spaces
+        if action_space is not None:
+            self.action_space = action_space
+            # For Dict action spaces
+            self.network = PPONetwork(state_dim, action_space).to(device)
+        else:
+            # For legacy Box action spaces
+            self.action_dim = action_dim
+            self.network = PPONetwork(state_dim, action_dim).to(device)
+
         self.optimizer = optim.Adam(self.network.parameters(), lr=lr)
 
         # Storage for trajectory data
@@ -50,7 +57,20 @@ class PPOAgent:
             state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
             action, log_prob, value = self.network.get_action(state_tensor)
 
-            return action.cpu().numpy()[0], log_prob.cpu().item(), value.cpu().item()
+            # Handle dictionary actions
+            if isinstance(action, dict):
+                # Convert each tensor in the dictionary to numpy
+                numpy_action = {}
+                for key, tensor in action.items():
+                    numpy_action[key] = tensor.cpu().numpy()[0]
+                return numpy_action, log_prob.cpu().item(), value.cpu().item()
+            else:
+                # Original behavior for tensor actions
+                return (
+                    action.cpu().numpy()[0],
+                    log_prob.cpu().item(),
+                    value.cpu().item(),
+                )
 
     def store_transition(self, state, action, reward, log_prob, value, done):
         self.states.append(state)
@@ -97,13 +117,40 @@ class PPOAgent:
 
         # Convert to tensors
         states = torch.FloatTensor(np.array(self.states)).to(self.device)
-        actions = torch.FloatTensor(np.array(self.actions)).to(self.device)
         old_log_probs = torch.FloatTensor(self.log_probs).to(self.device)
         returns = torch.FloatTensor(returns).to(self.device)
         advantages = torch.FloatTensor(advantages).to(self.device)
 
-        # Create a dataset and DataLoader
-        dataset = TensorDataset(states, actions, old_log_probs, returns, advantages)
+        # Check if we're dealing with Dict actions
+        is_dict_action = isinstance(self.actions[0], dict)
+
+        if is_dict_action:
+            # Handle dictionary actions
+            movement = torch.FloatTensor(
+                np.array([a["movement"] for a in self.actions])
+            ).to(self.device)
+            link_openness = torch.FloatTensor(
+                np.array([a["link_openness"] for a in self.actions])
+            ).to(self.device)
+            detach = torch.FloatTensor(
+                np.array([a["detach"] for a in self.actions])
+            ).to(self.device)
+
+            # Create a dataset that includes all tensor components
+            dataset = TensorDataset(
+                states,
+                movement,
+                link_openness,
+                detach,
+                old_log_probs,
+                returns,
+                advantages,
+            )
+        else:
+            # Legacy handling for simple actions
+            actions = torch.FloatTensor(np.array(self.actions)).to(self.device)
+            dataset = TensorDataset(states, actions, old_log_probs, returns, advantages)
+
         dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
         # Training statistics
@@ -114,19 +161,40 @@ class PPOAgent:
 
         # Multiple epochs of optimization
         for epoch in range(epochs):
-            for (
-                batch_states,
-                batch_actions,
-                batch_old_log_probs,
-                batch_returns,
-                batch_advantages,
-            ) in dataloader:
+            for batch_data in dataloader:
+                if is_dict_action:
+                    (
+                        batch_states,
+                        batch_movement,
+                        batch_link_openness,
+                        batch_detach,
+                        batch_old_log_probs,
+                        batch_returns,
+                        batch_advantages,
+                    ) = batch_data
+
+                    # Reconstruct the dictionary action
+                    batch_actions = {
+                        "movement": batch_movement,
+                        "link_openness": batch_link_openness,
+                        "detach": batch_detach,
+                    }
+                else:
+                    # Legacy unpacking
+                    (
+                        batch_states,
+                        batch_actions,
+                        batch_old_log_probs,
+                        batch_returns,
+                        batch_advantages,
+                    ) = batch_data
+
                 # Forward pass
                 log_probs, values, entropy = self.network.evaluate_action(
                     batch_states, batch_actions
                 )
 
-                # Policy loss (PPO clipped objective)
+                # The rest of the training loop remains unchanged
                 ratio = torch.exp(log_probs - batch_old_log_probs)
                 surr1 = ratio * batch_advantages
                 surr2 = (
@@ -136,7 +204,7 @@ class PPOAgent:
                 policy_loss = -torch.min(surr1, surr2).mean()
 
                 # Value loss
-                value_loss = F.mse_loss(values.squeeze(), batch_returns)
+                value_loss = F.mse_loss(values.reshape(-1), batch_returns)
 
                 # Entropy loss (for exploration)
                 entropy_loss = -entropy.mean()
