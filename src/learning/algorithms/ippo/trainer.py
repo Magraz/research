@@ -153,12 +153,12 @@ class IPPOTrainer:
         self.training_stats["episodes"] = []
 
         # Set a reasonable trajectory collection length
-        collection_size = 1000
+        batch_size = 2560
 
         # Keep training until we reach the desired number of steps
         while steps_completed < total_steps:
             # Determine how many more steps to collect in this iteration
-            steps_to_collect = min(collection_size, total_steps - steps_completed)
+            steps_to_collect = min(batch_size, total_steps - steps_completed)
 
             # Collect trajectory for a fixed number of steps
             episode_reward, step_count, final_values = self.collect_trajectory(

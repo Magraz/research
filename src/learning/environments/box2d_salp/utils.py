@@ -108,7 +108,7 @@ def get_linear_positions(n_agents):
     return positions
 
 
-def get_scatter_positions(world_width, world_height, n_agents, min_distance=1.0):
+def get_scatter_positions(world_width, world_height, n_agents, min_distance=0.5):
     """
     Generate random starting positions for all agents
 
@@ -121,7 +121,7 @@ def get_scatter_positions(world_width, world_height, n_agents, min_distance=1.0)
     positions = []
 
     # Define safe boundaries (away from walls)
-    margin = 2.0  # Distance from walls
+    margin = 12.0  # Distance from walls
     safe_x_min = margin
     safe_x_max = world_width - margin
     safe_y_min = margin
@@ -159,3 +159,109 @@ def get_scatter_positions(world_width, world_height, n_agents, min_distance=1.0)
             positions.append((pos_x, pos_y))
 
     return positions
+
+
+def position_target_area(
+    width, height, existing_positions=None, min_distance=8.0, max_attempts=100
+):
+    """
+    Position a target area with direction-based offset from the world center,
+    ensuring minimum distance from existing targets.
+
+    Args:
+        width (float): World width
+        height (float): World height
+        existing_positions (list): List of (x, y) tuples of existing target positions
+        min_distance (float): Minimum distance required between target positions
+        max_attempts (int): Maximum number of positioning attempts before falling back
+
+    Returns:
+        tuple: (x, y) coordinates for the target area
+    """
+    # Initialize existing positions if None
+    if existing_positions is None:
+        existing_positions = []
+
+    # Calculate world center
+    center_x = width / 2
+    center_y = height / 2
+
+    # Define bounding box dimensions (60% of world size)
+    box_width = width * 0.6
+    box_height = height * 0.6
+
+    # Calculate bounding box boundaries
+    box_left = center_x - box_width / 2
+    box_right = center_x + box_width / 2
+    box_bottom = center_y - box_height / 2
+    box_top = center_y + box_height / 2
+
+    # Margin from edges
+    margin = 10
+    boundary_margin = 4.0
+
+    for attempt in range(max_attempts):
+        # Step 1: Generate random position within bounding box
+        x = np.random.uniform(box_left + margin, box_right - margin)
+        y = np.random.uniform(box_bottom + margin, box_top - margin)
+
+        # Step 2: Calculate direction vector from center
+        dir_x = x - center_x
+        dir_y = y - center_y
+
+        # Step 3: Normalize direction vector (if not zero)
+        magnitude = np.sqrt(dir_x**2 + dir_y**2)
+        if magnitude > 0.001:  # Avoid division by zero
+            dir_x /= magnitude
+            dir_y /= magnitude
+
+        # Step 4: Apply additional offset in same direction
+        offset_magnitude = 10
+        x = center_x + dir_x * (magnitude + offset_magnitude)
+        y = center_y + dir_y * (magnitude + offset_magnitude)
+
+        # Step 5: Ensure the position stays within world bounds
+        x = np.clip(x, boundary_margin, width - boundary_margin)
+        y = np.clip(y, boundary_margin, height - boundary_margin)
+
+        # Step 6: Check minimum distance from all existing target positions
+        valid_position = True
+        for pos_x, pos_y in existing_positions:
+            distance = np.sqrt((x - pos_x) ** 2 + (y - pos_y) ** 2)
+            if distance < min_distance:
+                valid_position = False
+                break
+
+        # If position is valid (meets minimum distance), return it
+        if valid_position:
+            return x, y
+
+    # Fallback: If we couldn't find a valid position after max attempts,
+    # try to place it at the furthest point from all existing positions
+    if existing_positions:
+        # Find position furthest from all existing positions
+        best_position = None
+        best_min_distance = -1
+
+        # Try a grid of positions
+        grid_size = 20
+        for grid_x in np.linspace(boundary_margin, width - boundary_margin, grid_size):
+            for grid_y in np.linspace(
+                boundary_margin, height - boundary_margin, grid_size
+            ):
+                min_dist_to_existing = float("inf")
+                for pos_x, pos_y in existing_positions:
+                    dist = np.sqrt((grid_x - pos_x) ** 2 + (grid_y - pos_y) ** 2)
+                    min_dist_to_existing = min(min_dist_to_existing, dist)
+
+                if min_dist_to_existing > best_min_distance:
+                    best_min_distance = min_dist_to_existing
+                    best_position = (grid_x, grid_y)
+
+        return best_position
+
+    # If there are no existing positions or we couldn't find a better position,
+    # just return a random position within bounds
+    x = np.random.uniform(boundary_margin, width - boundary_margin)
+    y = np.random.uniform(boundary_margin, height - boundary_margin)
+    return x, y

@@ -19,17 +19,86 @@ from learning.environments.box2d_salp.utils import (
     UnionFind,
     BoundaryContactListener,
     get_scatter_positions,
+    position_target_area,
 )
+
+
+class TargetArea:
+    def __init__(
+        self,
+        x,
+        y,
+        radius,
+        coupling_requirement,
+        reward_scale=1.0,
+        color=(100, 200, 100, 128),
+    ):
+        self.x = x  # Center x-coordinate
+        self.y = y  # Center y-coordinate
+        self.radius = radius  # Area of influence
+        self.coupling_requirement = (
+            coupling_requirement  # Minimum connected agents required
+        )
+        self.reward_scale = reward_scale  # Reward scaling factor
+        self.color = color  # Semi-transparent green by default
+
+    def calculate_reward(self, agents, union_find):
+        """Calculate reward based on proximity to center if coupling requirement is met"""
+        # Find agents within this target area
+        agents_in_area = []
+        for i, agent in enumerate(agents):
+            dist = np.sqrt(
+                (agent.position.x - self.x) ** 2 + (agent.position.y - self.y) ** 2
+            )
+            if dist <= self.radius:
+                agents_in_area.append(i)
+
+        if len(agents_in_area) < self.coupling_requirement:
+            return 0.0  # Not enough agents to meet requirement
+
+        # Group agents by their connected component using union_find
+        component_map = {}
+        for idx in agents_in_area:
+            root = union_find.find(idx)
+            if root not in component_map:
+                component_map[root] = []
+            component_map[root].append(idx)
+
+        # Check if any component meets the coupling requirement
+        qualifying_agents = []
+        for component in component_map.values():
+            if len(component) >= self.coupling_requirement:
+                qualifying_agents.extend(component)
+
+        if not qualifying_agents:
+            return 0.0  # No component meets requirement
+
+        # Calculate reward based on proximity
+        total_reward = 0.0
+        for i in qualifying_agents:
+            agent = agents[i]
+            dist = np.sqrt(
+                (agent.position.x - self.x) ** 2 + (agent.position.y - self.y) ** 2
+            )
+            # Reward decreases with distance (1.0 at center, 0.0 at radius)
+            normalized_dist = 1.0 - (dist / self.radius)
+            total_reward += normalized_dist
+
+        return total_reward * self.reward_scale
 
 
 class SalpChainEnv(gym.Env):
     metadata = {"render_modes": ["human"], "render_fps": 30}
 
-    def __init__(self, render_mode=None, n_agents=6):
+    def __init__(self, render_mode=None, n_agents=6, n_target_areas=5):
         super().__init__()
 
         self.n_agents = n_agents
         self.render_mode = render_mode
+
+        # Add target areas parameters
+        self.n_target_areas = n_target_areas
+        self.target_areas = []
 
         # Add joint limit parameter
         self.max_joints_per_agent = 2
@@ -50,7 +119,7 @@ class SalpChainEnv(gym.Env):
         )
 
         self.observation_space = spaces.Box(
-            low=-np.inf, high=np.inf, shape=(self.n_agents, 16), dtype=np.float32
+            low=-np.inf, high=np.inf, shape=(self.n_agents, 20), dtype=np.float32
         )
 
         self.world = b2World(gravity=(0, 0))
@@ -65,15 +134,18 @@ class SalpChainEnv(gym.Env):
         self.world.contactListener = self.contact_listener
 
         # Boundary parameters (customize as needed)
-        self.world_width = 40
-        self.world_height = 30
+        self.world_width = 80
+        self.world_height = 60
         self.boundary_thickness = 0.5
 
         # Pygame rendering setup
         self.screen = None
         self.clock = None
-        self.screen_size = (800, 600)
+        self.screen_size = (1600, 1200)
         self.scale = 20.0  # Pixels per Box2D meter
+
+        # Create target areas
+        self._create_target_areas()
 
         # Create boundary and agents
         self._create_boundary(
@@ -89,7 +161,7 @@ class SalpChainEnv(gym.Env):
         self.max_joints_per_agent = 2
 
         # Add sector sensing threshold
-        self.sector_sensor_radius = 5.0
+        self.sector_sensor_radius = 10.0
 
         # Add parameters for nearest neighbor detection
         self.neighbor_detection_range = 3.0  # Maximum range to detect neighbors
@@ -117,6 +189,34 @@ class SalpChainEnv(gym.Env):
             idx_a = self.agents.index(joint.bodyA)
             idx_b = self.agents.index(joint.bodyB)
             self.union_find.union(idx_a, idx_b)
+
+    def _create_target_areas(self):
+        """Create target areas at random positions in the environment"""
+        self.target_areas = []
+
+        for _ in range(self.n_target_areas):
+            # Get position using the new method
+            x, y = position_target_area(self.world_width, self.world_height)
+
+            # Random radius between 2 and 4
+            radius = np.random.uniform(2.0, 4.0)
+
+            # Random coupling requirement between 2 and min(5, n_agents)
+            coupling_req = np.random.randint(2, self.n_agents + 1)
+
+            # Set reward scale based on coupling requirement
+            reward_scale = 1.0 * coupling_req
+
+            # Random color (semi-transparent)
+            color = (
+                np.random.randint(50, 200),  # R
+                np.random.randint(50, 200),  # G
+                np.random.randint(50, 200),  # B
+                128,  # Alpha (semi-transparent)
+            )
+
+            target_area = TargetArea(x, y, radius, coupling_req, reward_scale, color)
+            self.target_areas.append(target_area)
 
     def _create_agents(self, positions):
         for i in range(self.n_agents):
@@ -457,23 +557,7 @@ class SalpChainEnv(gym.Env):
         ]
         pygame.draw.polygon(self.screen, color, arrow_points)
 
-    def _draw_neighbor_detection_ranges(self):
-        """Draw detection ranges for debugging"""
-        for idx, body in enumerate(self.agents):
-            center_x = body.position.x * self.scale
-            center_y = self.screen_size[1] - body.position.y * self.scale
-            radius = self.neighbor_detection_range * self.scale
-
-            # Draw detection range circle (semi-transparent)
-            pygame.draw.circle(
-                self.screen,
-                (200, 200, 200, 50),  # Light gray with transparency
-                (int(center_x), int(center_y)),
-                int(radius),
-                1,  # Thin outline
-            )
-
-    def _draw_density_sensors(self):
+    def _draw_density_sensors(self, normalization_value=10):
         """Draw density sensors for each agent as sector outlines with text values"""
         # Initialize font if not already done
         if not hasattr(self, "sensor_font"):
@@ -485,8 +569,11 @@ class SalpChainEnv(gym.Env):
             center_x = agent.position.x * self.scale
             center_y = self.screen_size[1] - agent.position.y * self.scale
 
-            # Get sensor values
-            densities = self._calculate_density_sensors(idx, self.sector_sensor_radius)
+            # Get sensor values - now returns 8 values (4 agent densities + 4 target densities)
+            sensors = self._calculate_density_sensors(idx, self.sector_sensor_radius)
+            agent_densities = sensors[:4]
+            target_densities = sensors[4:]
+
             sensor_radius = 5.0 * self.scale  # Radius of detection circle
 
             # Define sector angles
@@ -499,11 +586,23 @@ class SalpChainEnv(gym.Env):
 
             # Draw each sector outline
             for sector, (start_angle, end_angle) in enumerate(sector_angles):
-                # Line thickness based on density (thicker = higher density)
-                density = min(densities[sector], 3.0) / 3.0  # Normalize to 0-1
-                line_thickness = max(1, int(1 + 3 * density))  # 1-4 pixels thick
+                # Agent density (blue lines)
+                agent_density = (
+                    min(agent_densities[sector], normalization_value)
+                    / normalization_value
+                )  # Normalize to 0-1
+                agent_thickness = max(1, int(1 + 3 * agent_density))  # 1-4 pixels thick
 
-                # Calculate arc points to draw lines from center to arc edges
+                # Target density (green lines)
+                target_density = (
+                    min(target_densities[sector], normalization_value)
+                    / normalization_value
+                )  # Normalize to 0-1
+                target_thickness = max(
+                    1, int(1 + 3 * target_density)
+                )  # 1-4 pixels thick
+
+                # Calculate arc points
                 start_rad = math.radians(start_angle)
                 end_rad = math.radians(end_angle)
 
@@ -515,27 +614,46 @@ class SalpChainEnv(gym.Env):
                 end_x = center_x + sensor_radius * math.cos(end_rad)
                 end_y = center_y - sensor_radius * math.sin(end_rad)
 
-                # Draw lines from center to arc edges
+                # Draw agent density lines (blue)
                 pygame.draw.line(
                     self.screen,
-                    (0, 0, 255),  # Blue color
+                    (0, 0, 255),  # Blue color for agent density
                     (int(center_x), int(center_y)),
                     (int(start_x), int(start_y)),
-                    line_thickness,
+                    agent_thickness,
                 )
 
                 pygame.draw.line(
                     self.screen,
-                    (0, 0, 255),  # Blue color
+                    (0, 0, 255),  # Blue color for agent density
                     (int(center_x), int(center_y)),
                     (int(end_x), int(end_y)),
-                    line_thickness,
+                    agent_thickness,
                 )
 
-                # Draw the arc connecting the two points
+                # Draw target density lines (green, slightly offset)
+                if target_thickness > 1:  # Only draw if significant target density
+                    offset = 3  # Small offset for visibility
+                    pygame.draw.line(
+                        self.screen,
+                        (0, 200, 0),  # Green color for target density
+                        (int(center_x), int(center_y)),
+                        (int(start_x) + offset, int(start_y) + offset),
+                        target_thickness,
+                    )
+
+                    pygame.draw.line(
+                        self.screen,
+                        (0, 200, 0),  # Green color for target density
+                        (int(center_x), int(center_y)),
+                        (int(end_x) + offset, int(end_y) + offset),
+                        target_thickness,
+                    )
+
+                # Draw the arc connecting the two points (for agent density)
                 pygame.draw.arc(
                     self.screen,
-                    (0, 0, 255),  # Blue color
+                    (0, 0, 255),  # Blue color for agent density
                     pygame.Rect(
                         int(center_x - sensor_radius),
                         int(center_y - sensor_radius),
@@ -544,7 +662,7 @@ class SalpChainEnv(gym.Env):
                     ),
                     start_rad,
                     end_rad,
-                    line_thickness,  # Line width based on density
+                    agent_thickness,
                 )
 
                 # Calculate text position at the middle of the sector
@@ -555,18 +673,70 @@ class SalpChainEnv(gym.Env):
                 text_x = center_x + text_distance * math.cos(mid_angle)
                 text_y = center_y - text_distance * math.sin(mid_angle)
 
-                # Format the density value (2 decimal places)
-                density_text = f"{densities[sector]:.2f}"
+                # Format the density values (2 decimal places)
+                density_text = (
+                    f"A:{agent_densities[sector]:.1f}\nT:{target_densities[sector]:.1f}"
+                )
 
                 # Render the text
                 text_surface = self.sensor_font.render(density_text, True, (0, 0, 0))
                 text_rect = text_surface.get_rect(center=(int(text_x), int(text_y)))
 
                 # Draw text with white background for better visibility
-                pygame.draw.rect(
-                    self.screen, (255, 255, 255, 180), text_rect.inflate(4, 4)
-                )
+                # pygame.draw.rect(
+                #     self.screen, (255, 255, 255, 180), text_rect.inflate(4, 4)
+                # )
+
                 self.screen.blit(text_surface, text_rect)
+
+    def _draw_target_areas(self):
+        """Draw target areas with their coupling requirements"""
+        if not hasattr(self, "target_font"):
+            pygame.font.init()
+            self.target_font = pygame.font.SysFont("Arial", 14)
+
+        for area in self.target_areas:
+            # Draw the area as a semi-transparent circle
+            area_rect = pygame.Rect(
+                (area.x - area.radius) * self.scale,
+                self.screen_size[1] - (area.y + area.radius) * self.scale,
+                area.radius * 2 * self.scale,
+                area.radius * 2 * self.scale,
+            )
+
+            # Create a surface for the semi-transparent circle
+            circle_surface = pygame.Surface(
+                (int(area.radius * 2 * self.scale), int(area.radius * 2 * self.scale)),
+                pygame.SRCALPHA,
+            )
+            pygame.draw.circle(
+                circle_surface,
+                area.color,
+                (int(area.radius * self.scale), int(area.radius * self.scale)),
+                int(area.radius * self.scale),
+            )
+
+            # Draw the circle
+            self.screen.blit(circle_surface, area_rect)
+
+            # Draw the coupling requirement text
+            req_text = f"Req: {area.coupling_requirement}"
+            text_surface = self.target_font.render(req_text, True, (0, 0, 0))
+            text_rect = text_surface.get_rect(
+                center=(area.x * self.scale, self.screen_size[1] - area.y * self.scale)
+            )
+            self.screen.blit(text_surface, text_rect)
+
+            # Draw a small indicator of reward scale
+            scale_text = f"x{area.reward_scale:.1f}"
+            scale_surface = self.target_font.render(scale_text, True, (0, 0, 0))
+            scale_rect = scale_surface.get_rect(
+                center=(
+                    area.x * self.scale,
+                    self.screen_size[1] - area.y * self.scale + 20,
+                )
+            )
+            self.screen.blit(scale_surface, scale_rect)
 
     def _get_nearest_non_connected_agent_relative(self, agent_idx, all_states):
         """
@@ -707,6 +877,32 @@ class SalpChainEnv(gym.Env):
 
         return reward, terminated
 
+    def _get_target_rewards(self):
+        """Calculate combined rewards from chain size and target areas"""
+        # Calculate target area rewards
+        target_rewards = 0.0
+
+        # Default to false if there are no targets
+        if not self.target_areas:
+            return 0.0, False
+
+        # Check if all targets have their coupling requirements met
+        all_couplings_met = True
+
+        for target_area in self.target_areas:
+            # Calculate reward for this target area
+            reward = target_area.calculate_reward(self.agents, self.union_find)
+            target_rewards += reward
+
+            # A target with zero reward means its coupling requirement wasn't met
+            if reward <= 0:
+                all_couplings_met = False
+
+        # Set terminated based on whether all couplings are met
+        terminated = all_couplings_met
+
+        return target_rewards, terminated
+
     def _find_largest_connected_component(self):
         """
         Find the size of the largest connected component using graph traversal
@@ -760,18 +956,17 @@ class SalpChainEnv(gym.Env):
 
     def _calculate_density_sensors(self, agent_idx, sensor_radius):
         """
-        Calculate density of agents in four sectors around an agent.
-        Returns a vector of 4 values representing density in each sector:
-        [top-right, top-left, bottom-left, bottom-right]
-
-        Ignores agents that are connected to this agent via joints.
+        Calculate density of agents and targets in four sectors around an agent.
+        Returns a vector of 8 values:
+        - First 4 values: agent density in [top-right, top-left, bottom-left, bottom-right]
+        - Last 4 values: target density in [top-right, top-left, bottom-left, bottom-right]
 
         Args:
             agent_idx: Index of the agent to calculate sensors for
             sensor_radius: Radius of the detection circle
 
         Returns:
-            numpy array: 4-element vector with density values for each sector
+            numpy array: 8-element vector with density values for each sector
         """
         agent_pos = np.array(
             [self.agents[agent_idx].position.x, self.agents[agent_idx].position.y]
@@ -781,17 +976,18 @@ class SalpChainEnv(gym.Env):
         self._update_union_find()
 
         # Find the root component of the current agent
-        agent_component = self.union_find.find(agent_idx)
+        _ = self.union_find.find(agent_idx)
 
-        # Initialize densities for the 4 sectors
-        densities = np.zeros(4, dtype=np.float32)
+        # Initialize densities for the 4 sectors (for both agents and targets)
+        agent_densities = np.zeros(4, dtype=np.float32)
+        target_densities = np.zeros(4, dtype=np.float32)
 
         # Check each other agent
         for other_idx, other_agent in enumerate(self.agents):
             if other_idx == agent_idx:
                 continue  # Skip self
 
-            # Skip connected agents using UnionFind (much more efficient)
+            # Skip connected agents using UnionFind
             if self.union_find.connected(agent_idx, other_idx):
                 continue
 
@@ -822,9 +1018,43 @@ class SalpChainEnv(gym.Env):
             density_value = 1.0 / (distance * distance + 0.1)
 
             # Add to appropriate sector
-            densities[sector] += density_value
+            agent_densities[sector] += density_value
 
-        return densities
+        # Check each target area
+        for target in self.target_areas:
+            target_pos = np.array([target.x, target.y])
+            relative_pos = target_pos - agent_pos
+
+            # Calculate distance
+            distance = np.linalg.norm(relative_pos)
+
+            # Skip if outside sensor radius
+            if distance > sensor_radius:
+                continue
+
+            # Determine sector (0: top-right, 1: top-left, 2: bottom-left, 3: bottom-right)
+            sector = 0
+            if relative_pos[0] < 0:  # Left side
+                if relative_pos[1] >= 0:  # Top-left
+                    sector = 1
+                else:  # Bottom-left
+                    sector = 2
+            else:  # Right side
+                if relative_pos[1] < 0:  # Bottom-right
+                    sector = 3
+                # else it's already sector 0 (top-right)
+
+            # Calculate target density contribution, weighted by reward scale and coupling requirement
+            # This makes more valuable targets (higher reward scale) provide stronger signals
+            # and targets with higher coupling requirements also provide stronger signals
+            weight = target.reward_scale
+            density_value = weight * (1.0 / (distance * distance + 0.1))
+
+            # Add to appropriate sector
+            target_densities[sector] += density_value
+
+        # Combine agent and target densities
+        return np.concatenate([agent_densities, target_densities])
 
     def _process_detachments(self, detach_threshold=0.90):
         """Check for agents that want to detach from their connections"""
@@ -854,6 +1084,9 @@ class SalpChainEnv(gym.Env):
             self.world.DestroyBody(body)
 
         self._create_chain()
+
+        # Recreate target areas with new random positions
+        self._create_target_areas()
 
         # Reset link_openness to all open
         self.link_openness = np.ones(self.n_agents, dtype=np.int8)
@@ -907,7 +1140,7 @@ class SalpChainEnv(gym.Env):
             reward = -10.0  # Negative reward for boundary collision
         else:
             # The normal reward calculation
-            reward, terminated = self._get_chain_size_reward()
+            reward, terminated = self._get_target_rewards()
 
         # The observation
         obs = self._get_observation()
@@ -936,11 +1169,11 @@ class SalpChainEnv(gym.Env):
         # Draw boundary walls correctly positioned
         self._draw_boundary_walls()
 
+        # Draw target areas before or after drawing agents
+        self._draw_target_areas()
+
         # Draw agents
         self._render_agents_as_circles()
-
-        # Draw neighbor detection ranges (optional, for debugging)
-        # self._draw_neighbor_detection_ranges()
 
         self._draw_density_sensors()  # Add this before or after drawing agents
 

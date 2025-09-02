@@ -11,49 +11,24 @@ def biased_sample(env, zero_prob=1.0):
 
 
 env = SalpChainEnv(render_mode="human", n_agents=12)
-obs, _ = env.reset()
 
-for step in range(5000):
-    # if step < 100:
-    #     # Push agents in different directions with 2D forces
-    #     action = np.array(
-    #         [
-    #             [1.0, 0.5],  # Agent 0: right and up
-    #             [-0.5, 1.0],  # Agent 1: left and up
-    #             [0.0, -1.0],  # Agent 2: down only
-    #             [1.0, -0.5],  # Agent 3: right and down
-    #             [-1.0, 0.0],  # Agent 4: left only
-    #         ]
-    #     )
+for episodes in range(10):
+    obs, _ = env.reset()
+    for step in range(100):
 
-    # if step < 200:
-    #     # Circular motion pattern
-    #     t = (step - 100) * 0.1
-    #     action = np.array(
-    #         [
-    #             [np.cos(t + i * np.pi / 4), np.sin(t + i * np.pi / 4)]
-    #             for i in range(env.n_agents)
-    #         ]
-    #     )
+        action = {
+            "movement": np.random.uniform(-1, 1, size=(env.n_agents, 2)),
+            "link_openness": np.random.randint(0, 2, size=env.n_agents),
+            "detach": np.random.uniform(0, 1, size=env.n_agents),
+        }
 
-    # Random 2D actions
-    # action = env.action_space.sample()
+        obs, reward, terminated, truncated, info = env.step(action)
+        env.render()
 
-    # action = biased_sample(env)
+        print(f"Step={step}, Reward={reward}, Terminated={terminated}")
 
-    action = {
-        "movement": np.random.uniform(-1, 1, size=(env.n_agents, 2)),
-        "link_openness": np.random.randint(0, 2, size=env.n_agents),
-        "detach": np.random.uniform(0, 1, size=env.n_agents),
-    }
-
-    obs, reward, terminated, truncated, info = env.step(action)
-    env.render()
-
-    print(f"Step {step}: Reward = {reward}")
-
-    # if terminated == True:
-    #     print("TERMINATED")
-    #     break
+        # if terminated == True:
+        #     print("TERMINATED")
+        #     break
 
 env.close()
