@@ -90,7 +90,7 @@ class TargetArea:
 class SalpChainEnv(gym.Env):
     metadata = {"render_modes": ["human"], "render_fps": 30}
 
-    def __init__(self, render_mode=None, n_agents=6, n_target_areas=5):
+    def __init__(self, render_mode=None, n_agents=6, n_target_areas=4):
         super().__init__()
 
         self.n_agents = n_agents
@@ -135,13 +135,13 @@ class SalpChainEnv(gym.Env):
 
         # Boundary parameters (customize as needed)
         self.world_width = 80
-        self.world_height = 60
+        self.world_height = 80
         self.boundary_thickness = 0.5
 
         # Pygame rendering setup
         self.screen = None
         self.clock = None
-        self.screen_size = (1600, 1200)
+        self.screen_size = (1600, 1600)
         self.scale = 20.0  # Pixels per Box2D meter
 
         # Create target areas
@@ -161,7 +161,7 @@ class SalpChainEnv(gym.Env):
         self.max_joints_per_agent = 2
 
         # Add sector sensing threshold
-        self.sector_sensor_radius = 10.0
+        self.sector_sensor_radius = 20.0
 
         # Add parameters for nearest neighbor detection
         self.neighbor_detection_range = 3.0  # Maximum range to detect neighbors
@@ -195,14 +195,17 @@ class SalpChainEnv(gym.Env):
         self.target_areas = []
 
         for _ in range(self.n_target_areas):
+
             # Get position using the new method
             x, y = position_target_area(self.world_width, self.world_height)
 
             # Random radius between 2 and 4
-            radius = np.random.uniform(2.0, 4.0)
+            # radius = np.random.uniform(2.0, 4.0)
+            radius = 4.0
 
             # Random coupling requirement between 2 and min(5, n_agents)
-            coupling_req = np.random.randint(2, self.n_agents + 1)
+            # coupling_req = np.random.randint(2, self.n_agents - 1)
+            coupling_req = 4
 
             # Set reward scale based on coupling requirement
             reward_scale = 1.0 * coupling_req
@@ -574,7 +577,9 @@ class SalpChainEnv(gym.Env):
             agent_densities = sensors[:4]
             target_densities = sensors[4:]
 
-            sensor_radius = 5.0 * self.scale  # Radius of detection circle
+            sensor_radius = (
+                self.sector_sensor_radius * self.scale
+            )  # Radius of detection circle
 
             # Define sector angles
             sector_angles = [
@@ -675,7 +680,7 @@ class SalpChainEnv(gym.Env):
 
                 # Format the density values (2 decimal places)
                 density_text = (
-                    f"A:{agent_densities[sector]:.1f}\nT:{target_densities[sector]:.1f}"
+                    f"A:{agent_densities[sector]:.3f}|T:{target_densities[sector]:.3f}"
                 )
 
                 # Render the text
@@ -1018,7 +1023,7 @@ class SalpChainEnv(gym.Env):
             density_value = 1.0 / (distance * distance + 0.1)
 
             # Add to appropriate sector
-            agent_densities[sector] += density_value
+            agent_densities[sector] += density_value * 10
 
         # Check each target area
         for target in self.target_areas:
@@ -1051,7 +1056,7 @@ class SalpChainEnv(gym.Env):
             density_value = weight * (1.0 / (distance * distance + 0.1))
 
             # Add to appropriate sector
-            target_densities[sector] += density_value
+            target_densities[sector] += density_value * 10
 
         # Combine agent and target densities
         return np.concatenate([agent_densities, target_densities])
@@ -1152,7 +1157,23 @@ class SalpChainEnv(gym.Env):
         # Reset collision flag for next step
         self.contact_listener.reset()
 
-        return obs, reward, terminated, truncated, {}
+        # Create info dictionary with target positions
+        info = {
+            "target_positions": [
+                {
+                    "x": target.x,
+                    "y": target.y,
+                    "radius": target.radius,
+                    "requirement": target.coupling_requirement,
+                }
+                for target in self.target_areas
+            ],
+            "agent_positions": [
+                {"x": agent.position.x, "y": agent.position.y} for agent in self.agents
+            ],
+        }
+
+        return obs, reward, terminated, truncated, info
 
     def render(self):
         if self.render_mode != "human":

@@ -108,7 +108,7 @@ def get_linear_positions(n_agents):
     return positions
 
 
-def get_scatter_positions(world_width, world_height, n_agents, min_distance=0.5):
+def get_scatter_positions(world_width, world_height, n_agents, min_distance=3):
     """
     Generate random starting positions for all agents
 
@@ -121,7 +121,7 @@ def get_scatter_positions(world_width, world_height, n_agents, min_distance=0.5)
     positions = []
 
     # Define safe boundaries (away from walls)
-    margin = 12.0  # Distance from walls
+    margin = 20.0  # Distance from walls
     safe_x_min = margin
     safe_x_max = world_width - margin
     safe_y_min = margin
@@ -162,11 +162,16 @@ def get_scatter_positions(world_width, world_height, n_agents, min_distance=0.5)
 
 
 def position_target_area(
-    width, height, existing_positions=None, min_distance=8.0, max_attempts=100
+    width,
+    height,
+    existing_positions=None,
+    min_distance=15.0,
+    max_attempts=200,
+    min_center_radius=10.0,  # New parameter for minimum distance from center
 ):
     """
     Position a target area with direction-based offset from the world center,
-    ensuring minimum distance from existing targets.
+    ensuring minimum distance from existing targets and placement outside a central circle.
 
     Args:
         width (float): World width
@@ -174,6 +179,7 @@ def position_target_area(
         existing_positions (list): List of (x, y) tuples of existing target positions
         min_distance (float): Minimum distance required between target positions
         max_attempts (int): Maximum number of positioning attempts before falling back
+        min_center_radius (float): Minimum radius from world center where targets can be placed
 
     Returns:
         tuple: (x, y) coordinates for the target area
@@ -186,9 +192,9 @@ def position_target_area(
     center_x = width / 2
     center_y = height / 2
 
-    # Define bounding box dimensions (60% of world size)
-    box_width = width * 0.6
-    box_height = height * 0.6
+    # Define bounding box dimensions (80% of world size)
+    box_width = width * 0.9
+    box_height = height * 0.9
 
     # Calculate bounding box boundaries
     box_left = center_x - box_width / 2
@@ -197,8 +203,8 @@ def position_target_area(
     box_top = center_y + box_height / 2
 
     # Margin from edges
-    margin = 10
-    boundary_margin = 4.0
+    margin = 0
+    boundary_margin = 4
 
     for attempt in range(max_attempts):
         # Step 1: Generate random position within bounding box
@@ -209,22 +215,40 @@ def position_target_area(
         dir_x = x - center_x
         dir_y = y - center_y
 
-        # Step 3: Normalize direction vector (if not zero)
-        magnitude = np.sqrt(dir_x**2 + dir_y**2)
-        if magnitude > 0.001:  # Avoid division by zero
-            dir_x /= magnitude
-            dir_y /= magnitude
+        # Step 3: Calculate distance from center
+        dist_from_center = np.sqrt(dir_x**2 + dir_y**2)
 
-        # Step 4: Apply additional offset in same direction
-        offset_magnitude = 10
-        x = center_x + dir_x * (magnitude + offset_magnitude)
-        y = center_y + dir_y * (magnitude + offset_magnitude)
+        # Step 4: Normalize direction vector (if not zero)
+        if dist_from_center > 0.001:  # Avoid division by zero
+            dir_x /= dist_from_center
+            dir_y /= dist_from_center
 
-        # Step 5: Ensure the position stays within world bounds
+        # Step 5: Apply offset to ensure position is outside min_center_radius
+        # If already outside, add smaller offset; if inside, push outside
+        if dist_from_center < min_center_radius:
+            # Position is inside forbidden circle, push it outside
+            offset_magnitude = (
+                min_center_radius - dist_from_center + 5.0
+            )  # Extra offset for safety
+        else:
+            # Position is already outside, add smaller offset
+            offset_magnitude = 0.0
+
+        # Apply offset in direction from center
+        x = center_x + dir_x * (dist_from_center + offset_magnitude)
+        y = center_y + dir_y * (dist_from_center + offset_magnitude)
+
+        # Step 6: Ensure the position stays within world bounds
         x = np.clip(x, boundary_margin, width - boundary_margin)
         y = np.clip(y, boundary_margin, height - boundary_margin)
 
-        # Step 6: Check minimum distance from all existing target positions
+        # Step 7: Verify the position is still outside the central circle
+        # (clipping might have moved it back inside)
+        new_dist = np.sqrt((x - center_x) ** 2 + (y - center_y) ** 2)
+        if new_dist < min_center_radius:
+            continue  # Skip this position as it's inside the forbidden circle
+
+        # Step 8: Check minimum distance from all existing target positions
         valid_position = True
         for pos_x, pos_y in existing_positions:
             distance = np.sqrt((x - pos_x) ** 2 + (y - pos_y) ** 2)
@@ -232,36 +256,42 @@ def position_target_area(
                 valid_position = False
                 break
 
-        # If position is valid (meets minimum distance), return it
+        # If position is valid (meets minimum distance and outside center), return it
         if valid_position:
             return x, y
 
-    # Fallback: If we couldn't find a valid position after max attempts,
-    # try to place it at the furthest point from all existing positions
-    if existing_positions:
-        # Find position furthest from all existing positions
-        best_position = None
-        best_min_distance = -1
+    # Fallback strategy: if we can't find a valid position, try a systematic approach
+    # Use positions at different angles around the min_center_radius circle
+    angles = np.linspace(0, 2 * np.pi, max_attempts, endpoint=False)
+    np.random.shuffle(angles)  # Randomize the order for better spread
 
-        # Try a grid of positions
-        grid_size = 20
-        for grid_x in np.linspace(boundary_margin, width - boundary_margin, grid_size):
-            for grid_y in np.linspace(
-                boundary_margin, height - boundary_margin, grid_size
-            ):
-                min_dist_to_existing = float("inf")
-                for pos_x, pos_y in existing_positions:
-                    dist = np.sqrt((grid_x - pos_x) ** 2 + (grid_y - pos_y) ** 2)
-                    min_dist_to_existing = min(min_dist_to_existing, dist)
+    for angle in angles:
+        # Position on circle with min_center_radius + small offset
+        x = center_x + (min_center_radius + 2.0) * np.cos(angle)
+        y = center_y + (min_center_radius + 2.0) * np.sin(angle)
 
-                if min_dist_to_existing > best_min_distance:
-                    best_min_distance = min_dist_to_existing
-                    best_position = (grid_x, grid_y)
+        # Ensure within bounds
+        x = np.clip(x, boundary_margin, width - boundary_margin)
+        y = np.clip(y, boundary_margin, height - boundary_margin)
 
-        return best_position
+        # Check distance from existing targets
+        valid_position = True
+        for pos_x, pos_y in existing_positions:
+            distance = np.sqrt((x - pos_x) ** 2 + (y - pos_y) ** 2)
+            if distance < min_distance:
+                valid_position = False
+                break
 
-    # If there are no existing positions or we couldn't find a better position,
-    # just return a random position within bounds
-    x = np.random.uniform(boundary_margin, width - boundary_margin)
-    y = np.random.uniform(boundary_margin, height - boundary_margin)
+        if valid_position:
+            return x, y
+
+    # Final fallback: return position on circle at random angle
+    angle = np.random.uniform(0, 2 * np.pi)
+    x = center_x + (min_center_radius + 2.0) * np.cos(angle)
+    y = center_y + (min_center_radius + 2.0) * np.sin(angle)
+
+    # Final bounds check
+    x = np.clip(x, boundary_margin, width - boundary_margin)
+    y = np.clip(y, boundary_margin, height - boundary_margin)
+
     return x, y

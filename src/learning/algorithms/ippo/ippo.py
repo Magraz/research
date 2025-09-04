@@ -1,8 +1,8 @@
 import torch
 import torch.optim as optim
 import torch.nn.functional as F
-import numpy as np
 from torch.utils.data import DataLoader, TensorDataset
+import numpy as np
 
 from learning.algorithms.ippo.network import PPONetwork
 
@@ -11,8 +11,8 @@ class PPOAgent:
     def __init__(
         self,
         state_dim,
-        action_dim=None,  # Make optional
-        action_space=None,  # Add action_space parameter
+        action_dim=None,
+        action_space=None,
         lr=3e-4,
         gamma=0.99,
         gae_lambda=0.95,
@@ -29,99 +29,120 @@ class PPOAgent:
         self.entropy_coef = entropy_coef
         self.device = device
 
-        # Handle both Dict action spaces and regular action spaces
+        # Initialize network
         if action_space is not None:
             self.action_space = action_space
-            # For Dict action spaces
             self.network = PPONetwork(state_dim, action_space).to(device)
         else:
-            # For legacy Box action spaces
             self.action_dim = action_dim
             self.network = PPONetwork(state_dim, action_dim).to(device)
 
         self.optimizer = optim.Adam(self.network.parameters(), lr=lr)
 
-        # Storage for trajectory data
+        # Initialize buffer with empty tensors lists
         self.reset_buffer()
 
     def reset_buffer(self):
+        """Reset the agent's buffer with empty lists to store tensors"""
         self.states = []
         self.actions = []
         self.rewards = []
         self.log_probs = []
         self.values = []
         self.dones = []
+        # This will be determined when the first action is stored
+        self.is_dict_action = None
 
     def get_action(self, state, deterministic=False):
-        """
-        Get action from the policy with optional deterministic behavior.
-
-        Args:
-            state: The current state
-            deterministic: If True, use mean action without sampling
-
-        Returns:
-            action, log_prob, value
-        """
+        """Get action from policy while minimizing tensor conversions"""
         with torch.no_grad():
-            state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
-
-            # Check if we have a dict action space
-            if hasattr(self, "action_space") and hasattr(self.action_space, "spaces"):
-                # For Dict action spaces, use the network's get_action method
-                # which should have a deterministic parameter
-                return self.network.get_action(
-                    state_tensor, deterministic=deterministic
-                )
+            # Convert state to tensor if needed
+            if not torch.is_tensor(state):
+                state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
             else:
-                # For simple action spaces
-                action_mean, action_log_std, value = self.network(state_tensor)
+                # If already tensor, ensure it has batch dimension and is on right device
+                state_tensor = (
+                    state.unsqueeze(0).to(self.device)
+                    if state.dim() == 1
+                    else state.to(self.device)
+                )
 
-                # Use mean action directly if deterministic
-                if deterministic:
-                    action = torch.tanh(action_mean)
-                else:
-                    action_std = torch.exp(action_log_std)
-                    normal = torch.distributions.Normal(action_mean, action_std)
-                    action = torch.tanh(normal.sample())
+            # Get action, log_prob and value from network
+            action, log_prob, value = self.network.get_action(
+                state_tensor, deterministic
+            )
 
-                # Calculate log probability
-                log_prob = self._calculate_log_prob(action_mean, action_log_std, action)
-
-                # Convert to numpy
-                if isinstance(action, dict):
-                    # Handle dict actions
-                    numpy_action = {}
-                    for key, tensor in action.items():
-                        numpy_action[key] = tensor.cpu().numpy()[0]
-                    return numpy_action, log_prob.cpu().item(), value.cpu().item()
-                else:
-                    # Handle tensor actions
-                    return (
-                        action.cpu().numpy()[0],
-                        log_prob.cpu().item(),
-                        value.cpu().item(),
-                    )
+            # For environment interaction, convert to numpy
+            if isinstance(action, dict):
+                # Handle dictionary actions
+                numpy_action = {}
+                for key, tensor in action.items():
+                    numpy_action[key] = tensor.cpu().numpy()[0]
+                return numpy_action, log_prob.cpu().item(), value.cpu().item()
+            else:
+                # Handle regular actions
+                return (
+                    action.cpu().numpy()[0],
+                    log_prob.cpu().item(),
+                    value.cpu().item(),
+                )
 
     def store_transition(self, state, action, reward, log_prob, value, done):
-        self.states.append(state)
-        self.actions.append(action)
-        self.rewards.append(reward)
-        self.log_probs.append(log_prob)
-        self.values.append(value)
-        self.dones.append(done)
+        """Store transition in buffer, converting to tensors if needed"""
+        # Convert state to tensor and store
+        if not torch.is_tensor(state):
+            self.states.append(torch.FloatTensor(state).to(self.device))
+        else:
+            self.states.append(state.to(self.device))
+
+        # Handle action based on type (first determine action type if not yet set)
+        if self.is_dict_action is None:
+            self.is_dict_action = isinstance(action, dict)
+
+        if self.is_dict_action:
+            # Convert dict action components to tensors
+            action_dict = {}
+            for key, val in action.items():
+                if not torch.is_tensor(val):
+                    action_dict[key] = (
+                        torch.FloatTensor([val]).to(self.device)
+                        if np.isscalar(val)
+                        else torch.FloatTensor(val).to(self.device)
+                    )
+                else:
+                    action_dict[key] = val.to(self.device)
+            self.actions.append(action_dict)
+        else:
+            # Convert regular action to tensor
+            if not torch.is_tensor(action):
+                self.actions.append(torch.FloatTensor(action).to(self.device))
+            else:
+                self.actions.append(action.to(self.device))
+
+        # Store other transition components as tensors
+        self.rewards.append(torch.tensor(reward, dtype=torch.float32).to(self.device))
+        self.log_probs.append(
+            torch.tensor(log_prob, dtype=torch.float32).to(self.device)
+        )
+        self.values.append(torch.tensor(value, dtype=torch.float32).to(self.device))
+        self.dones.append(torch.tensor(done, dtype=torch.float32).to(self.device))
 
     def compute_returns_and_advantages(self, next_value=0):
-        returns = []
-        advantages = []
+        """Compute returns and advantages using all tensor operations"""
+        # Convert next_value to tensor if needed
+        if not torch.is_tensor(next_value):
+            next_value = torch.tensor(next_value, dtype=torch.float32).to(self.device)
 
-        # Convert to numpy arrays
-        rewards = np.array(self.rewards)
-        values = np.array(self.values + [next_value])
-        dones = np.array(self.dones + [False])
+        # Process all data as tensors
+        rewards = torch.stack(self.rewards)
+        values = torch.cat([torch.stack(self.values), next_value.unsqueeze(0)])
+        dones = torch.cat([torch.stack(self.dones), torch.zeros(1, device=self.device)])
 
-        # Compute advantages using GAE
-        gae = 0
+        # Initialize advantages tensor
+        advantages = torch.zeros_like(rewards)
+
+        # Compute GAE
+        gae = torch.tensor(0.0, device=self.device)
         for step in reversed(range(len(rewards))):
             delta = (
                 rewards[step]
@@ -129,103 +150,93 @@ class PPOAgent:
                 - values[step]
             )
             gae = delta + self.gamma * self.gae_lambda * (1 - dones[step]) * gae
-            advantages.insert(0, gae)
+            advantages[step] = gae
 
-        # Compute returns
-        returns = [adv + val for adv, val in zip(advantages, self.values)]
+        # Compute returns (properly using tensor operations)
+        returns = advantages + values[:-1]
 
-        return np.array(returns), np.array(advantages)
+        return returns, advantages
 
     def update(self, next_value=0, epochs=10, batch_size=64):
+        """Update policy with minimal tensor-numpy conversions"""
         if len(self.states) == 0:
             return {}
 
-        # Compute returns and advantages
+        # Compute returns and advantages using tensor operations
         returns, advantages = self.compute_returns_and_advantages(next_value)
 
         # Normalize advantages
         advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
-        # Convert to tensors
-        states = torch.FloatTensor(np.array(self.states)).to(self.device)
-        old_log_probs = torch.FloatTensor(self.log_probs).to(self.device)
-        returns = torch.FloatTensor(returns).to(self.device)
-        advantages = torch.FloatTensor(advantages).to(self.device)
+        # Stack states
+        states = torch.stack(self.states)
+        old_log_probs = torch.stack(self.log_probs)
 
-        # Check if we're dealing with Dict actions
-        is_dict_action = isinstance(self.actions[0], dict)
+        # Handle different action types
+        if self.is_dict_action:
+            # For dict actions, create separate tensors for each action component
+            action_tensors = {}
+            for key in self.actions[0].keys():
+                # Stack tensors for each component
+                try:
+                    action_tensors[key] = torch.stack([a[key] for a in self.actions])
+                except:
+                    # If shapes don't match (e.g., some actions have different dimensions)
+                    # Process them individually
+                    component_tensors = []
+                    for a in self.actions:
+                        if a[key].dim() == 0:  # If scalar
+                            component_tensors.append(a[key].unsqueeze(0))
+                        else:
+                            component_tensors.append(a[key])
+                    action_tensors[key] = torch.stack(component_tensors)
 
-        if is_dict_action:
-            # Handle dictionary actions
-            movement = torch.FloatTensor(
-                np.array([a["movement"] for a in self.actions])
-            ).to(self.device)
-            link_openness = torch.FloatTensor(
-                np.array([a["link_openness"] for a in self.actions])
-            ).to(self.device)
-            detach = torch.FloatTensor(
-                np.array([a["detach"] for a in self.actions])
-            ).to(self.device)
+            # Create dataset with all components
+            dataset_tensors = [states, old_log_probs, returns, advantages]
+            for key in action_tensors:
+                dataset_tensors.insert(1, action_tensors[key])  # Insert after states
 
-            # Create a dataset that includes all tensor components
-            dataset = TensorDataset(
-                states,
-                movement,
-                link_openness,
-                detach,
-                old_log_probs,
-                returns,
-                advantages,
-            )
+            dataset = TensorDataset(*dataset_tensors)
+
         else:
-            # Legacy handling for simple actions
-            actions = torch.FloatTensor(np.array(self.actions)).to(self.device)
+            # For regular actions, simply stack them
+            actions = torch.stack(self.actions)
             dataset = TensorDataset(states, actions, old_log_probs, returns, advantages)
 
         dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
         # Training statistics
-        total_loss = 0
-        policy_loss_total = 0
-        value_loss_total = 0
-        entropy_loss_total = 0
+        stats = {"total_loss": 0, "policy_loss": 0, "value_loss": 0, "entropy_loss": 0}
 
         # Multiple epochs of optimization
         for epoch in range(epochs):
-            for batch_data in dataloader:
-                if is_dict_action:
-                    (
-                        batch_states,
-                        batch_movement,
-                        batch_link_openness,
-                        batch_detach,
-                        batch_old_log_probs,
-                        batch_returns,
-                        batch_advantages,
-                    ) = batch_data
+            for batch in dataloader:
+                # Process batch based on action type
+                if self.is_dict_action:
+                    batch_states = batch[0]
+                    batch_old_log_probs = batch[-3]
+                    batch_returns = batch[-2]
+                    batch_advantages = batch[-1]
 
-                    # Reconstruct the dictionary action
-                    batch_actions = {
-                        "movement": batch_movement,
-                        "link_openness": batch_link_openness,
-                        "detach": batch_detach,
-                    }
+                    # Extract action components from batch
+                    batch_actions = {}
+                    for i, key in enumerate(action_tensors.keys()):
+                        batch_actions[key] = batch[i + 1]  # +1 because states is first
                 else:
-                    # Legacy unpacking
                     (
                         batch_states,
                         batch_actions,
                         batch_old_log_probs,
                         batch_returns,
                         batch_advantages,
-                    ) = batch_data
+                    ) = batch
 
                 # Forward pass
                 log_probs, values, entropy = self.network.evaluate_action(
                     batch_states, batch_actions
                 )
 
-                # The rest of the training loop remains unchanged
+                # PPO objective
                 ratio = torch.exp(log_probs - batch_old_log_probs)
                 surr1 = ratio * batch_advantages
                 surr2 = (
@@ -235,9 +246,9 @@ class PPOAgent:
                 policy_loss = -torch.min(surr1, surr2).mean()
 
                 # Value loss
-                value_loss = F.mse_loss(values.reshape(-1), batch_returns)
+                value_loss = F.mse_loss(values.squeeze(-1), batch_returns)
 
-                # Entropy loss (for exploration)
+                # Entropy loss for exploration
                 entropy_loss = -entropy.mean()
 
                 # Total loss
@@ -247,25 +258,24 @@ class PPOAgent:
                     + self.entropy_coef * entropy_loss
                 )
 
-                # Backward pass
+                # Optimize
                 self.optimizer.zero_grad()
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(self.network.parameters(), 0.5)
                 self.optimizer.step()
 
-                # Accumulate losses
-                total_loss += loss.item()
-                policy_loss_total += policy_loss.item()
-                value_loss_total += value_loss.item()
-                entropy_loss_total += entropy_loss.item()
+                # Update statistics
+                stats["total_loss"] += loss.item()
+                stats["policy_loss"] += policy_loss.item()
+                stats["value_loss"] += value_loss.item()
+                stats["entropy_loss"] += entropy_loss.item()
 
-        # Reset storage
+        # Reset buffer after update
         self.reset_buffer()
 
+        # Normalize statistics by number of updates
         num_updates = epochs * len(dataloader)
-        return {
-            "total_loss": total_loss / num_updates,
-            "policy_loss": policy_loss_total / num_updates,
-            "value_loss": value_loss_total / num_updates,
-            "entropy_loss": entropy_loss_total / num_updates,
-        }
+        for key in stats:
+            stats[key] /= max(1, num_updates)
+
+        return stats

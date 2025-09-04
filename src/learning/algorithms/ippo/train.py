@@ -13,7 +13,8 @@ def train(
     checkpoint: bool = False,
 ):
     # Device configuration
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = "cpu"
     print(f"Using device: {device}")
 
     # Environment configuration
