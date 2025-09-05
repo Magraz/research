@@ -1,4 +1,4 @@
-from learning.algorithms.ppo.types import Experiment, Params
+from learning.algorithms.ippo.types import Experiment, Params
 from learning.environments.types import EnvironmentEnum
 
 from dataclasses import asdict
@@ -28,8 +28,7 @@ for experiment_name in EXPERIMENTS_LIST:
             lmbda=0.95,
             ent_coef=1e-3,
             std_coef=0.0,
-            lr_actor=5e-5,
-            lr_critic=5e-5,
+            lr=5e-5,
             random_seeds=[118, 1234, 8764, 3486, 2487, 5439, 6584, 7894, 523, 69],
         ),
     )

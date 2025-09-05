@@ -51,10 +51,11 @@ class IPPOTrainer:
         self.episode_lengths = []
         self.training_stats = defaultdict(list)
 
-    def collect_trajectory(self, max_steps=1000):
+    def collect_trajectory(self, max_steps):
         obs, _ = self.env.reset()
         total_reward = 0
         step_count = 0
+        episode_count = 0
 
         for step in range(max_steps):
             # Get actions from all agents
@@ -100,6 +101,7 @@ class IPPOTrainer:
             if terminated or truncated:
                 # Get new observations from reset
                 obs, _ = self.env.reset()
+                episode_count += 1
 
                 # Note: We've already stored the transition with done=True
                 # So the agents will know where episodes end for return calculation
@@ -110,32 +112,9 @@ class IPPOTrainer:
             _, _, final_value = agent.get_action(obs[i])
             final_values.append(final_value)
 
-        return total_reward, step_count, final_values
+        return total_reward, step_count, episode_count, final_values
 
-    def train_episode(self):
-        # Collect trajectory
-        episode_reward, episode_length, final_values = self.collect_trajectory()
-
-        # Update all agents
-        update_stats = {}
-        for i, (agent, final_value) in enumerate(zip(self.agents, final_values)):
-            stats = agent.update(next_value=final_value)
-            for key, value in stats.items():
-                if f"agent_{i}_{key}" not in update_stats:
-                    update_stats[f"agent_{i}_{key}"] = []
-                update_stats[f"agent_{i}_{key}"].append(value)
-
-        # Store episode statistics
-        self.episode_rewards.append(episode_reward)
-        self.episode_lengths.append(episode_length)
-
-        # Store training statistics
-        for key, values in update_stats.items():
-            self.training_stats[key].extend(values)
-
-        return episode_reward, episode_length
-
-    def train(self, total_steps=1000000, log_every=1000):
+    def train(self, total_steps, batch_size, log_every=1000):
         """
         Train agents for a specific number of environment steps.
 
@@ -152,17 +131,14 @@ class IPPOTrainer:
         self.training_stats["reward"] = []
         self.training_stats["episodes"] = []
 
-        # Set a reasonable trajectory collection length
-        batch_size = 2560
-
         # Keep training until we reach the desired number of steps
         while steps_completed < total_steps:
             # Determine how many more steps to collect in this iteration
             steps_to_collect = min(batch_size, total_steps - steps_completed)
 
             # Collect trajectory for a fixed number of steps
-            episode_reward, step_count, final_values = self.collect_trajectory(
-                max_steps=steps_to_collect
+            total_rewards, step_count, episode_count, final_values = (
+                self.collect_trajectory(max_steps=steps_to_collect)
             )
 
             # Update all agents
@@ -176,27 +152,24 @@ class IPPOTrainer:
 
             # Update tracking variables
             steps_completed += step_count
-            episodes_completed += 1
+            episodes_completed += episode_count
 
             # Store training statistics
             for key, values in update_stats.items():
                 self.training_stats[key].extend(values)
 
             self.training_stats["total_steps"].append(steps_completed)
-            self.training_stats["reward"].append(episode_reward)
+            self.training_stats["reward"].append(total_rewards / episodes_completed)
             self.training_stats["episodes"].append(episodes_completed)
-
-            # Store episode statistics
-            self.episode_rewards.append(episode_reward)
-            self.episode_lengths.append(step_count)
 
             # Log progress
             if steps_completed % log_every < step_count:
-                # Average over recent episodes
+                # Average over recent batch updates
+                average_window = 100
                 recent_rewards = (
-                    self.episode_rewards[-10:]
-                    if len(self.episode_rewards) > 10
-                    else self.episode_rewards
+                    self.training_stats["reward"][-average_window:]
+                    if len(self.training_stats["reward"]) > average_window
+                    else self.training_stats["reward"]
                 )
                 avg_reward = sum(recent_rewards) / len(recent_rewards)
 
@@ -257,7 +230,7 @@ class IPPOTrainer:
 
             if terminated or truncated:
                 print(f"REWARD: {cumulative_reward}")
-                break
+                # break
 
     def save_agents(self, filepath):
         torch.save(

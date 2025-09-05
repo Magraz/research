@@ -17,7 +17,6 @@ class PPOAgent:
         gamma=0.99,
         gae_lambda=0.95,
         clip_epsilon=0.2,
-        value_coef=0.5,
         entropy_coef=0.01,
         device="cpu",
     ):
@@ -25,7 +24,6 @@ class PPOAgent:
         self.gamma = gamma
         self.gae_lambda = gae_lambda
         self.clip_epsilon = clip_epsilon
-        self.value_coef = value_coef
         self.entropy_coef = entropy_coef
         self.device = device
 
@@ -252,11 +250,7 @@ class PPOAgent:
                 entropy_loss = -entropy.mean()
 
                 # Total loss
-                loss = (
-                    policy_loss
-                    + self.value_coef * value_loss
-                    + self.entropy_coef * entropy_loss
-                )
+                loss = policy_loss + value_loss + self.entropy_coef * entropy_loss
 
                 # Optimize
                 self.optimizer.zero_grad()

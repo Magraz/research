@@ -14,8 +14,7 @@ class Params:
     eps_clip: float
     gamma: float
 
-    lr_critic: float
-    lr_actor: float
+    lr: float
     random_seeds: list
     grad_clip: float
     ent_coef: float

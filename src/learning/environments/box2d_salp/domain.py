@@ -205,7 +205,7 @@ class SalpChainEnv(gym.Env):
 
             # Random coupling requirement between 2 and min(5, n_agents)
             # coupling_req = np.random.randint(2, self.n_agents - 1)
-            coupling_req = 4
+            coupling_req = 2
 
             # Set reward scale based on coupling requirement
             reward_scale = 1.0 * coupling_req

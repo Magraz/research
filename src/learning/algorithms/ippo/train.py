@@ -1,7 +1,19 @@
 import torch
 from learning.algorithms.ippo.trainer import IPPOTrainer
 from learning.environments.types import EnvironmentParams
-from learning.algorithms.ippo.types import Experiment
+from learning.algorithms.ippo.types import Experiment, Params
+import random
+import numpy as np
+
+
+def set_seeds(seed):
+    """Set random seeds for reproducibility"""
+    random.seed(seed)  # Python's random module
+    np.random.seed(seed)  # NumPy
+    torch.manual_seed(seed)  # PyTorch
+    torch.cuda.manual_seed_all(seed)  # PyTorch CUDA
+    torch.backends.cudnn.deterministic = True  # Make CUDA deterministic
+    torch.backends.cudnn.benchmark = False  # Disable CUDA benchmarking
 
 
 def train(
@@ -12,32 +24,40 @@ def train(
     dirs: dict,
     checkpoint: bool = False,
 ):
+
+    # Set params
+    params = Params(**exp_config.params)
+
+    # Set seeds
+    random_seed = params.random_seeds[0]
+
+    # Set all random seeds for reproducibility
+    set_seeds(random_seed)
+
     # Device configuration
     # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    device = "cpu"
-    print(f"Using device: {device}")
+    print(f"Using device: {exp_config.device}")
 
     # Environment configuration
     env_config = {
         "render_mode": None,  # Set to "human" for visual training
-        "n_agents": 10,
+        "n_agents": env_config.n_agents,
     }
 
     # PPO configuration
     ppo_config = {
-        "lr": 3e-4,
-        "gamma": 0.99,
-        "gae_lambda": 0.95,
-        "clip_epsilon": 0.2,
-        "value_coef": 0.5,
-        "entropy_coef": 0.01,
+        "lr": params.lr,
+        "gamma": params.gamma,
+        "gae_lambda": params.lmbda,
+        "clip_epsilon": params.eps_clip,
+        "entropy_coef": params.ent_coef,
     }
 
     # Create trainer
     trainer = IPPOTrainer(env_config, ppo_config, device)
 
     # Train
-    trainer.train()
+    trainer.train(total_steps=params.n_total_steps, batch_size=params.batch_size)
     trainer.save_training_stats(dirs["logs"] / "training_stats.pkl")
 
     # Save trained agents
