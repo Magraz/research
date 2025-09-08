@@ -230,7 +230,7 @@ class IPPOTrainer:
 
             if terminated or truncated:
                 print(f"REWARD: {cumulative_reward}")
-                # break
+                break
 
     def save_agents(self, filepath):
         torch.save(
