@@ -5,6 +5,9 @@ import os
 from matplotlib.patches import Circle
 from matplotlib.colors import to_rgba
 
+MAP_X = 60
+MAP_Y = 40
+
 
 def plot_all_target_positions(pickle_path):
     """
@@ -19,8 +22,8 @@ def plot_all_target_positions(pickle_path):
     fig, ax = plt.subplots(figsize=(12, 9))
 
     # Setup the plot
-    ax.set_xlim(0, 80)  # Match world width from environment
-    ax.set_ylim(0, 80)  # Match world height from environment
+    ax.set_xlim(0, MAP_X)  # Match world width from environment
+    ax.set_ylim(0, MAP_Y)  # Match world height from environment
     ax.set_aspect("equal")
     ax.set_title("Target Positions Across All Episodes")
     ax.set_xlabel("X Position")
@@ -121,8 +124,8 @@ def plot_all_agent_positions(pickle_path):
     fig, ax = plt.subplots(figsize=(12, 9))
 
     # Setup the plot
-    ax.set_xlim(0, 80)  # Match world width from environment
-    ax.set_ylim(0, 80)  # Match world height from environment
+    ax.set_xlim(0, MAP_X)  # Match world width from environment
+    ax.set_ylim(0, MAP_Y)  # Match world height from environment
     ax.set_aspect("equal")
     ax.set_title("Agent Positions Across All Episodes")
     ax.set_xlabel("X Position")
@@ -176,7 +179,7 @@ def plot_all_agent_positions(pickle_path):
     ax.legend(title="Episode", loc="upper right")
 
     # Draw a center point representing the world center
-    world_center = (40, 40)  # Based on world width and height of 80
+    world_center = (MAP_X / 2, MAP_Y / 2)  # Based on world width and height of 80
     ax.plot(world_center[0], world_center[1], "k+", markersize=12)
 
     # Draw a circle at min_center_radius (assumed to be 15 based on code review)

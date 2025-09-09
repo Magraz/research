@@ -134,14 +134,14 @@ class SalpChainEnv(gym.Env):
         self.world.contactListener = self.contact_listener
 
         # Boundary parameters (customize as needed)
-        self.world_width = 80
-        self.world_height = 80
+        self.world_width = 60
+        self.world_height = 40
         self.boundary_thickness = 0.5
 
         # Pygame rendering setup
         self.screen = None
         self.clock = None
-        self.screen_size = (1600, 1600)
+        self.screen_size = (1200, 800)
         self.scale = 20.0  # Pixels per Box2D meter
 
         # Create target areas
@@ -161,7 +161,7 @@ class SalpChainEnv(gym.Env):
         self.max_joints_per_agent = 2
 
         # Add sector sensing threshold
-        self.sector_sensor_radius = 20.0
+        self.sector_sensor_radius = 40.0
 
         # Add parameters for nearest neighbor detection
         self.neighbor_detection_range = 3.0  # Maximum range to detect neighbors
@@ -1196,7 +1196,7 @@ class SalpChainEnv(gym.Env):
         # Draw agents
         self._render_agents_as_circles()
 
-        self._draw_density_sensors()  # Add this before or after drawing agents
+        # self._draw_density_sensors()  # Add this before or after drawing agents
 
         # Draw joints accurately using anchor points
         for joint in self.joints:

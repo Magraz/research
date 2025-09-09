@@ -108,7 +108,7 @@ def get_linear_positions(n_agents):
     return positions
 
 
-def get_scatter_positions(world_width, world_height, n_agents, min_distance=3):
+def get_scatter_positions(world_width, world_height, n_agents, min_distance=1):
     """
     Generate random starting positions for all agents
 
@@ -121,7 +121,7 @@ def get_scatter_positions(world_width, world_height, n_agents, min_distance=3):
     positions = []
 
     # Define safe boundaries (away from walls)
-    margin = 20.0  # Distance from walls
+    margin = 15.0  # Distance from walls
     safe_x_min = margin
     safe_x_max = world_width - margin
     safe_y_min = margin
@@ -193,8 +193,8 @@ def position_target_area(
     center_y = height / 2
 
     # Define bounding box dimensions (80% of world size)
-    box_width = width * 0.9
-    box_height = height * 0.9
+    box_width = width * 0.95
+    box_height = height * 0.95
 
     # Calculate bounding box boundaries
     box_left = center_x - box_width / 2
@@ -204,7 +204,7 @@ def position_target_area(
 
     # Margin from edges
     margin = 0
-    boundary_margin = 4
+    boundary_margin = 5
 
     for attempt in range(max_attempts):
         # Step 1: Generate random position within bounding box
