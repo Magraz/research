@@ -673,7 +673,7 @@ class SalpChainEnv(gym.Env):
                 # Calculate text position at the middle of the sector
                 mid_angle = math.radians((start_angle + end_angle) / 2)
                 text_distance = (
-                    sensor_radius * 0.7
+                    sensor_radius * 0.2
                 )  # Position text at 70% of the radius
                 text_x = center_x + text_distance * math.cos(mid_angle)
                 text_y = center_y - text_distance * math.sin(mid_angle)
@@ -1125,8 +1125,8 @@ class SalpChainEnv(gym.Env):
 
         # Apply movement forces
         for idx, agent in enumerate(self.agents):
-            force_x = float(movement_actions[idx].squeeze()[0]) * 10.0  # X component
-            force_y = float(movement_actions[idx].squeeze()[1]) * 10.0  # Y component
+            force_x = float(movement_actions[idx].squeeze()[0]) * 1  # X component
+            force_y = float(movement_actions[idx].squeeze()[1]) * 1  # Y component
 
             # Store the 2D force vector for visualization
             self.applied_forces[idx] = [force_x, force_y]
@@ -1196,7 +1196,7 @@ class SalpChainEnv(gym.Env):
         # Draw agents
         self._render_agents_as_circles()
 
-        # self._draw_density_sensors()  # Add this before or after drawing agents
+        self._draw_density_sensors()  # Add this before or after drawing agents
 
         # Draw joints accurately using anchor points
         for joint in self.joints:

@@ -31,6 +31,9 @@ def train(
     # Set seeds
     random_seed = params.random_seeds[0]
 
+    if trial_id.isdigit():
+        random_seed = params.random_seeds[int(trial_id)]
+
     # Set all random seeds for reproducibility
     set_seeds(random_seed)
 
@@ -54,14 +57,14 @@ def train(
     }
 
     # Create trainer
-    trainer = IPPOTrainer(env_config, ppo_config, device)
+    trainer = IPPOTrainer(dirs, env_config, ppo_config, device)
 
     # Train
     trainer.train(total_steps=params.n_total_steps, batch_size=params.batch_size)
-    trainer.save_training_stats(dirs["logs"] / "training_stats.pkl")
+    trainer.save_training_stats(dirs["logs"] / "training_stats_finished.pkl")
 
     # Save trained agents
-    trainer.save_agents(dirs["models"] / "models.pth")
+    trainer.save_agents(dirs["models"] / "models_finished.pth")
 
     # Test trained agents with rendering
     print("\nTesting trained agents...")

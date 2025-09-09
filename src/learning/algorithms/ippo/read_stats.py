@@ -105,7 +105,7 @@ def print_pickle_file(filepath):
 
 if __name__ == "__main__":
     # File path
-    file_path = "/home/magraz/research/src/learning/experiments/results/box2d_salp_test/default/debug/logs/training_stats.pkl"
+    file_path = "/home/magraz/research/src/learning/experiments/results/box2d_salp_test/default/debug/logs/training_stats_checkpoint.pkl"
 
     # Print file keys
     print_pickle_file(file_path)

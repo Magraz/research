@@ -34,10 +34,10 @@ def view(
     }
 
     # Create trainer
-    trainer = IPPOTrainer(env_config, ppo_config, device)
+    trainer = IPPOTrainer(dirs, env_config, ppo_config, device)
 
     # Save trained agents
-    trainer.load_agents(dirs["models"] / "models.pth")
+    trainer.load_agents(dirs["models"] / "models_checkpoint.pth")
 
     # Test trained agents with rendering
     print("\nTesting trained agents...")

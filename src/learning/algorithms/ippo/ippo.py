@@ -155,7 +155,7 @@ class PPOAgent:
 
         return returns, advantages
 
-    def update(self, next_value=0, epochs=10, batch_size=64):
+    def update(self, next_value=0, epochs=10, batch_size=128):
         """Update policy with minimal tensor-numpy conversions"""
         if len(self.states) == 0:
             return {}

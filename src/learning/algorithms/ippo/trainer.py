@@ -8,8 +8,9 @@ import pickle  # Add this import at the top of the file
 
 
 class IPPOTrainer:
-    def __init__(self, env_config, ppo_config, device="cpu"):
+    def __init__(self, dirs, env_config, ppo_config, device="cpu"):
         self.device = device
+        self.dirs = dirs
         self.env_config = env_config
         self.ppo_config = ppo_config
 
@@ -179,6 +180,11 @@ class IPPOTrainer:
                     f"Recent Avg Reward: {avg_reward:.2f} | "
                     f"Last Batch Steps: {step_count}"
                 )
+
+                self.save_training_stats(
+                    self.dirs["logs"] / "training_stats_checkpoint.pkl"
+                )
+                self.save_agents(self.dirs["models"] / "models_checkpoint.pth")
 
         print(
             f"Training completed! Total steps: {steps_completed}, Episodes: {episodes_completed}"
