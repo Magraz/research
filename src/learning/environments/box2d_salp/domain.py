@@ -743,6 +743,38 @@ class SalpChainEnv(gym.Env):
             )
             self.screen.blit(scale_surface, scale_rect)
 
+    def _draw_agent_indices(self):
+        """Render the index of each agent on top of them for easy identification"""
+        # Initialize font if not already done
+        if not hasattr(self, "index_font"):
+            pygame.font.init()
+            self.index_font = pygame.font.SysFont("Arial", 12, bold=True)
+
+        for idx, agent in enumerate(self.agents):
+            # Get agent position in screen coordinates
+            center_x = agent.position.x * self.scale
+            center_y = self.screen_size[1] - agent.position.y * self.scale
+
+            # Render the agent index
+            index_text = str(idx)
+            text_surface = self.index_font.render(
+                index_text, True, (255, 255, 255)
+            )  # White text
+
+            # Center the text on the agent
+            text_rect = text_surface.get_rect(
+                center=(int(center_x + 5), int(center_y + 5))
+            )
+
+            # Add a black outline for better visibility
+            for offset in [(1, 0), (-1, 0), (0, 1), (0, -1)]:
+                outline_rect = text_rect.move(offset)
+                outline_surface = self.index_font.render(index_text, True, (0, 0, 0))
+                self.screen.blit(outline_surface, outline_rect)
+
+            # Draw the actual text
+            self.screen.blit(text_surface, text_rect)
+
     def _get_nearest_non_connected_agent_relative(self, agent_idx, all_states):
         """
         Find the nearest non-connected agent and return relative state information
@@ -1195,6 +1227,9 @@ class SalpChainEnv(gym.Env):
 
         # Draw agents
         self._render_agents_as_circles()
+
+        # Draw agent indices on top of agents
+        self._draw_agent_indices()
 
         self._draw_density_sensors()  # Add this before or after drawing agents
 
