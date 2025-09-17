@@ -16,5 +16,5 @@ class EnvironmentEnum(StrEnum):
     VMAS_SALP_PASSAGE = "salp_passage"
     VMAS_BALANCE = "balance"
     VMAS_BUZZ_WIRE = "buzz_wire"
-    MAMUJOCO_SWIMMER = "many_segment_swimmer"
+    MPE = "mpe"
     BOX2D_SALP = "box2d_salp"

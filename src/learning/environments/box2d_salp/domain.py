@@ -19,7 +19,8 @@ from learning.environments.box2d_salp.utils import (
     UnionFind,
     BoundaryContactListener,
     get_scatter_positions,
-    position_target_area,
+    dynamic_position_target_area,
+    fixed_position_target_area,
 )
 
 
@@ -193,11 +194,17 @@ class SalpChainEnv(gym.Env):
     def _create_target_areas(self):
         """Create target areas at random positions in the environment"""
         self.target_areas = []
+        existing_positions = []
 
-        for _ in range(self.n_target_areas):
+        for idx in range(self.n_target_areas):
 
             # Get position using the new method
-            x, y = position_target_area(self.world_width, self.world_height)
+            # x, y = dynamic_position_target_area(
+            #     self.world_width,
+            #     self.world_height,
+            # )
+            x, y = fixed_position_target_area(idx, self.world_width, self.world_height)
+            existing_positions.append((x, y))
 
             # Random radius between 2 and 4
             # radius = np.random.uniform(2.0, 4.0)

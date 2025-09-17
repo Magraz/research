@@ -8,25 +8,22 @@ import pickle  # Add this import at the top of the file
 
 
 class IPPOTrainer:
-    def __init__(self, dirs, env_config, ppo_config, device="cpu"):
+    def __init__(self, env, n_agents, state_dim, ppo_config, dirs, device="cpu"):
         self.device = device
         self.dirs = dirs
-        self.env_config = env_config
         self.ppo_config = ppo_config
+        self.n_agents = n_agents
 
         # Create environment
-        self.env = SalpChainEnv(**env_config)
+        self.env = env
 
         # Check if we're dealing with Dict action space
         self.using_dict_action = hasattr(self.env.action_space, "spaces")
 
-        # Create independent PPO agents
-        state_dim = self.env.observation_space.shape[1]
-
         if self.using_dict_action:
             # For Dict actions, pass the entire action_space to the agents
             self.agents = []
-            for i in range(self.env.n_agents):
+            for i in range(self.n_agents):
                 agent = PPOAgent(
                     state_dim=state_dim,
                     action_space=self.env.action_space,  # Pass the whole action space
@@ -38,7 +35,7 @@ class IPPOTrainer:
             # Original initialization for Box action space
             action_dim = self.env.action_space.shape[1]
             self.agents = []
-            for i in range(self.env.n_agents):
+            for i in range(self.n_agents):
                 agent = PPOAgent(
                     state_dim=state_dim,
                     action_dim=action_dim,
@@ -242,8 +239,6 @@ class IPPOTrainer:
         torch.save(
             {
                 "agents": [agent.network.state_dict() for agent in self.agents],
-                "config": self.ppo_config,
-                "env_config": self.env_config,
             },
             filepath,
         )

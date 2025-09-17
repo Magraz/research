@@ -161,7 +161,28 @@ def get_scatter_positions(world_width, world_height, n_agents, min_distance=1):
     return positions
 
 
-def position_target_area(
+def fixed_position_target_area(
+    idx,
+    width,
+    height,
+):
+    # Calculate world center
+    center_x = width / 2
+    center_y = height / 2
+
+    x_offset = 15
+    y_offset = 10
+
+    positions = [
+        (center_x + x_offset, center_y + y_offset),
+        (center_x + x_offset, center_y - y_offset),
+        (center_x - x_offset, center_y + y_offset),
+        (center_x - x_offset, center_y - y_offset),
+    ]
+    return positions[idx]
+
+
+def dynamic_position_target_area(
     width,
     height,
     existing_positions=None,

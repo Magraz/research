@@ -35,7 +35,7 @@ class PPONetwork(nn.Module):
             self.detach_log_std = nn.Parameter(torch.zeros(1, 1))
         else:
             # Legacy support for simple Box action space
-            action_dim = action_space.shape[-1]
+            action_dim = action_space
             self.action_mean = nn.Linear(hidden_dim, action_dim)
             self.action_log_std = nn.Parameter(torch.zeros(1, action_dim))
 

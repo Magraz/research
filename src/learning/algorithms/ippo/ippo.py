@@ -29,10 +29,8 @@ class PPOAgent:
 
         # Initialize network
         if action_space is not None:
-            self.action_space = action_space
             self.network = PPONetwork(state_dim, action_space).to(device)
         else:
-            self.action_dim = action_dim
             self.network = PPONetwork(state_dim, action_dim).to(device)
 
         self.optimizer = optim.Adam(self.network.parameters(), lr=lr)
