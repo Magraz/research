@@ -844,8 +844,8 @@ class SalpChainEnv(gym.Env):
         all_states = np.array(
             [
                 [
-                    a.position.x - self.world_center_x / self.world_center_x,
-                    a.position.y - self.world_center_y / self.world_center_y,
+                    (a.position.x - self.world_center_x) / self.world_center_x,
+                    (a.position.y - self.world_center_y) / self.world_center_y,
                     a.linearVelocity.x,
                     a.linearVelocity.y,
                 ]
