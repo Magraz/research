@@ -1,1 +1,1 @@
-builder_type: learning.builders.ppo
+builder_type: learning.builders.ippo

@@ -21,6 +21,7 @@ from learning.environments.box2d_salp.utils import (
     get_scatter_positions,
     dynamic_position_target_area,
     fixed_position_target_area,
+    add_dictionary_values,
 )
 
 
@@ -45,6 +46,9 @@ class TargetArea:
 
     def calculate_reward(self, agents, union_find):
         """Calculate reward based on proximity to center if coupling requirement is met"""
+
+        reward_map = {}
+
         # Find agents within this target area
         agents_in_area = []
         for i, agent in enumerate(agents):
@@ -55,7 +59,7 @@ class TargetArea:
                 agents_in_area.append(i)
 
         if len(agents_in_area) < self.coupling_requirement:
-            return 0.0  # Not enough agents to meet requirement
+            return reward_map  # Not enough agents to meet requirement
 
         # Group agents by their connected component using union_find
         component_map = {}
@@ -65,27 +69,27 @@ class TargetArea:
                 component_map[root] = []
             component_map[root].append(idx)
 
-        # Check if any component meets the coupling requirement
+        # Check if any chain meets the coupling requirement
         qualifying_agents = []
         for component in component_map.values():
             if len(component) >= self.coupling_requirement:
                 qualifying_agents.extend(component)
 
         if not qualifying_agents:
-            return 0.0  # No component meets requirement
+            return reward_map  # No component meets requirement
 
         # Calculate reward based on proximity
-        total_reward = 0.0
+        reward_map = dict.fromkeys(qualifying_agents, 0)
         for i in qualifying_agents:
-            agent = agents[i]
             dist = np.sqrt(
-                (agent.position.x - self.x) ** 2 + (agent.position.y - self.y) ** 2
+                (agents[i].position.x - self.x) ** 2
+                + (agents[i].position.y - self.y) ** 2
             )
             # Reward decreases with distance (1.0 at center, 0.0 at radius)
             normalized_dist = 1.0 - (dist / self.radius)
-            total_reward += normalized_dist
+            reward_map[i] = float(normalized_dist)
 
-        return total_reward * self.reward_scale
+        return reward_map
 
 
 class SalpChainEnv(gym.Env):
@@ -137,6 +141,8 @@ class SalpChainEnv(gym.Env):
         # Boundary parameters (customize as needed)
         self.world_width = 60
         self.world_height = 40
+        self.world_center_x = self.world_width // 2
+        self.world_center_y = self.world_height // 2
         self.boundary_thickness = 0.5
 
         # Pygame rendering setup
@@ -837,7 +843,12 @@ class SalpChainEnv(gym.Env):
         # Get all agent states as a matrix
         all_states = np.array(
             [
-                [a.position.x, a.position.y, a.linearVelocity.x, a.linearVelocity.y]
+                [
+                    a.position.x - self.world_center_x / self.world_center_x,
+                    a.position.y - self.world_center_y / self.world_center_y,
+                    a.linearVelocity.x,
+                    a.linearVelocity.y,
+                ]
                 for a in self.agents
             ],
             dtype=np.float32,
@@ -924,7 +935,9 @@ class SalpChainEnv(gym.Env):
     def _get_target_rewards(self):
         """Calculate combined rewards from chain size and target areas"""
         # Calculate target area rewards
-        target_rewards = 0.0
+        shared_reward = 0.0
+
+        individual_rewards = dict.fromkeys(list(range(0, self.n_agents)), 0)
 
         # Default to false if there are no targets
         if not self.target_areas:
@@ -935,17 +948,21 @@ class SalpChainEnv(gym.Env):
 
         for target_area in self.target_areas:
             # Calculate reward for this target area
-            reward = target_area.calculate_reward(self.agents, self.union_find)
-            target_rewards += reward
+            reward_map = target_area.calculate_reward(self.agents, self.union_find)
 
             # A target with zero reward means its coupling requirement wasn't met
-            if reward <= 0:
+            if not reward_map:
                 all_couplings_met = False
+            else:
+                individual_rewards = add_dictionary_values(
+                    individual_rewards, reward_map
+                )
+                shared_reward += max(reward_map.values())
 
         # Set terminated based on whether all couplings are met
         terminated = all_couplings_met
 
-        return target_rewards, terminated
+        return shared_reward, individual_rewards, terminated
 
     def _find_largest_connected_component(self):
         """
@@ -1062,7 +1079,7 @@ class SalpChainEnv(gym.Env):
             density_value = 1.0 / (distance * distance + 0.1)
 
             # Add to appropriate sector
-            agent_densities[sector] += density_value * 10
+            agent_densities[sector] += density_value
 
         # Check each target area
         for target in self.target_areas:
@@ -1095,7 +1112,7 @@ class SalpChainEnv(gym.Env):
             density_value = weight * (1.0 / (distance * distance + 0.1))
 
             # Add to appropriate sector
-            target_densities[sector] += density_value * 10
+            target_densities[sector] += density_value
 
         # Combine agent and target densities
         return np.concatenate([agent_densities, target_densities])
@@ -1179,12 +1196,14 @@ class SalpChainEnv(gym.Env):
         self._join_on_proximity()
 
         # Check for boundary collisions
+        shared_reward = 0.0
+        individual_rewards = dict.fromkeys(list(range(0, self.n_agents)), 0)
         if self.contact_listener.boundary_collision:
             terminated = True
-            reward = -10.0  # Negative reward for boundary collision
+            shared_reward = -10.0  # Negative reward for boundary collision
         else:
             # The normal reward calculation
-            reward, terminated = self._get_target_rewards()
+            shared_reward, individual_rewards, terminated = self._get_target_rewards()
 
         # The observation
         obs = self._get_observation()
@@ -1210,9 +1229,10 @@ class SalpChainEnv(gym.Env):
             "agent_positions": [
                 {"x": agent.position.x, "y": agent.position.y} for agent in self.agents
             ],
+            "individual_rewards": individual_rewards,
         }
 
-        return obs, reward, terminated, truncated, info
+        return obs, shared_reward, terminated, truncated, info
 
     def render(self):
         if self.render_mode != "human":

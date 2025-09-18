@@ -85,7 +85,7 @@ class IPPOTrainer:
                 agent.store_transition(
                     state=obs[i],
                     action=actions[i],
-                    reward=reward,
+                    reward=info["individual_rewards"][i],
                     log_prob=log_probs[i],
                     value=values[i],
                     done=terminated or truncated,
@@ -136,7 +136,7 @@ class IPPOTrainer:
 
             # Collect trajectory for a fixed number of steps
             total_rewards, step_count, episode_count, final_values = (
-                self.collect_trajectory(max_steps=steps_to_collect)
+                self.collect_trajectory(max_steps=int(steps_to_collect))
             )
 
             # Update all agents
@@ -157,24 +157,24 @@ class IPPOTrainer:
                 self.training_stats[key].extend(values)
 
             self.training_stats["total_steps"].append(steps_completed)
-            self.training_stats["reward"].append(total_rewards / episodes_completed)
+            self.training_stats["reward"].append(total_rewards / episode_count)
             self.training_stats["episodes"].append(episodes_completed)
 
             # Log progress
             if steps_completed % log_every < step_count:
                 # Average over recent batch updates
-                average_window = 100
-                recent_rewards = (
-                    self.training_stats["reward"][-average_window:]
-                    if len(self.training_stats["reward"]) > average_window
-                    else self.training_stats["reward"]
-                )
-                avg_reward = sum(recent_rewards) / len(recent_rewards)
+                # average_window = 100
+                # recent_rewards = (
+                #     self.training_stats["reward"][-average_window:]
+                #     if len(self.training_stats["reward"]) > average_window
+                #     else self.training_stats["reward"]
+                # )
+                # avg_reward = sum(recent_rewards) / len(recent_rewards)
 
                 print(
                     f"Steps: {steps_completed}/{total_steps} ({steps_completed/total_steps*100:.1f}%) | "
                     f"Episodes: {episodes_completed} | "
-                    f"Recent Avg Reward: {avg_reward:.2f} | "
+                    f"Recent Avg Reward: {self.training_stats["reward"][-1]:.2f} | "
                     f"Last Batch Steps: {step_count}"
                 )
 

@@ -25,31 +25,31 @@ class PPONetwork(nn.Module):
             # Movement action (continuous 2D)
             movement_dim = action_space["movement"].shape[-1]
             self.movement_mean = nn.Linear(hidden_dim, movement_dim)
-            self.movement_log_std = nn.Parameter(torch.zeros(1, movement_dim))
+            self.movement_log_std = nn.Parameter(torch.ones(1, movement_dim) * -0.5)
 
             # Link openness action (discrete binary)
             self.link_openness_logits = nn.Linear(hidden_dim, 1)  # Single binary output
 
             # Detach action (continuous scalar)
             self.detach_mean = nn.Linear(hidden_dim, 1)
-            self.detach_log_std = nn.Parameter(torch.zeros(1, 1))
+            self.detach_log_std = nn.Parameter(torch.ones(1, 1) * -0.5)
         else:
             # Legacy support for simple Box action space
             action_dim = action_space
             self.action_mean = nn.Linear(hidden_dim, action_dim)
-            self.action_log_std = nn.Parameter(torch.zeros(1, action_dim))
+            self.action_log_std = nn.Parameter(torch.ones(1, action_dim) * -0.5)
 
         # Value function
         self.value = nn.Linear(hidden_dim, 1)
 
     def forward(self, x):
         # Shared feature extraction
-        x = F.relu(self.feature_layer1(x))
-        x = F.relu(self.feature_layer2(x))
+        x = F.gelu(self.feature_layer1(x))
+        x = F.gelu(self.feature_layer2(x))
 
         if self.is_dict_action:
             # Movement action distribution
-            movement_mean = self.movement_mean(x)
+            movement_mean = torch.tanh(self.movement_mean(x))
             movement_log_std = self.movement_log_std.expand_as(movement_mean)
 
             # Link openness logits
@@ -65,6 +65,7 @@ class PPONetwork(nn.Module):
                 "link_openness": link_openness_logits,
                 "detach": (detach_mean, detach_log_std),
             }, value
+
         else:
             # Legacy support
             action_mean = self.action_mean(x)

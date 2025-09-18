@@ -5,6 +5,60 @@ import os
 import pygame
 
 
+def get_target_seeking_action(env):
+    """Generate actions that move each agent towards the nearest target"""
+
+    # Get target positions from environment info
+    if not hasattr(env, "target_areas") or not env.target_areas:
+        # If no targets available, return random movement
+        return {
+            "movement": np.random.uniform(-0.5, 0.5, size=(env.n_agents, 2)),
+            "link_openness": np.ones(env.n_agents, dtype=np.int8),
+            "detach": np.zeros(env.n_agents, dtype=np.float32),
+        }
+
+    # Extract target positions
+    target_positions = np.array([(target.x, target.y) for target in env.target_areas])
+
+    # Get current agent positions
+    agent_positions = np.array(
+        [[agent.position.x, agent.position.y] for agent in env.agents]
+    )
+
+    def find_nearest_target(agent_pos):
+        distances = np.linalg.norm(target_positions - agent_pos, axis=1)
+        nearest_idx = np.argmin(distances)
+        return target_positions[nearest_idx], distances[nearest_idx]
+
+    def calculate_movement_towards(from_pos, to_pos, max_force=1.0):
+        direction = to_pos - from_pos
+        distance = np.linalg.norm(direction)
+
+        if distance < 0.01:
+            return np.array([0.0, 0.0])
+
+        normalized_direction = direction / distance
+
+        # Scale force based on distance (stronger when further)
+        force_scale = min(1.0, distance / 10.0)
+        return normalized_direction * max_force * force_scale
+
+    # Calculate movements toward nearest targets
+    movements = []
+    for i in range(env.n_agents):
+        nearest_target, distance = find_nearest_target(agent_positions[i])
+        movement = calculate_movement_towards(
+            agent_positions[i], nearest_target, max_force=0.8
+        )
+        movements.append(movement)
+
+    return {
+        "movement": np.array(movements),
+        "link_openness": np.ones(env.n_agents, dtype=np.int8),  # Keep links open
+        "detach": np.zeros(env.n_agents, dtype=np.float32),  # Don't detach
+    }
+
+
 def get_nearest_agent_action(env):
     """Generate actions that move each agent towards its nearest neighbor"""
 
@@ -135,6 +189,8 @@ def check_keyboard_input():
                 return "scatter"
             elif event.key == pygame.K_r:  # 'R' for random
                 return "random"
+            elif event.key == pygame.K_t:  # 'T' for target
+                return "target"
             elif event.key == pygame.K_q:  # 'Q' for quit
                 return "quit"
         elif event.type == pygame.QUIT:
@@ -154,6 +210,7 @@ print("CONTROLS:")
 print("  N - Switch to Nearest Agent behavior")
 print("  S - Switch to Scatter behavior")
 print("  R - Switch to Random behavior")
+print("  T - Switch to Target Seeking behavior")
 print("  Q - Quit simulation")
 print("=" * 50)
 print(f"Starting with '{action_mode.upper()}' action mode")
@@ -176,6 +233,9 @@ try:
             elif key_input == "random":
                 action_mode = "random"
                 print(f"\n>>> Switched to RANDOM mode at step {step} <<<")
+            elif key_input == "target":
+                action_mode = "target"
+                print(f"\n>>> Switched to TARGET SEEKING mode at step {step} <<<")
             elif key_input == "quit":
                 print("\n>>> Quitting simulation <<<")
                 raise KeyboardInterrupt
@@ -185,6 +245,8 @@ try:
                 action = get_nearest_agent_action(env)
             elif action_mode == "scatter":
                 action = get_scatter_action(env)
+            elif action_mode == "target":
+                action = get_target_seeking_action(env)
             else:  # random mode
                 action = biased_sample(env, zero_prob=0.7)
 
@@ -195,7 +257,9 @@ try:
             # Display current mode and step info
             if step % 25 == 0:
                 mode_display = f"[{action_mode.upper()}]"
-                print(f"Step={step:3d} {mode_display:10s} Reward={reward:6.2f}")
+                print(
+                    f"Step={step:3d} {mode_display:10s} Reward={reward:6.2f} Reward Map={info["individual_rewards"]}"
+                )
 
             if terminated:
                 print("TERMINATED")

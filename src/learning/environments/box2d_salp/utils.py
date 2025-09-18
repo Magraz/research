@@ -316,3 +316,23 @@ def dynamic_position_target_area(
     y = np.clip(y, boundary_margin, height - boundary_margin)
 
     return x, y
+
+
+def add_dictionary_values(dict1, dict2):
+    """
+    Adds values of two dictionaries, summing values for common keys
+    and including all other key-value pairs.
+    """
+    merged_dict = {}
+
+    # Add values from dict1
+    for key, value in dict1.items():
+        merged_dict[key] = value
+
+    # Add values from dict2, summing if key exists in merged_dict
+    for key, value in dict2.items():
+        if key in merged_dict:
+            merged_dict[key] += value
+        else:
+            merged_dict[key] = value
+    return merged_dict
