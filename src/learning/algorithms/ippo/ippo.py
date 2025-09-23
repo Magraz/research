@@ -4,7 +4,8 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader, TensorDataset
 import numpy as np
 
-from learning.algorithms.ippo.network import PPONetwork
+from learning.algorithms.ippo.models.hybrid_mlp_ac import Hybrid_MLP_AC
+from learning.algorithms.ippo.models.mlp_ac import MLP_AC
 
 
 class PPOAgent:
@@ -29,11 +30,13 @@ class PPOAgent:
 
         # Initialize network
         if action_space is not None:
-            self.network = PPONetwork(state_dim, action_space).to(device)
+            self.policy = Hybrid_MLP_AC(state_dim, action_space).to(device)
         else:
-            self.network = PPONetwork(state_dim, action_dim).to(device)
+            self.policy = MLP_AC(state_dim, action_dim).to(device)
+            self.policy_old = MLP_AC(state_dim, action_dim).to(device)
+            self.policy_old.load_state_dict(self.policy.state_dict())
 
-        self.optimizer = optim.Adam(self.network.parameters(), lr=lr)
+        self.optimizer = optim.Adam(self.policy.parameters(), lr=lr)
 
         # Initialize buffer with empty tensors lists
         self.reset_buffer()
@@ -49,39 +52,28 @@ class PPOAgent:
         # This will be determined when the first action is stored
         self.is_dict_action = None
 
-    def get_action(self, state, deterministic=False):
+    def get_action(self, state, update_norm=False, deterministic=False):
         """Get action from policy while minimizing tensor conversions"""
-        with torch.no_grad():
-            # Convert state to tensor if needed
-            if not torch.is_tensor(state):
-                state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
-            else:
-                # If already tensor, ensure it has batch dimension and is on right device
-                state_tensor = (
-                    state.unsqueeze(0).to(self.device)
-                    if state.dim() == 1
-                    else state.to(self.device)
-                )
 
-            # Get action, log_prob and value from network
-            action, log_prob, value = self.network.get_action(
-                state_tensor, deterministic
+        state_tensor = torch.FloatTensor(state).to(self.device)
+
+        # Get action, log_prob and value from network
+        action, log_prob, value = self.policy_old.act(state_tensor, deterministic)
+
+        # For environment interaction, convert to numpy
+        if isinstance(action, dict):
+            # Handle dictionary actions
+            numpy_action = {}
+            for key, tensor in action.items():
+                numpy_action[key] = tensor.cpu().numpy()[0]
+            return numpy_action, log_prob.cpu().item(), value.cpu().item()
+        else:
+            # Handle regular actions
+            return (
+                action.cpu().numpy(),
+                log_prob.cpu().item(),
+                value.cpu().item(),
             )
-
-            # For environment interaction, convert to numpy
-            if isinstance(action, dict):
-                # Handle dictionary actions
-                numpy_action = {}
-                for key, tensor in action.items():
-                    numpy_action[key] = tensor.cpu().numpy()[0]
-                return numpy_action, log_prob.cpu().item(), value.cpu().item()
-            else:
-                # Handle regular actions
-                return (
-                    action.cpu().numpy()[0],
-                    log_prob.cpu().item(),
-                    value.cpu().item(),
-                )
 
     def store_transition(self, state, action, reward, log_prob, value, done):
         """Store transition in buffer, converting to tensors if needed"""
@@ -125,9 +117,7 @@ class PPOAgent:
 
     def compute_returns_and_advantages(self, next_value=0):
         """Compute returns and advantages using all tensor operations"""
-        # Convert next_value to tensor if needed
-        if not torch.is_tensor(next_value):
-            next_value = torch.tensor(next_value, dtype=torch.float32).to(self.device)
+        next_value = torch.tensor(next_value, dtype=torch.float32).to(self.device)
 
         # Process all data as tensors
         rewards = torch.stack(self.rewards)
@@ -151,22 +141,22 @@ class PPOAgent:
         # Compute returns (properly using tensor operations)
         returns = advantages + values[:-1]
 
-        return returns, advantages
-
-    def update(self, next_value=0, epochs=10, batch_size=128):
-        """Update policy with minimal tensor-numpy conversions"""
-        if len(self.states) == 0:
-            return {}
-
-        # Compute returns and advantages using tensor operations
-        returns, advantages = self.compute_returns_and_advantages(next_value)
-
         # Normalize advantages
         advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
+        return returns, advantages
+
+    def update(self, next_value=0, minibatch_size=128, epochs=10):
+        """Update policy with minimal tensor-numpy conversions"""
+
+        # Compute returns and advantages using tensor operations
+        returns, advantages = self.compute_returns_and_advantages(next_value)
+        returns = returns.unsqueeze(-1)
+        advantages = advantages.unsqueeze(-1)
+
         # Stack states
         states = torch.stack(self.states)
-        old_log_probs = torch.stack(self.log_probs)
+        old_log_probs = torch.stack(self.log_probs).unsqueeze(-1)
 
         # Handle different action types
         if self.is_dict_action:
@@ -199,61 +189,58 @@ class PPOAgent:
             actions = torch.stack(self.actions)
             dataset = TensorDataset(states, actions, old_log_probs, returns, advantages)
 
-        dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+        dataloader = DataLoader(dataset, batch_size=minibatch_size, shuffle=True)
 
         # Training statistics
         stats = {"total_loss": 0, "policy_loss": 0, "value_loss": 0, "entropy_loss": 0}
 
         # Multiple epochs of optimization
         for epoch in range(epochs):
-            for batch in dataloader:
+            for (
+                b_old_states,
+                b_old_actions,
+                b_old_logprobs,
+                b_returns,
+                b_advantages,
+            ) in dataloader:
                 # Process batch based on action type
                 if self.is_dict_action:
-                    batch_states = batch[0]
-                    batch_old_log_probs = batch[-3]
-                    batch_returns = batch[-2]
-                    batch_advantages = batch[-1]
-
                     # Extract action components from batch
-                    batch_actions = {}
+                    batch_dict_actions = {}
                     for i, key in enumerate(action_tensors.keys()):
-                        batch_actions[key] = batch[i + 1]  # +1 because states is first
-                else:
-                    (
-                        batch_states,
-                        batch_actions,
-                        batch_old_log_probs,
-                        batch_returns,
-                        batch_advantages,
-                    ) = batch
+                        batch_dict_actions[key] = b_old_actions[
+                            i + 1
+                        ]  # +1 because states is first
+
+                    b_old_actions = batch_dict_actions
 
                 # Forward pass
-                log_probs, values, entropy = self.network.evaluate_action(
-                    batch_states, batch_actions
+                log_probs, values, entropy = self.policy.evaluate(
+                    b_old_states, b_old_actions
                 )
 
                 # PPO objective
-                ratio = torch.exp(log_probs - batch_old_log_probs)
-                surr1 = ratio * batch_advantages
+                ratio = torch.exp(log_probs - b_old_logprobs)
+                surr1 = ratio * b_advantages
                 surr2 = (
                     torch.clamp(ratio, 1 - self.clip_epsilon, 1 + self.clip_epsilon)
-                    * batch_advantages
+                    * b_advantages
                 )
                 policy_loss = -torch.min(surr1, surr2).mean()
 
                 # Value loss
-                value_loss = F.mse_loss(values.squeeze(-1), batch_returns)
+                value_loss = F.mse_loss(values, b_returns)
 
                 # Entropy loss for exploration
-                entropy_loss = -entropy.mean()
+                entropy_loss = -self.entropy_coef * entropy.mean()
 
                 # Total loss
-                loss = policy_loss + value_loss + self.entropy_coef * entropy_loss
+                loss = policy_loss + value_loss + entropy_loss
 
                 # Optimize
                 self.optimizer.zero_grad()
                 loss.backward()
-                torch.nn.utils.clip_grad_norm_(self.network.parameters(), 0.5)
+                torch.nn.utils.clip_grad_norm_(self.policy.parameters(), 0.5)
                 self.optimizer.step()
 
                 # Update statistics
@@ -261,6 +248,9 @@ class PPOAgent:
                 stats["policy_loss"] += policy_loss.item()
                 stats["value_loss"] += value_loss.item()
                 stats["entropy_loss"] += entropy_loss.item()
+
+        # Copy new weights into old policy
+        self.policy_old.load_state_dict(self.policy.state_dict())
 
         # Reset buffer after update
         self.reset_buffer()

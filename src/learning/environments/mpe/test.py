@@ -1,6 +1,6 @@
-from mpe2 import simple_push_v3
+from mpe2 import simple_spread_v3
 
-env = simple_push_v3.env(render_mode="human")
+env = simple_spread_v3.env(render_mode="human")
 env.reset(seed=42)
 
 for agent in env.agent_iter():

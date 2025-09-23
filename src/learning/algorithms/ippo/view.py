@@ -29,6 +29,7 @@ def view(
     }
 
     # Create environment
+    using_hybrid_actions = False
     match (env_config.environment):
         case EnvironmentEnum.BOX2D_SALP:
             # Environment configuration
@@ -38,10 +39,22 @@ def view(
             }
             env = SalpChainEnv(**env_config)
             state_dim = env.observation_space.shape[1]
+            action_dim = env.action_space.shape[1]
+            # Check if we're dealing with Dict action space
+            using_hybrid_actions = hasattr(env.action_space, "spaces")
             n_agents = env.n_agents
 
     # Create trainer
-    trainer = IPPOTrainer(env, n_agents, state_dim, ppo_config, dirs, device)
+    trainer = IPPOTrainer(
+        env,
+        n_agents,
+        state_dim,
+        action_dim,
+        ppo_config,
+        dirs,
+        using_hybrid_actions,
+        device,
+    )
 
     # Save trained agents
     trainer.load_agents(dirs["models"] / "models_checkpoint.pth")
@@ -49,5 +62,5 @@ def view(
     # Test trained agents with rendering
     print("\nTesting trained agents...")
     for i in range(10):
-        trainer.render_episode()
+        trainer.render_episode(max_steps=512)
     trainer.env.close()

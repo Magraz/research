@@ -100,10 +100,36 @@ class BoundaryContactListener(b2ContactListener):
         self.boundary_collision = False
 
 
-def get_linear_positions(n_agents):
+def get_linear_positions(world_width, world_height, n_agents, spacing=2):
+    """
+    Generate positions for agents arranged in a horizontal line centered on the map,
+    with half the agents on the left of center and half on the right.
+
+    Args:
+        world_width (float): Width of the world
+        world_height (float): Height of the world
+        n_agents (int): Number of agents to position
+        spacing (float): Distance between adjacent agents
+
+    Returns:
+        list: List of (x, y) tuples for each agent position
+    """
     positions = []
+
+    # Calculate world center
+    center_x = world_width / 2
+    center_y = world_height / 2
+
+    # Calculate total width of the formation
+    total_width = (n_agents - 1) * spacing
+
+    # Calculate starting position (leftmost agent)
+    start_x = center_x - (total_width / 2)
+
+    # Position agents in a line
     for i in range(n_agents):
-        positions.append((10 + i * 1.5, 10))
+        x_pos = start_x + (i * spacing)
+        positions.append((x_pos, center_y))
 
     return positions
 

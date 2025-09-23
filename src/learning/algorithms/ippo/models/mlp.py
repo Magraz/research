@@ -42,7 +42,7 @@ class MLP(nn.Module):
 
         return action_mean, action_std, value
 
-    def get_action(self, state):
+    def act(self, state):
         action_mean, action_std, value = self.forward(state)
 
         # Create normal distribution
@@ -57,7 +57,7 @@ class MLP(nn.Module):
 
         return action, log_prob, value
 
-    def evaluate_action(self, state, action):
+    def evaluate(self, state, action):
         action_mean, action_std, value = self.forward(state)
 
         # Create distribution

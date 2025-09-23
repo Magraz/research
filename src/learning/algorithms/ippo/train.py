@@ -4,7 +4,7 @@ from learning.environments.types import EnvironmentParams, EnvironmentEnum
 from learning.algorithms.ippo.types import Experiment, Params
 from learning.environments.box2d_salp.domain import SalpChainEnv
 
-from mpe2 import simple_push_v3
+from mpe2 import simple_spread_v3
 
 import random
 import numpy as np
@@ -55,6 +55,7 @@ def train(
     }
 
     # Create environment
+    using_hybrid_actions = False
     match (env_config.environment):
         case EnvironmentEnum.BOX2D_SALP:
             # Environment configuration
@@ -64,19 +65,43 @@ def train(
             }
             env = SalpChainEnv(**env_config)
             state_dim = env.observation_space.shape[1]
+            action_dim = env.action_space.shape[1]
+            # Check if we're dealing with Dict action space
+            using_hybrid_actions = hasattr(env.action_space, "spaces")
             n_agents = env.n_agents
 
         case EnvironmentEnum.MPE:
-            env = simple_push_v3.env(render_mode="human")
+            env = simple_spread_v3.env(
+                N=3,
+                local_ratio=0.5,
+                max_cycles=25,
+                continuous_actions=True,
+                dynamic_rescaling=False,
+            )
             state_dim = env.observation_space("agent_0").shape[0]
-            action_dim = int(env.action_space("agent_0").n)
+            action_dim = env.action_space("agent_0").shape[0]
             n_agents = env.max_num_agents
 
     # Create trainer
-    trainer = IPPOTrainer(env, n_agents, state_dim, ppo_config, dirs, device)
+    trainer = IPPOTrainer(
+        env,
+        n_agents,
+        state_dim,
+        action_dim,
+        ppo_config,
+        dirs,
+        using_hybrid_actions,
+        device,
+    )
+
+    # trainer.train_normalizer()
 
     # Train
-    trainer.train(total_steps=params.n_total_steps, batch_size=params.batch_size)
+    trainer.train(
+        total_steps=params.n_total_steps,
+        batch_size=params.batch_size,
+        minibatches=params.n_minibatches,
+    )
     trainer.save_training_stats(dirs["logs"] / "training_stats_finished.pkl")
 
     # Save trained agents

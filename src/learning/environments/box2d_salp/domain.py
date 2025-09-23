@@ -19,6 +19,7 @@ from learning.environments.box2d_salp.utils import (
     UnionFind,
     BoundaryContactListener,
     get_scatter_positions,
+    get_linear_positions,
     dynamic_position_target_area,
     fixed_position_target_area,
     add_dictionary_values,
@@ -38,16 +39,14 @@ class TargetArea:
         self.x = x  # Center x-coordinate
         self.y = y  # Center y-coordinate
         self.radius = radius  # Area of influence
-        self.coupling_requirement = (
-            coupling_requirement  # Minimum connected agents required
-        )
+        self.coupling_requirement = coupling_requirement
         self.reward_scale = reward_scale  # Reward scaling factor
         self.color = color  # Semi-transparent green by default
 
     def calculate_reward(self, agents, union_find):
         """Calculate reward based on proximity to center if coupling requirement is met"""
 
-        reward_map = {}
+        reward_map = dict.fromkeys(list(range(0, len(agents))), 0)
 
         # Find agents within this target area
         agents_in_area = []
@@ -79,15 +78,13 @@ class TargetArea:
             return reward_map  # No component meets requirement
 
         # Calculate reward based on proximity
-        reward_map = dict.fromkeys(qualifying_agents, 0)
         for i in qualifying_agents:
             dist = np.sqrt(
                 (agents[i].position.x - self.x) ** 2
                 + (agents[i].position.y - self.y) ** 2
             )
             # Reward decreases with distance (1.0 at center, 0.0 at radius)
-            normalized_dist = 1.0 - (dist / self.radius)
-            reward_map[i] = float(normalized_dist)
+            reward_map[i] = 1 / (dist**2 + 0.1)
 
         return reward_map
 
@@ -95,7 +92,7 @@ class TargetArea:
 class SalpChainEnv(gym.Env):
     metadata = {"render_modes": ["human"], "render_fps": 30}
 
-    def __init__(self, render_mode=None, n_agents=6, n_target_areas=4):
+    def __init__(self, render_mode=None, n_agents=6, n_target_areas=1):
         super().__init__()
 
         self.n_agents = n_agents
@@ -109,27 +106,30 @@ class SalpChainEnv(gym.Env):
         self.max_joints_per_agent = 2
 
         # Update action space to include detach action
-        self.action_space = spaces.Dict(
-            {
-                "movement": spaces.Box(
-                    low=-1, high=1, shape=(self.n_agents, 2), dtype=np.float32
-                ),
-                "link_openness": spaces.MultiDiscrete(
-                    [2] * self.n_agents
-                ),  # Each agent has a 0/1 choice
-                "detach": spaces.Box(
-                    low=0, high=1, shape=(self.n_agents,), dtype=np.float32
-                ),  # Detach desire from 0 to 1
-            }
+        # self.action_space = spaces.Dict(
+        #     {
+        #         "movement": spaces.Box(
+        #             low=-1, high=1, shape=(self.n_agents, 2), dtype=np.float32
+        #         ),
+        #         "link_openness": spaces.MultiDiscrete(
+        #             [2] * self.n_agents
+        #         ),  # Each agent has a 0/1 choice
+        #         "detach": spaces.Box(
+        #             low=0, high=1, shape=(self.n_agents,), dtype=np.float32
+        #         ),  # Detach desire from 0 to 1
+        #     }
+        # )
+
+        self.action_space = spaces.Box(
+            low=-1, high=1, shape=(self.n_agents, 2), dtype=np.float32
         )
 
         self.observation_space = spaces.Box(
-            low=-np.inf, high=np.inf, shape=(self.n_agents, 20), dtype=np.float32
+            low=-np.inf, high=np.inf, shape=(self.n_agents, 4), dtype=np.float32
         )
 
         self.world = b2World(gravity=(0, 0))
         self.time_step = 1.0 / 60.0
-        self.step_count = 0
 
         self.agents = []
         self.joints = []
@@ -140,7 +140,7 @@ class SalpChainEnv(gym.Env):
 
         # Boundary parameters (customize as needed)
         self.world_width = 60
-        self.world_height = 40
+        self.world_height = 60
         self.world_center_x = self.world_width // 2
         self.world_center_y = self.world_height // 2
         self.boundary_thickness = 0.5
@@ -148,7 +148,7 @@ class SalpChainEnv(gym.Env):
         # Pygame rendering setup
         self.screen = None
         self.clock = None
-        self.screen_size = (1200, 800)
+        self.screen_size = (1200, 1200)
         self.scale = 20.0  # Pixels per Box2D meter
 
         # Create target areas
@@ -186,6 +186,10 @@ class SalpChainEnv(gym.Env):
             self.n_agents, dtype=np.float32
         )  # Default to 0 (no desire to detach)
 
+        # Step tracking for truncation
+        self.max_steps = 400
+        self.current_step = 0
+
     def _update_union_find(self):
         """Update the Union-Find structure based on current joints"""
         # Reset Union-Find
@@ -205,20 +209,19 @@ class SalpChainEnv(gym.Env):
         for idx in range(self.n_target_areas):
 
             # Get position using the new method
-            # x, y = dynamic_position_target_area(
-            #     self.world_width,
-            #     self.world_height,
-            # )
-            x, y = fixed_position_target_area(idx, self.world_width, self.world_height)
+            x, y = dynamic_position_target_area(
+                self.world_width, self.world_height, existing_positions
+            )
+            # x, y = fixed_position_target_area(idx, self.world_width, self.world_height)
             existing_positions.append((x, y))
 
             # Random radius between 2 and 4
             # radius = np.random.uniform(2.0, 4.0)
-            radius = 4.0
+            radius = 60
 
             # Random coupling requirement between 2 and min(5, n_agents)
             # coupling_req = np.random.randint(2, self.n_agents - 1)
-            coupling_req = 2
+            coupling_req = 1
 
             # Set reward scale based on coupling requirement
             reward_scale = 1.0 * coupling_req
@@ -240,7 +243,7 @@ class SalpChainEnv(gym.Env):
                 # shape=b2PolygonShape(box=(0.3, 0.5)),
                 shape=b2CircleShape(radius=0.4),
                 density=1.0,
-                friction=0.3,
+                friction=1.0,
                 isSensor=False,
             )
 
@@ -271,7 +274,10 @@ class SalpChainEnv(gym.Env):
         self.agents.clear()
         self.joints.clear()
 
-        positions = get_scatter_positions(
+        # positions = get_scatter_positions(
+        #     self.world_width, self.world_height, self.n_agents
+        # )
+        positions = get_linear_positions(
             self.world_width, self.world_height, self.n_agents
         )
 
@@ -846,8 +852,8 @@ class SalpChainEnv(gym.Env):
                 [
                     (a.position.x - self.world_center_x) / self.world_center_x,
                     (a.position.y - self.world_center_y) / self.world_center_y,
-                    a.linearVelocity.x,
-                    a.linearVelocity.y,
+                    # a.linearVelocity.x,
+                    # a.linearVelocity.y,
                 ]
                 for a in self.agents
             ],
@@ -912,8 +918,15 @@ class SalpChainEnv(gym.Env):
                 i, self.sector_sensor_radius
             )
 
+            x_diff = self.target_areas[0].x - self.agents[i].position.x
+            y_diff = self.target_areas[0].y - self.agents[i].position.y
+
+            diff_pos = np.array([x_diff / self.world_width, y_diff / self.world_height])
+
             # Combine all observations: own absolute state + connected relative states + density sensors
-            agent_obs = np.concatenate([own_state, connected_states, density_sensors])
+            # agent_obs = np.concatenate([own_state, connected_states, density_sensors])
+            agent_obs = np.concatenate([own_state, diff_pos])
+
             observations.append(agent_obs)
 
         return np.array(observations, dtype=np.float32)
@@ -932,19 +945,15 @@ class SalpChainEnv(gym.Env):
 
         return reward, terminated
 
-    def _get_target_rewards(self):
+    def _get_rewards(self):
         """Calculate combined rewards from chain size and target areas"""
         # Calculate target area rewards
         shared_reward = 0.0
 
-        individual_rewards = dict.fromkeys(list(range(0, self.n_agents)), 0)
-
-        # Default to false if there are no targets
-        if not self.target_areas:
-            return 0.0, False
+        individual_rewards = {i: 0 for i in range(self.n_agents)}
 
         # Check if all targets have their coupling requirements met
-        all_couplings_met = True
+        all_couplings_met = False
 
         for target_area in self.target_areas:
             # Calculate reward for this target area
@@ -954,10 +963,14 @@ class SalpChainEnv(gym.Env):
             if not reward_map:
                 all_couplings_met = False
             else:
-                individual_rewards = add_dictionary_values(
-                    individual_rewards, reward_map
-                )
-                shared_reward += max(reward_map.values())
+
+                for i, _ in enumerate(self.agents):
+                    # individual_rewards[i] = reward_map[i] - self.prev_rewards[i]
+                    # self.prev_rewards[i] = reward_map[i]
+
+                    individual_rewards[i] = reward_map[i]
+
+                shared_reward += min(reward_map.values())
 
         # Set terminated based on whether all couplings are met
         terminated = all_couplings_met
@@ -1076,7 +1089,7 @@ class SalpChainEnv(gym.Env):
 
             # Calculate density contribution (inverse square of distance)
             # Add a small epsilon to avoid division by zero
-            density_value = 1.0 / (distance * distance + 0.1)
+            density_value = 1.0 / ((distance / self.sector_sensor_radius) + 1.0)
 
             # Add to appropriate sector
             agent_densities[sector] += density_value
@@ -1109,10 +1122,13 @@ class SalpChainEnv(gym.Env):
             # This makes more valuable targets (higher reward scale) provide stronger signals
             # and targets with higher coupling requirements also provide stronger signals
             weight = target.reward_scale
-            density_value = weight * (1.0 / (distance * distance + 0.1))
+            density_value = weight * (
+                1.0 / ((distance / self.sector_sensor_radius) + 1.0)
+            )
 
-            # Add to appropriate sector
-            target_densities[sector] += density_value
+            # Set as sector value if its the highest value
+            if target_densities[sector] < density_value:
+                target_densities[sector] = density_value
 
         # Combine agent and target densities
         return np.concatenate([agent_densities, target_densities])
@@ -1141,6 +1157,12 @@ class SalpChainEnv(gym.Env):
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
 
+        # Reset previous rewards
+        self.prev_rewards = dict.fromkeys(list(range(0, self.n_agents)), 0)
+
+        # Reset step counter
+        self.current_step = 0
+
         for body in self.agents:
             self.world.DestroyBody(body)
 
@@ -1166,23 +1188,25 @@ class SalpChainEnv(gym.Env):
         return obs, {}
 
     def step(self, actions):
-        # Unpack movement, link_openness, and detach actions
-        movement_actions = actions["movement"]
-        link_openness_actions = actions["link_openness"]
-        detach_actions = actions["detach"]
+        # # Unpack movement, link_openness, and detach actions
+        # movement_actions = actions["movement"]
+        # link_openness_actions = actions["link_openness"]
+        # detach_actions = actions["detach"]
 
-        # Update link_openness and detach states - ensure we get scalar values
-        # Convert to flat numpy array if needed
-        self.link_openness = np.array(link_openness_actions).flatten()
-        self.detach_values = np.array(detach_actions).flatten()
+        # # Update link_openness and detach states - ensure we get scalar values
+        # # Convert to flat numpy array if needed
+        # self.link_openness = np.array(link_openness_actions).flatten()
+        # self.detach_values = np.array(detach_actions).flatten()
 
-        # Check for detachments before applying forces
-        self._process_detachments()
+        # # Check for detachments before applying forces
+        # self._process_detachments()
+
+        movement_actions = actions
 
         # Apply movement forces
         for idx, agent in enumerate(self.agents):
-            force_x = float(movement_actions[idx].squeeze()[0]) * 1  # X component
-            force_y = float(movement_actions[idx].squeeze()[1]) * 1  # Y component
+            force_x = float(movement_actions[idx][0])  # X component
+            force_y = float(movement_actions[idx][1])  # Y component
 
             # Store the 2D force vector for visualization
             self.applied_forces[idx] = [force_x, force_y]
@@ -1193,7 +1217,7 @@ class SalpChainEnv(gym.Env):
         # Rest of the step method remains the same
         self.world.Step(self.time_step, 6, 2)
 
-        self._join_on_proximity()
+        # self._join_on_proximity()
 
         # Check for boundary collisions
         shared_reward = 0.0
@@ -1203,14 +1227,10 @@ class SalpChainEnv(gym.Env):
             shared_reward = -10.0  # Negative reward for boundary collision
         else:
             # The normal reward calculation
-            shared_reward, individual_rewards, terminated = self._get_target_rewards()
+            shared_reward, individual_rewards, terminated = self._get_rewards()
 
         # The observation
         obs = self._get_observation()
-
-        truncated = False
-
-        self.step_count += 1
 
         # Reset collision flag for next step
         self.contact_listener.reset()
@@ -1231,6 +1251,10 @@ class SalpChainEnv(gym.Env):
             ],
             "individual_rewards": individual_rewards,
         }
+
+        self.current_step += 1
+
+        truncated = self.current_step >= self.max_steps
 
         return obs, shared_reward, terminated, truncated, info
 

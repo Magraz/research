@@ -80,6 +80,7 @@ class PPONetwork(nn.Module):
 
                 # Movement action (continuous)
                 movement_mean, movement_log_std = action_params["movement"]
+
                 if deterministic:
                     movement = movement_mean
                 else:
@@ -89,6 +90,7 @@ class PPONetwork(nn.Module):
                 # Link openness (discrete binary)
                 link_logits = action_params["link_openness"]
                 link_probs = torch.sigmoid(link_logits)  # Convert to probability
+
                 if deterministic:
                     link_openness = (link_probs > 0.5).int()
                 else:
@@ -96,6 +98,7 @@ class PPONetwork(nn.Module):
 
                 # Detach action (continuous in [0,1])
                 detach_mean, detach_log_std = action_params["detach"]
+
                 if deterministic:
                     detach = detach_mean
                 else:

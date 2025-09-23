@@ -8,6 +8,46 @@ import pygame
 def get_target_seeking_action(env):
     """Generate actions that move each agent towards the nearest target"""
 
+    # Extract target positions
+    target_positions = np.array([(target.x, target.y) for target in env.target_areas])
+
+    # Get current agent positions
+    agent_positions = np.array(
+        [[agent.position.x, agent.position.y] for agent in env.agents]
+    )
+
+    def find_nearest_target(agent_pos):
+        distances = np.linalg.norm(target_positions - agent_pos, axis=1)
+        nearest_idx = np.argmin(distances)
+        return target_positions[nearest_idx], distances[nearest_idx]
+
+    def calculate_movement_towards(from_pos, to_pos, max_force=1.0):
+        direction = to_pos - from_pos
+        distance = np.linalg.norm(direction)
+
+        if distance < 0.01:
+            return np.array([0.0, 0.0])
+
+        normalized_direction = direction / distance
+
+        # Scale force based on distance (stronger when further)
+        return normalized_direction * max_force
+
+    # Calculate movements toward nearest targets
+    movements = []
+    for i in range(env.n_agents):
+        nearest_target, distance = find_nearest_target(agent_positions[i])
+        movement = calculate_movement_towards(
+            agent_positions[i], nearest_target, max_force=1.0
+        )
+        movements.append(movement)
+
+    return np.array(movements)
+
+
+def get_target_seeking_hybrid_action(env):
+    """Generate actions that move each agent towards the nearest target"""
+
     # Get target positions from environment info
     if not hasattr(env, "target_areas") or not env.target_areas:
         # If no targets available, return random movement
@@ -199,11 +239,10 @@ def check_keyboard_input():
 
 
 # Initialize environment
-env = SalpChainEnv(render_mode="human", n_agents=8)
-info_record = []
+env = SalpChainEnv(render_mode="human", n_agents=2)
 
 # Action mode control
-action_mode = "nearest"  # Start with nearest-agent behavior
+action_mode = "target"  # Start with nearest-agent behavior
 
 print("=" * 50)
 print("CONTROLS:")
@@ -211,14 +250,17 @@ print("  N - Switch to Nearest Agent behavior")
 print("  S - Switch to Scatter behavior")
 print("  R - Switch to Random behavior")
 print("  T - Switch to Target Seeking behavior")
+print("  H - Switch to Target Seeking Hybrid behavior")
 print("  Q - Quit simulation")
 print("=" * 50)
 print(f"Starting with '{action_mode.upper()}' action mode")
 
+info_record = []
+episode_record = {"observation": [], "reward": [], "info": []}
+
 try:
-    for episode in range(10):
+    for episode in range(3):
         obs, _ = env.reset()
-        episode_info = None
 
         for step in range(500):
             # Check for keyboard input to switch modes
@@ -251,22 +293,26 @@ try:
                 action = biased_sample(env, zero_prob=0.7)
 
             obs, reward, terminated, truncated, info = env.step(action)
-            episode_info = info
+
+            episode_record["observation"].append(obs)
+            episode_record["reward"].append(reward)
+            episode_record["info"].append(info)
+
             env.render()
 
             # Display current mode and step info
             if step % 25 == 0:
                 mode_display = f"[{action_mode.upper()}]"
                 print(
-                    f"Step={step:3d} {mode_display:10s} Reward={reward:6.2f} Reward Map={info["individual_rewards"]}"
+                    f"Step={step:3d} {mode_display:10s} Reward={reward:6.2f} Reward Map={info["individual_rewards"]} Observation={obs}"
                 )
 
             if terminated:
                 print("TERMINATED")
                 break
 
-        if episode_info is not None:
-            info_record.append(episode_info)
+        info_record.append(episode_record)
+        episode_record = {"observation": [], "reward": [], "info": []}
 
         print(f"Completed Episode {episode} in {action_mode.upper()} mode")
 
@@ -278,7 +324,7 @@ finally:
 
     # Save results
     output_dir = os.path.dirname(os.path.abspath(__file__))
-    pickle_path = os.path.join(output_dir, "test_info_three_modes.pkl")
+    pickle_path = os.path.join(output_dir, "rollout_info.pkl")
 
     with open(pickle_path, "wb") as f:
         pickle.dump(info_record, f)

@@ -8,8 +8,8 @@ class Params:
     n_total_steps: int
     n_total_episodes: int
     n_max_steps_per_episode: int
+    n_minibatches: int
     batch_size: int
-    minibatch_size: int
 
     eps_clip: float
     gamma: float
