@@ -16,7 +16,7 @@ class IPPOTrainer:
         action_dim=None,
         ppo_config=None,
         dirs=None,
-        use_hybrid_actions=False,
+        use_dict_actions=False,
         device="cpu",
     ):
         self.device = device
@@ -27,16 +27,16 @@ class IPPOTrainer:
         # Create environment
         self.env = env
 
-        self.using_hybrid_actions = use_hybrid_actions
+        self.using_dict_actions = use_dict_actions
         self.agents = []
 
         for _ in range(self.n_agents):
             agent = PPOAgent(
                 state_dim=state_dim,
                 action_space=(
-                    self.env.action_space if self.using_hybrid_actions else None
+                    self.env.action_space if self.using_dict_actions else None
                 ),
-                action_dim=(action_dim if not self.using_hybrid_actions else None),
+                action_dim=(action_dim if not self.using_dict_actions else None),
                 device=device,
                 **ppo_config,
             )
@@ -50,7 +50,7 @@ class IPPOTrainer:
     def collect_trajectory(self, max_steps):
         obs, _ = self.env.reset()
         total_reward = 0
-        step_count = 0
+        total_step_count = 0
         current_episode_steps = 0
         steps_per_episode = []
         episode_count = 0
@@ -71,7 +71,7 @@ class IPPOTrainer:
                 values.append(value)
 
             # Format actions correctly for environment step
-            if self.using_hybrid_actions:
+            if self.using_dict_actions:
                 # Convert list of dict actions to dict of batched actions
                 env_actions = {}
                 for key in actions[0].keys():
@@ -96,6 +96,8 @@ class IPPOTrainer:
 
             obs = next_obs
             total_reward += reward
+            total_step_count += 1
+            current_episode_steps += 1
 
             # If environment terminated or truncated, reset it and continue collecting
             if terminated or truncated:
@@ -115,7 +117,13 @@ class IPPOTrainer:
                 _, _, final_value = agent.get_action(obs[i])
             final_values.append(final_value)
 
-        return total_reward, step_count, episode_count, steps_per_episode, final_values
+        return (
+            total_reward,
+            total_step_count,
+            episode_count,
+            steps_per_episode,
+            final_values,
+        )
 
     def collect_trajectory_mpe(self, max_steps):
 
@@ -291,17 +299,13 @@ class IPPOTrainer:
                 actions.append(action)
 
             # Format actions correctly for environment step
-            if self.using_hybrid_actions:
+            if self.using_dict_actions:
+                # Convert list of dict actions to dict of batched actions
                 env_actions = {}
                 for key in actions[0].keys():
-                    # Move tensors to CPU before converting to numpy
-                    env_actions[key] = np.array(
-                        [
-                            a[key].cpu().numpy() if torch.is_tensor(a[key]) else a[key]
-                            for a in actions
-                        ]
-                    )
+                    env_actions[key] = np.array([a[key] for a in actions])
             else:
+                # Original format for Box actions
                 env_actions = np.array(actions)
 
             # Step environment
@@ -339,7 +343,7 @@ class IPPOTrainer:
                     actions.append(action)
 
                 # Format actions correctly for environment step
-                if self.using_hybrid_actions:
+                if self.using_dict_actions:
                     env_actions = {}
                     for key in actions[0].keys():
                         # Move tensors to CPU before converting to numpy

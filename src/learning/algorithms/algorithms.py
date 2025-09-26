@@ -85,14 +85,13 @@ def run_algorithm(
         case AlgorithmEnum.IPPO:
             exp_config = IPPO_Experiment(**exp_dict)
             runner = IPPO_Runner(
-                device=exp_config.device,
-                batch_dir=batch_dir,
-                trials_dir=Path(batch_dir).parents[1]
-                / "results"
-                / batch_name
-                / experiment_name,
-                trial_id=trial_id,
-                checkpoint=checkpoint,
+                exp_config.device,
+                batch_dir,
+                (Path(batch_dir).parents[1] / "results" / batch_name / experiment_name),
+                trial_id,
+                checkpoint,
+                exp_config,
+                env_config,
             )
 
         case AlgorithmEnum.PPO:
@@ -138,17 +137,8 @@ def run_algorithm(
         #     )
 
     if view:
-        runner.view(
-            env_config=env_config,
-            exp_config=exp_config,
-        )
+        runner.view()
     elif evaluate:
-        runner.evaluate(
-            env_config=env_config,
-            exp_config=exp_config,
-        )
+        runner.evaluate()
     else:
-        runner.train(
-            env_config=env_config,
-            exp_config=exp_config,
-        )
+        runner.train()

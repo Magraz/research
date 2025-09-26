@@ -31,10 +31,13 @@ class PPOAgent:
         # Initialize network
         if action_space is not None:
             self.policy = Hybrid_MLP_AC(state_dim, action_space).to(device)
+            self.policy_old = Hybrid_MLP_AC(state_dim, action_space).to(device)
+
         else:
             self.policy = MLP_AC(state_dim, action_dim).to(device)
             self.policy_old = MLP_AC(state_dim, action_dim).to(device)
-            self.policy_old.load_state_dict(self.policy.state_dict())
+
+        self.policy_old.load_state_dict(self.policy.state_dict())
 
         self.optimizer = optim.Adam(self.policy.parameters(), lr=lr)
 
@@ -52,7 +55,7 @@ class PPOAgent:
         # This will be determined when the first action is stored
         self.is_dict_action = None
 
-    def get_action(self, state, update_norm=False, deterministic=False):
+    def get_action(self, state, deterministic=False):
         """Get action from policy while minimizing tensor conversions"""
 
         state_tensor = torch.FloatTensor(state).to(self.device)
@@ -65,7 +68,7 @@ class PPOAgent:
             # Handle dictionary actions
             numpy_action = {}
             for key, tensor in action.items():
-                numpy_action[key] = tensor.cpu().numpy()[0]
+                numpy_action[key] = tensor.cpu().numpy()
             return numpy_action, log_prob.cpu().item(), value.cpu().item()
         else:
             # Handle regular actions
@@ -89,23 +92,9 @@ class PPOAgent:
 
         if self.is_dict_action:
             # Convert dict action components to tensors
-            action_dict = {}
-            for key, val in action.items():
-                if not torch.is_tensor(val):
-                    action_dict[key] = (
-                        torch.FloatTensor([val]).to(self.device)
-                        if np.isscalar(val)
-                        else torch.FloatTensor(val).to(self.device)
-                    )
-                else:
-                    action_dict[key] = val.to(self.device)
-            self.actions.append(action_dict)
-        else:
-            # Convert regular action to tensor
-            if not torch.is_tensor(action):
-                self.actions.append(torch.FloatTensor(action).to(self.device))
-            else:
-                self.actions.append(action.to(self.device))
+            action = np.concatenate(list(action.values()), axis=0)
+
+        self.actions.append(torch.FloatTensor(action).to(self.device))
 
         # Store other transition components as tensors
         self.rewards.append(torch.tensor(reward, dtype=torch.float32).to(self.device))
@@ -158,36 +147,8 @@ class PPOAgent:
         states = torch.stack(self.states)
         old_log_probs = torch.stack(self.log_probs).unsqueeze(-1)
 
-        # Handle different action types
-        if self.is_dict_action:
-            # For dict actions, create separate tensors for each action component
-            action_tensors = {}
-            for key in self.actions[0].keys():
-                # Stack tensors for each component
-                try:
-                    action_tensors[key] = torch.stack([a[key] for a in self.actions])
-                except:
-                    # If shapes don't match (e.g., some actions have different dimensions)
-                    # Process them individually
-                    component_tensors = []
-                    for a in self.actions:
-                        if a[key].dim() == 0:  # If scalar
-                            component_tensors.append(a[key].unsqueeze(0))
-                        else:
-                            component_tensors.append(a[key])
-                    action_tensors[key] = torch.stack(component_tensors)
-
-            # Create dataset with all components
-            dataset_tensors = [states, old_log_probs, returns, advantages]
-            for key in action_tensors:
-                dataset_tensors.insert(1, action_tensors[key])  # Insert after states
-
-            dataset = TensorDataset(*dataset_tensors)
-
-        else:
-            # For regular actions, simply stack them
-            actions = torch.stack(self.actions)
-            dataset = TensorDataset(states, actions, old_log_probs, returns, advantages)
+        actions = torch.stack(self.actions)
+        dataset = TensorDataset(states, actions, old_log_probs, returns, advantages)
 
         dataloader = DataLoader(dataset, batch_size=minibatch_size, shuffle=True)
 
@@ -203,16 +164,6 @@ class PPOAgent:
                 b_returns,
                 b_advantages,
             ) in dataloader:
-                # Process batch based on action type
-                if self.is_dict_action:
-                    # Extract action components from batch
-                    batch_dict_actions = {}
-                    for i, key in enumerate(action_tensors.keys()):
-                        batch_dict_actions[key] = b_old_actions[
-                            i + 1
-                        ]  # +1 because states is first
-
-                    b_old_actions = batch_dict_actions
 
                 # Forward pass
                 log_probs, values, entropy = self.policy.evaluate(

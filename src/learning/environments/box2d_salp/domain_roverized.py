@@ -92,7 +92,7 @@ class TargetArea:
 class SalpChainEnv(gym.Env):
     metadata = {"render_modes": ["human"], "render_fps": 30}
 
-    def __init__(self, render_mode=None, n_agents=2, n_target_areas=1):
+    def __init__(self, render_mode=None, n_agents=6, n_target_areas=1):
         super().__init__()
 
         self.n_agents = n_agents
@@ -106,22 +106,26 @@ class SalpChainEnv(gym.Env):
         self.max_joints_per_agent = 2
 
         # Update action space to include detach action
-        self.action_space = spaces.Dict(
-            {
-                "movement": spaces.Box(
-                    low=-1, high=1, shape=(self.n_agents, 2), dtype=np.float32
-                ),
-                "attach": spaces.MultiDiscrete(
-                    [1] * self.n_agents
-                ),  # Each agent has a 0/1 choice
-                "detach": spaces.MultiDiscrete(
-                    [1] * self.n_agents
-                ),  # Each agent has a 0/1 choice
-            }
+        # self.action_space = spaces.Dict(
+        #     {
+        #         "movement": spaces.Box(
+        #             low=-1, high=1, shape=(self.n_agents, 2), dtype=np.float32
+        #         ),
+        #         "link_openness": spaces.MultiDiscrete(
+        #             [2] * self.n_agents
+        #         ),  # Each agent has a 0/1 choice
+        #         "detach": spaces.Box(
+        #             low=0, high=1, shape=(self.n_agents,), dtype=np.float32
+        #         ),  # Detach desire from 0 to 1
+        #     }
+        # )
+
+        self.action_space = spaces.Box(
+            low=-1, high=1, shape=(self.n_agents, 2), dtype=np.float32
         )
 
         self.observation_space = spaces.Box(
-            low=-np.inf, high=np.inf, shape=(self.n_agents, 10), dtype=np.float32
+            low=-np.inf, high=np.inf, shape=(self.n_agents, 4), dtype=np.float32
         )
 
         self.world = b2World(gravity=(0, 0))
@@ -173,13 +177,13 @@ class SalpChainEnv(gym.Env):
         self.union_find = UnionFind(n_agents)
 
         # Add a field to track link openness for each agent
-        self.attach_values = np.zeros(
+        self.link_openness = np.ones(
             self.n_agents, dtype=np.int8
-        )  # Default to no attachment (0)
+        )  # Default to open (1)
 
         # Add a field to track detach values for each agent
         self.detach_values = np.zeros(
-            self.n_agents, dtype=np.int8
+            self.n_agents, dtype=np.float32
         )  # Default to 0 (no desire to detach)
 
         # Step tracking for truncation
@@ -205,22 +209,22 @@ class SalpChainEnv(gym.Env):
         for idx in range(self.n_target_areas):
 
             # Get position using the new method
-            # x, y = dynamic_position_target_area(
-            #     self.world_width, self.world_height, existing_positions
-            # )
-            x, y = fixed_position_target_area(idx, self.world_width, self.world_height)
+            x, y = dynamic_position_target_area(
+                self.world_width, self.world_height, existing_positions
+            )
+            # x, y = fixed_position_target_area(idx, self.world_width, self.world_height)
             existing_positions.append((x, y))
 
             # Random radius between 2 and 4
             # radius = np.random.uniform(2.0, 4.0)
-            radius = 10
+            radius = 60
 
             # Random coupling requirement between 2 and min(5, n_agents)
             # coupling_req = np.random.randint(2, self.n_agents - 1)
-            coupling_req = 2
+            coupling_req = 1
 
             # Set reward scale based on coupling requirement
-            reward_scale = 1.0  # * coupling_req
+            reward_scale = 1.0 * coupling_req
 
             # Random color (semi-transparent)
             color = (
@@ -270,12 +274,12 @@ class SalpChainEnv(gym.Env):
         self.agents.clear()
         self.joints.clear()
 
-        positions = get_scatter_positions(
-            self.world_width, self.world_height, self.n_agents
-        )
-        # positions = get_linear_positions(
+        # positions = get_scatter_positions(
         #     self.world_width, self.world_height, self.n_agents
         # )
+        positions = get_linear_positions(
+            self.world_width, self.world_height, self.n_agents
+        )
 
         self._create_agents(positions)
         # self._create_sequential_joints()
@@ -291,8 +295,8 @@ class SalpChainEnv(gym.Env):
             center_y = self.screen_size[1] - body.position.y * self.scale
             radius = body.fixtures[0].shape.radius * self.scale  # Get radius from shape
 
-            # Choose color based on attach
-            if self.attach_values[idx] == 1 and self.detach_values[idx] == 0:
+            # Choose color based on link_openness
+            if self.link_openness[idx] == 1:
                 color = OPEN_COLOR  # Open to links
             else:
                 color = CLOSED_COLOR  # Closed to links
@@ -313,6 +317,44 @@ class SalpChainEnv(gym.Env):
                 int(radius),
                 2,  # Outline thickness
             )
+
+            # Visualize detach value as a red ring that grows with detach value
+            detach_value = self.detach_values[idx]
+            if detach_value > 0.1:  # Only show if significant
+                # Calculate ring thickness based on detach value
+                ring_thickness = int(3 * detach_value)  # 0 to 3 pixels thick
+
+                # Calculate ring color (get more red as detach increases)
+                ring_red = min(255, int(150 + 105 * detach_value))  # 150-255
+                ring_color = (ring_red, 50, 50)
+
+                # Draw detach ring
+                pygame.draw.circle(
+                    self.screen,
+                    ring_color,
+                    (int(center_x), int(center_y)),
+                    int(radius * 0.7),  # Inner ring
+                    ring_thickness,  # Thickness varies with detach value
+                )
+
+            # Draw plus sign for open agents
+            if self.link_openness[idx] == 1:
+                # Draw a small plus sign for open agents
+                line_length = radius * 0.5
+                pygame.draw.line(
+                    self.screen,
+                    (255, 255, 255),
+                    (int(center_x - line_length), int(center_y)),
+                    (int(center_x + line_length), int(center_y)),
+                    3,  # Line thickness
+                )
+                pygame.draw.line(
+                    self.screen,
+                    (255, 255, 255),
+                    (int(center_x), int(center_y - line_length)),
+                    (int(center_x), int(center_y + line_length)),
+                    3,  # Line thickness
+                )
 
     def _render_agents_as_boxes(self):
         for idx, body in enumerate(self.agents):
@@ -352,7 +394,7 @@ class SalpChainEnv(gym.Env):
 
             # Skip if this agent is not open to being linked to
             # Use scalar comparison to avoid array comparison issues
-            if self.attach_values[i] == 0:
+            if self.link_openness[i] == 0:
                 continue
 
             for j, bodyB in enumerate(self.agents[i + 1 :], i + 1):
@@ -361,7 +403,7 @@ class SalpChainEnv(gym.Env):
                     continue
 
                 # Skip if other agent is not open to being linked to
-                if self.attach_values[j] == 0:
+                if self.link_openness[j] == 0:
                     continue
 
                 # Check if already connected using Union-Find
@@ -863,8 +905,7 @@ class SalpChainEnv(gym.Env):
                 connected_states = connected_relative_states.flatten()
 
                 # Pad or truncate to fixed size
-                target_size = self.max_joints_per_agent * all_states[i].shape[-1]
-
+                target_size = self.max_joints_per_agent * 4
                 if len(connected_states) < target_size:
                     connected_states = np.pad(
                         connected_states, (0, target_size - len(connected_states))
@@ -884,7 +925,7 @@ class SalpChainEnv(gym.Env):
 
             # Combine all observations: own absolute state + connected relative states + density sensors
             # agent_obs = np.concatenate([own_state, connected_states, density_sensors])
-            agent_obs = np.concatenate([own_state, density_sensors])
+            agent_obs = np.concatenate([own_state, diff_pos])
 
             observations.append(agent_obs)
 
@@ -1080,7 +1121,8 @@ class SalpChainEnv(gym.Env):
             # Calculate target density contribution, weighted by reward scale and coupling requirement
             # This makes more valuable targets (higher reward scale) provide stronger signals
             # and targets with higher coupling requirements also provide stronger signals
-            density_value = target.reward_scale * (
+            weight = target.reward_scale
+            density_value = weight * (
                 1.0 / ((distance / self.sector_sensor_radius) + 1.0)
             )
 
@@ -1091,7 +1133,7 @@ class SalpChainEnv(gym.Env):
         # Combine agent and target densities
         return np.concatenate([agent_densities, target_densities])
 
-    def _process_detachments(self):
+    def _process_detachments(self, detach_threshold=0.90):
         """Check for agents that want to detach from their connections"""
         # Create a list of joints to remove (we can't modify self.joints while iterating)
         joints_to_remove = []
@@ -1102,7 +1144,10 @@ class SalpChainEnv(gym.Env):
             idx_b = self.agents.index(joint.bodyB)
 
             # Check if both agents want to detach
-            if self.detach_values[idx_a] == self.detach_values[idx_b]:
+            if (
+                self.detach_values[idx_a] > detach_threshold
+                and self.detach_values[idx_b] > detach_threshold
+            ):
                 joints_to_remove.append(joint)
 
         # Remove the joints outside the loop
@@ -1126,8 +1171,8 @@ class SalpChainEnv(gym.Env):
         # Recreate target areas with new random positions
         self._create_target_areas()
 
-        # Reset attach to all open
-        self.attach_values = np.ones(self.n_agents, dtype=np.int8)
+        # Reset link_openness to all open
+        self.link_openness = np.ones(self.n_agents, dtype=np.int8)
 
         # Reset detach values to all zero
         self.detach_values = np.zeros(self.n_agents, dtype=np.float32)
@@ -1143,18 +1188,20 @@ class SalpChainEnv(gym.Env):
         return obs, {}
 
     def step(self, actions):
-        # Unpack movement, attach, and detach actions
-        movement_actions = actions["movement"]
-        attach_actions = actions["attach"]
-        detach_actions = actions["detach"]
+        # # Unpack movement, link_openness, and detach actions
+        # movement_actions = actions["movement"]
+        # link_openness_actions = actions["link_openness"]
+        # detach_actions = actions["detach"]
 
-        # Update attach and detach states - ensure we get scalar values
-        # Convert to flat numpy array if needed
-        self.attach_values = np.array(attach_actions).flatten()
-        self.detach_values = np.array(detach_actions).flatten()
+        # # Update link_openness and detach states - ensure we get scalar values
+        # # Convert to flat numpy array if needed
+        # self.link_openness = np.array(link_openness_actions).flatten()
+        # self.detach_values = np.array(detach_actions).flatten()
 
-        # Check for detachments before applying forces
-        self._process_detachments()
+        # # Check for detachments before applying forces
+        # self._process_detachments()
+
+        movement_actions = actions
 
         # Apply movement forces
         for idx, agent in enumerate(self.agents):
@@ -1170,7 +1217,7 @@ class SalpChainEnv(gym.Env):
         # Rest of the step method remains the same
         self.world.Step(self.time_step, 6, 2)
 
-        self._join_on_proximity()
+        # self._join_on_proximity()
 
         # Check for boundary collisions
         shared_reward = 0.0

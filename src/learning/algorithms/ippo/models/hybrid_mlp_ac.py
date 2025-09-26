@@ -2,6 +2,15 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math
+import numpy as np
+
+LOG_STD_MIN, LOG_STD_MAX = -5.0, 2.0  # clamp for stability
+
+
+def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
+    torch.nn.init.orthogonal_(layer.weight, std)
+    torch.nn.init.constant_(layer.bias, bias_const)
+    return layer
 
 
 # To this:
@@ -19,52 +28,52 @@ class Hybrid_MLP_AC(nn.Module):
         self.action_space = action_space
 
         # Shared feature extraction
-        self.actor_layer1 = nn.Linear(observation_space, hidden_dim)
-        self.actor_layer2 = nn.Linear(hidden_dim, hidden_dim)
+        self.actor_layer1 = layer_init(nn.Linear(observation_space, hidden_dim))
+        self.actor_layer2 = layer_init(nn.Linear(hidden_dim, hidden_dim))
 
         # Movement action (continuous 2D)
         movement_dim = action_space["movement"].shape[-1]
-        self.movement_mean = nn.Linear(hidden_dim, movement_dim)
-        self.movement_log_std = nn.Parameter(torch.ones(1, movement_dim) * -0.5)
+        self.movement_mean = layer_init(nn.Linear(hidden_dim, movement_dim), std=0.01)
+        self.movement_log_std = nn.Parameter(
+            torch.full((movement_dim,), -0.5, requires_grad=True)
+        )
 
-        # Link openness action (discrete binary)
-        self.link_openness_logits = nn.Linear(hidden_dim, 1)  # Single binary output
+        # Attach action (discrete binary)
+        self.attach_action_logits = layer_init(nn.Linear(hidden_dim, 1), std=0.01)
 
-        # Detach action (continuous scalar)
-        self.detach_mean = nn.Linear(hidden_dim, 1)
-        self.detach_log_std = nn.Parameter(torch.ones(1, 1) * -0.5)
+        # Detach action (discrete binary)
+        self.detach_action_logits = layer_init(nn.Linear(hidden_dim, 1), std=0.01)
 
         # Critic
         self.critic = nn.Sequential(
-            nn.Linear(observation_space, 128),
-            nn.GELU(),
-            nn.Linear(128, 128),
-            nn.GELU(),
-            nn.Linear(128, 1),
+            layer_init(nn.Linear(observation_space, hidden_dim)),
+            nn.Tanh(),
+            layer_init(nn.Linear(hidden_dim, hidden_dim)),
+            nn.Tanh(),
+            layer_init(nn.Linear(hidden_dim, 1), std=1.0),
         )
 
     def forward(self, state):
         # Shared feature extraction
-        x = F.gelu(self.actor_layer1(state))
-        x = F.gelu(self.actor_layer2(x))
+        x = F.tanh(self.actor_layer1(state))
+        x = F.tanh(self.actor_layer2(x))
 
         # Movement action distribution
-        movement_mean = torch.tanh(self.movement_mean(x))
+        movement_mean = F.tanh(self.movement_mean(x))
         movement_log_std = self.movement_log_std.expand_as(movement_mean)
 
         # Link openness logits
-        link_openness_logits = self.link_openness_logits(x)
+        attach_action_logits = self.attach_action_logits(x)
 
         # Detach action distribution
-        detach_mean = torch.sigmoid(self.detach_mean(x))  # Bound to [0,1]
-        detach_log_std = self.detach_log_std.expand_as(detach_mean)
+        detach_action_logits = self.detach_action_logits(x)
 
         value = self.critic(state)
 
         return {
             "movement": (movement_mean, movement_log_std),
-            "link_openness": link_openness_logits,
-            "detach": (detach_mean, detach_log_std),
+            "attach": attach_action_logits,
+            "detach": detach_action_logits,
         }, value
 
     def act(self, state, deterministic=False):
@@ -73,34 +82,29 @@ class Hybrid_MLP_AC(nn.Module):
         # Movement action (continuous)
         movement_mean, movement_log_std = action_params["movement"]
 
+        # Link openness (discrete binary)
+        attach_logits = action_params["attach"]
+        attach_probs = torch.sigmoid(attach_logits)  # Convert to probability
+
+        # Detach action (discrete binary)
+        detach_logits = action_params["detach"]
+        detach_probs = torch.sigmoid(detach_logits)  # Convert to probability
+
         if deterministic:
             movement = movement_mean
+            attach_action = (attach_probs > 0.5).int()
+            detach_action = (detach_probs > 0.5).int()
+
         else:
-            movement_std = torch.exp(movement_log_std)
+            movement_std = torch.exp(movement_log_std.clamp(LOG_STD_MIN, LOG_STD_MAX))
             movement = torch.normal(movement_mean, movement_std)
-
-        # Link openness (discrete binary)
-        link_logits = action_params["link_openness"]
-        link_probs = torch.sigmoid(link_logits)  # Convert to probability
-
-        if deterministic:
-            link_openness = (link_probs > 0.5).int()
-        else:
-            link_openness = torch.bernoulli(link_probs).int()
-
-        # Detach action (continuous in [0,1])
-        detach_mean, detach_log_std = action_params["detach"]
-
-        if deterministic:
-            detach = detach_mean
-        else:
-            detach_std = torch.exp(detach_log_std)
-            detach = torch.clamp(torch.normal(detach_mean, detach_std), 0.0, 1.0)
+            attach_action = torch.bernoulli(attach_probs).int()
+            detach_action = torch.bernoulli(detach_probs).int()
 
         action = {
             "movement": movement,
-            "link_openness": link_openness,
-            "detach": detach,
+            "attach": attach_action,
+            "detach": detach_action,
         }
 
         # Calculate log probability
@@ -110,7 +114,10 @@ class Hybrid_MLP_AC(nn.Module):
 
     def evaluate(self, state, action):
         action_params, value = self.forward(state)
-        log_prob = self._get_log_prob(action, action_params)
+        action_dict = self._split_by_indices(
+            action, list(action_params.keys()), [2, 3], dim=1
+        )
+        log_prob = self._get_log_prob(action_dict, action_params)
         entropy = self._get_entropy(action_params)
         return log_prob, value, entropy
 
@@ -118,51 +125,44 @@ class Hybrid_MLP_AC(nn.Module):
         """Calculate combined log probability for all action components"""
         # Movement log prob
         movement_mean, movement_log_std = action_params["movement"]
-        movement_std = torch.exp(movement_log_std)
+        movement_std = torch.exp(movement_log_std.clamp(LOG_STD_MIN, LOG_STD_MAX))
         movement_dist = torch.distributions.Normal(movement_mean, movement_std)
         movement_log_prob = movement_dist.log_prob(action["movement"]).sum(-1)
 
         # Link openness log prob (binary)
-        link_logits = action_params["link_openness"]
-        link_dist = torch.distributions.Bernoulli(logits=link_logits.squeeze(-1))
-        link_log_prob = link_dist.log_prob(action["link_openness"].float().squeeze(-1))
+        attach_logits = action_params["attach"]
+        attach_dist = torch.distributions.Bernoulli(logits=attach_logits.squeeze(-1))
+        attach_log_prob = attach_dist.log_prob(action["attach"].float().squeeze(-1))
 
         # Detach log prob
-        detach_mean, detach_log_std = action_params["detach"]
-        detach_std = torch.exp(detach_log_std)
-        detach_dist = torch.distributions.Normal(detach_mean, detach_std)
-        detach_log_prob = detach_dist.log_prob(action["detach"]).sum(-1)
+        detach_logits = action_params["detach"]
+        detach_dist = torch.distributions.Bernoulli(logits=detach_logits.squeeze(-1))
+        detach_log_prob = detach_dist.log_prob(action["detach"].float().squeeze(-1))
 
         # Combined log probability
-        return movement_log_prob + link_log_prob + detach_log_prob
+        return movement_log_prob + attach_log_prob + detach_log_prob
 
     def _get_entropy(self, action_params):
         """Calculate combined entropy for all action components"""
         # Movement entropy
         movement_mean, movement_log_std = action_params["movement"]
-        movement_std = torch.exp(movement_log_std)
+        movement_std = torch.exp(movement_log_std.clamp(LOG_STD_MIN, LOG_STD_MAX))
         movement_dist = torch.distributions.Normal(movement_mean, movement_std)
         movement_entropy = movement_dist.entropy().sum(-1)
 
         # Link openness entropy
-        link_logits = action_params["link_openness"]
-        link_dist = torch.distributions.Bernoulli(logits=link_logits.squeeze(-1))
-        link_entropy = link_dist.entropy()
+        attach_logits = action_params["attach"]
+        attach_dist = torch.distributions.Bernoulli(logits=attach_logits.squeeze(-1))
+        attach_entropy = attach_dist.entropy()
 
         # Detach entropy
-        detach_mean, detach_log_std = action_params["detach"]
-        detach_std = torch.exp(detach_log_std)
-        detach_dist = torch.distributions.Normal(detach_mean, detach_std)
-        detach_entropy = detach_dist.entropy().sum(-1)
+        detach_logits = action_params["detach"]
+        detach_dist = torch.distributions.Bernoulli(logits=detach_logits.squeeze(-1))
+        detach_entropy = detach_dist.entropy()
 
-        return movement_entropy + link_entropy + detach_entropy
+        return movement_entropy + attach_entropy + detach_entropy
 
-    def _get_legacy_log_prob(self, action, action_mean, action_log_std):
-        """Legacy support for simple Box action spaces"""
-        action_std = torch.exp(action_log_std)
-        action_log_prob = -0.5 * (
-            ((action - action_mean) / (action_std + 1e-8)) ** 2
-            + 2 * action_log_std
-            + math.log(2 * math.pi)
-        )
-        return action_log_prob.sum(-1)
+    def _split_by_indices(self, t, keys, indices, dim=0):
+        # indices = cumulative cut points (exclude endpoints), e.g., [2, 7]
+        parts = torch.tensor_split(t, indices, dim=dim)
+        return {k: p for k, p in zip(keys, parts)}
