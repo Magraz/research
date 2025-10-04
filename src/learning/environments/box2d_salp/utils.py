@@ -197,11 +197,18 @@ def fixed_position_target_area(
     center_y = height / 2
 
     x_offset = 15
-    y_offset = 10
+    y_offset = 15
+
+    # positions = [
+    #     (center_x + x_offset, center_y + y_offset),
+    #     (center_x + x_offset, center_y - y_offset),
+    #     (center_x - x_offset, center_y + y_offset),
+    #     (center_x - x_offset, center_y - y_offset),
+    # ]
 
     positions = [
-        (center_x + x_offset, center_y + y_offset),
-        (center_x + x_offset, center_y - y_offset),
+        (center_x + 0, center_y + y_offset),
+        (center_x + 0, center_y - y_offset),
         (center_x - x_offset, center_y + y_offset),
         (center_x - x_offset, center_y - y_offset),
     ]

@@ -1,9 +1,7 @@
 import td3
 import cem_rl
-import behavior_archive
 
 import sys
-import pypickle
 import torch
 
 
@@ -14,14 +12,15 @@ class CEMRL_Trainer:
         n_agents,
         state_dim,
         action_dim=None,
-        ppo_config=None,
         dirs=None,
         use_dict_actions=False,
         device="cpu",
+        seed=None,
     ):
         self.env = env
         self.action_dim = action_dim
         self.state_dim = state_dim
+        self.seed = seed
 
     def train(self):
         episode_length = 500
@@ -41,7 +40,7 @@ class CEMRL_Trainer:
         )
 
         cemrl = cem_rl.CEM_RL(
-            rl=td3_alg, replay_buffer=replay_buffer, env=self.env, seed=int(sys.argv[1])
+            rl=td3_alg, replay_buffer=replay_buffer, env=self.env, seed=self.seed
         )
 
         iters = 0
@@ -68,19 +67,6 @@ class CEMRL_Trainer:
                 message = (
                     "i=" + str(iters) + ": " + str([float(i) for i in cemrl.rewards])
                 )
-
-                if len(sys.argv) == 3:
-                    print(
-                        "i="
-                        + str(iters)
-                        + ": "
-                        + str([float(i) for i in cemrl.rewards])
-                    )
-                elif sys.argv[3] == "hpc":
-                    with open(
-                        "cemrl_" + sys.argv[2] + "_output.log", "a", buffering=1
-                    ) as f:
-                        f.write(message + "\n")
 
             # if iters % 25 == 0:
             #     cem_rl.set_flat_params(cemrl.stateless_actor, torch.from_numpy(cemrl.mu).float())

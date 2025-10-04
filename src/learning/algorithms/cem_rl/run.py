@@ -1,10 +1,9 @@
 from learning.environments.types import EnvironmentParams, EnvironmentEnum
-from learning.algorithms.ippo.types import Experiment, Params
 from learning.algorithms.runner import Runner
 from pathlib import Path
 from learning.environments.box2d_salp.domain import SalpChainEnv
 
-from learning.algorithms.ippo.trainer import IPPOTrainer
+from learning.algorithms.cem_rl.trainer import CEMRL_Trainer
 
 import torch
 import numpy as np
@@ -53,15 +52,6 @@ class CEMRL_Runner(Runner):
         # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print(f"Using device: {self.exp_config.device}")
 
-        # PPO configuration
-        self.ppo_config = {
-            "lr": self.params.lr,
-            "gamma": self.params.gamma,
-            "gae_lambda": self.params.lmbda,
-            "clip_epsilon": self.params.eps_clip,
-            "entropy_coef": self.params.ent_coef,
-        }
-
         # Create environment
         using_dict_actions = False
         n_agents = 0
@@ -83,28 +73,16 @@ class CEMRL_Runner(Runner):
                 )
                 n_agents = self.env.n_agents
 
-            # case EnvironmentEnum.MPE:
-            #     env = simple_spread_v3.env(
-            #         N=3,
-            #         local_ratio=0.5,
-            #         max_cycles=25,
-            #         continuous_actions=True,
-            #         dynamic_rescaling=False,
-            #     )
-            #     state_dim = env.observation_space("agent_0").shape[0]
-            #     action_dim = env.action_space("agent_0").shape[0]
-            #     n_agents = env.max_num_agents
-
         # Create trainer
-        self.trainer = IPPOTrainer(
+        self.trainer = CEMRL_Trainer(
             self.env,
             n_agents,
             state_dim,
             action_dim,
-            self.ppo_config,
             self.dirs,
             using_dict_actions,
             self.device,
+            random_seed,
         )
 
     def train(self):

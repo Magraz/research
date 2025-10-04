@@ -53,8 +53,8 @@ def get_target_seeking_hybrid_action(env):
         # If no targets available, return random movement
         return {
             "movement": np.random.uniform(-0.5, 0.5, size=(env.n_agents, 2)),
-            "link_openness": np.ones(env.n_agents, dtype=np.int8),
-            "detach": np.zeros(env.n_agents, dtype=np.float32),
+            "attach": np.zeros(env.n_agents, dtype=np.int8),
+            "detach": np.zeros(env.n_agents, dtype=np.int8),
         }
 
     # Extract target positions
@@ -94,8 +94,8 @@ def get_target_seeking_hybrid_action(env):
 
     return {
         "movement": np.array(movements),
-        "link_openness": np.ones(env.n_agents, dtype=np.int8),  # Keep links open
-        "detach": np.zeros(env.n_agents, dtype=np.float32),  # Don't detach
+        "attach": np.zeros(env.n_agents, dtype=np.int8),  # Keep links open
+        "detach": np.zeros(env.n_agents, dtype=np.int8),  # Don't detach
     }
 
 
@@ -149,8 +149,8 @@ def get_nearest_agent_action(env):
 
     return {
         "movement": np.array(movements),
-        "link_openness": np.ones(env.n_agents, dtype=np.int8),
-        "detach": np.zeros(env.n_agents, dtype=np.float32),
+        "attach": np.ones(env.n_agents, dtype=np.int8),
+        "detach": np.zeros(env.n_agents, dtype=np.int8),
     }
 
 
@@ -206,16 +206,16 @@ def get_scatter_action(env):
 
     return {
         "movement": np.array(movements),
-        "link_openness": np.zeros(env.n_agents, dtype=np.int8),
+        "attach": np.zeros(env.n_agents, dtype=np.int8),
         "detach": np.ones(env.n_agents, dtype=np.float32),
     }
 
 
 def biased_sample(env, zero_prob=1.0):
-    """Sample from action space with biased link_openness"""
+    """Sample from action space with biased attach"""
     action = env.action_space.sample()
     random_values = np.random.random(env.n_agents)
-    action["link_openness"] = (random_values > zero_prob).astype(np.int8)
+    action["attach"] = (random_values > zero_prob).astype(np.int8)
     return action
 
 
@@ -288,7 +288,7 @@ try:
             elif action_mode == "scatter":
                 action = get_scatter_action(env)
             elif action_mode == "target":
-                action = get_target_seeking_action(env)
+                action = get_target_seeking_hybrid_action(env)
             else:  # random mode
                 action = biased_sample(env, zero_prob=0.7)
 

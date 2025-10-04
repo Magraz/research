@@ -121,7 +121,7 @@ class SalpChainEnv(gym.Env):
         )
 
         self.observation_space = spaces.Box(
-            low=-np.inf, high=np.inf, shape=(self.n_agents, 10), dtype=np.float32
+            low=-np.inf, high=np.inf, shape=(self.n_agents, 18), dtype=np.float32
         )
 
         self.world = b2World(gravity=(0, 0))
@@ -838,7 +838,7 @@ class SalpChainEnv(gym.Env):
             # Get connected states relative to this agent and pad/truncate
             if len(connected_indices) == 0:
                 connected_states = np.zeros(
-                    self.max_joints_per_agent * 4, dtype=np.float32
+                    self.max_joints_per_agent * 2, dtype=np.float32
                 )
             else:
                 # Get states of connected agents
@@ -855,9 +855,9 @@ class SalpChainEnv(gym.Env):
                     )
 
                     # Relative velocity = connected velocity - agent velocity
-                    connected_relative_states[j, 2:4] = (
-                        connected_absolute_states[j, 2:4] - own_state[2:4]
-                    )
+                    # connected_relative_states[j, 2:4] = (
+                    #     connected_absolute_states[j, 2:4] - own_state[2:4]
+                    # )
 
                 # Flatten the relative states
                 connected_states = connected_relative_states.flatten()
@@ -877,14 +877,9 @@ class SalpChainEnv(gym.Env):
                 i, self.sector_sensor_radius
             )
 
-            x_diff = self.target_areas[0].x - self.agents[i].position.x
-            y_diff = self.target_areas[0].y - self.agents[i].position.y
-
-            diff_pos = np.array([x_diff / self.world_width, y_diff / self.world_height])
-
             # Combine all observations: own absolute state + connected relative states + density sensors
             # agent_obs = np.concatenate([own_state, connected_states, density_sensors])
-            agent_obs = np.concatenate([own_state, density_sensors])
+            agent_obs = np.concatenate([own_state, connected_states, density_sensors])
 
             observations.append(agent_obs)
 
@@ -990,16 +985,13 @@ class SalpChainEnv(gym.Env):
     def _calculate_density_sensors(self, agent_idx, sensor_radius):
         """
         Calculate density of agents and targets in four sectors around an agent.
-        Returns a vector of 8 values:
+        Also returns relative coordinates to closest non-connected agent and target.
+
+        Returns a vector of 12 values:
         - First 4 values: agent density in [top-right, top-left, bottom-left, bottom-right]
-        - Last 4 values: target density in [top-right, top-left, bottom-left, bottom-right]
-
-        Args:
-            agent_idx: Index of the agent to calculate sensors for
-            sensor_radius: Radius of the detection circle
-
-        Returns:
-            numpy array: 8-element vector with density values for each sector
+        - Next 4 values: target density in [top-right, top-left, bottom-left, bottom-right]
+        - Next 2 values: relative [x,y] to closest non-connected agent
+        - Last 2 values: relative [x,y] to closest target
         """
         agent_pos = np.array(
             [self.agents[agent_idx].position.x, self.agents[agent_idx].position.y]
@@ -1008,12 +1000,15 @@ class SalpChainEnv(gym.Env):
         # Make sure the Union-Find structure is up to date
         self._update_union_find()
 
-        # Find the root component of the current agent
-        _ = self.union_find.find(agent_idx)
-
         # Initialize densities for the 4 sectors (for both agents and targets)
         agent_densities = np.zeros(4, dtype=np.float32)
         target_densities = np.zeros(4, dtype=np.float32)
+
+        # Variables to track closest agent and target
+        closest_agent_dist = float("inf")
+        closest_agent_rel = np.zeros(2, dtype=np.float32)
+        closest_target_dist = float("inf")
+        closest_target_rel = np.zeros(2, dtype=np.float32)
 
         # Check each other agent
         for other_idx, other_agent in enumerate(self.agents):
@@ -1030,7 +1025,12 @@ class SalpChainEnv(gym.Env):
             # Calculate distance
             distance = np.linalg.norm(relative_pos)
 
-            # Skip if outside sensor radius
+            # Update closest agent tracking
+            if distance < closest_agent_dist:
+                closest_agent_dist = distance
+                closest_agent_rel = relative_pos
+
+            # Skip if outside sensor radius for density calculation
             if distance > sensor_radius:
                 continue
 
@@ -1047,7 +1047,6 @@ class SalpChainEnv(gym.Env):
                 # else it's already sector 0 (top-right)
 
             # Calculate density contribution (inverse square of distance)
-            # Add a small epsilon to avoid division by zero
             density_value = 1.0 / ((distance / self.sector_sensor_radius) + 1.0)
 
             # Add to appropriate sector
@@ -1061,7 +1060,12 @@ class SalpChainEnv(gym.Env):
             # Calculate distance
             distance = np.linalg.norm(relative_pos)
 
-            # Skip if outside sensor radius
+            # Update closest target tracking
+            if distance < closest_target_dist:
+                closest_target_dist = distance
+                closest_target_rel = relative_pos
+
+            # Skip if outside sensor radius for density calculation
             if distance > sensor_radius:
                 continue
 
@@ -1077,9 +1081,7 @@ class SalpChainEnv(gym.Env):
                     sector = 3
                 # else it's already sector 0 (top-right)
 
-            # Calculate target density contribution, weighted by reward scale and coupling requirement
-            # This makes more valuable targets (higher reward scale) provide stronger signals
-            # and targets with higher coupling requirements also provide stronger signals
+            # Calculate target density contribution
             density_value = target.reward_scale * (
                 1.0 / ((distance / self.sector_sensor_radius) + 1.0)
             )
@@ -1088,8 +1090,23 @@ class SalpChainEnv(gym.Env):
             if target_densities[sector] < density_value:
                 target_densities[sector] = density_value
 
-        # Combine agent and target densities
-        return np.concatenate([agent_densities, target_densities])
+        # Normalize the relative coordinates by world dimensions
+        closest_agent_rel = closest_agent_rel / np.array(
+            [self.world_width, self.world_height]
+        )
+        closest_target_rel = closest_target_rel / np.array(
+            [self.world_width, self.world_height]
+        )
+
+        # Combine all values into one array
+        return np.concatenate(
+            [
+                agent_densities,  # 4 values
+                target_densities,  # 4 values
+                closest_agent_rel,  # 2 values (x,y)
+                closest_target_rel,  # 2 values (x,y)
+            ]
+        )
 
     def _process_detachments(self):
         """Check for agents that want to detach from their connections"""
@@ -1102,7 +1119,7 @@ class SalpChainEnv(gym.Env):
             idx_b = self.agents.index(joint.bodyB)
 
             # Check if both agents want to detach
-            if self.detach_values[idx_a] == self.detach_values[idx_b]:
+            if self.detach_values[idx_a] and self.detach_values[idx_b]:
                 joints_to_remove.append(joint)
 
         # Remove the joints outside the loop
