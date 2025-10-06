@@ -5,7 +5,7 @@ from dataclasses import asdict
 
 # EXPERIMENT SETTINGS
 ENVIRONMENT = EnvironmentEnum.VMAS_SALP_NAVIGATE
-BATCH_NAME = f"{ENVIRONMENT}_8a"
+BATCH_NAME = f"{ENVIRONMENT}_16a"
 EXPERIMENTS_LIST = [
     "mlp",
     "transformer_full",
@@ -37,8 +37,7 @@ for experiment_name in EXPERIMENTS_LIST:
             lmbda=0.95,
             ent_coef=1e-3,
             std_coef=0.0,
-            lr_actor=5e-5,
-            lr_critic=5e-5,
+            lr=5e-5,
             random_seeds=[118, 1234, 8764, 3486, 2487, 5439, 6584, 7894, 523, 69],
         ),
     )

@@ -97,14 +97,13 @@ def run_algorithm(
         case AlgorithmEnum.PPO:
             exp_config = PPO_Experiment(**exp_dict)
             runner = PPO_Runner(
-                device=exp_config.device,
-                batch_dir=batch_dir,
-                trials_dir=Path(batch_dir).parents[1]
-                / "results"
-                / batch_name
-                / experiment_name,
-                trial_id=trial_id,
-                checkpoint=checkpoint,
+                exp_config.device,
+                batch_dir,
+                (Path(batch_dir).parents[1] / "results" / batch_name / experiment_name),
+                trial_id,
+                checkpoint,
+                exp_config,
+                env_config,
             )
 
         case AlgorithmEnum.TD3:

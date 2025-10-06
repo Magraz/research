@@ -3,7 +3,6 @@ from learning.algorithms.ippo.types import Experiment, Params
 from learning.algorithms.runner import Runner
 from pathlib import Path
 from learning.environments.box2d_salp.domain import SalpChainEnv
-from mpe2 import simple_spread_v3
 
 from learning.algorithms.ippo.trainer import IPPOTrainer
 
