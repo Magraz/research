@@ -175,7 +175,7 @@ class PPO:
         # Create optimizers
         self.optimizer = torch.optim.Adam(
             self.policy.parameters(),
-            lr=params.lr_actor,
+            lr=params.lr,
         )
 
         # Logging params
