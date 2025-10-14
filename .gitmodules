@@ -1,6 +1,3 @@
 [submodule "VectorizedMultiAgentSimulator"]
 	path = VectorizedMultiAgentSimulator
 	url = https://github.com/proroklab/VectorizedMultiAgentSimulator.git
-[submodule "Jax2D"]
-	path = Jax2D
-	url = https://github.com/MichaelTMatthews/Jax2D.git

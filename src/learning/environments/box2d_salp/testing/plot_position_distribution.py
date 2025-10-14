@@ -6,7 +6,7 @@ from matplotlib.patches import Circle
 from matplotlib.colors import to_rgba
 
 MAP_X = 60
-MAP_Y = 40
+MAP_Y = 60
 
 
 def plot_all_target_positions(pickle_path):
@@ -44,7 +44,7 @@ def plot_all_target_positions(pickle_path):
         ax.plot([], [], "o", color=episode_color, label=f"Episode {episode_idx+1}")
 
         # Get target positions from this episode
-        targets = episode_info["target_positions"]
+        targets = episode_info["info"][0]["target_positions"]
 
         # Plot each target
         for target in targets:
@@ -143,7 +143,7 @@ def plot_all_agent_positions(pickle_path):
         ax.plot([], [], "o", color=episode_color, label=f"Episode {episode_idx+1}")
 
         # Get agent positions from this episode
-        agents = episode_info["agent_positions"]
+        agents = episode_info["info"][0]["agent_positions"]
 
         # Extract x and y coordinates
         x_coords = [agent["x"] for agent in agents]
@@ -204,7 +204,7 @@ def plot_all_agent_positions(pickle_path):
 
 if __name__ == "__main__":
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    pickle_path = os.path.join(script_dir, "test_info.pkl")
+    pickle_path = os.path.join(script_dir, "rollout_info.pkl")
 
     # Plot both target and agent positions
     plot_all_target_positions(pickle_path)

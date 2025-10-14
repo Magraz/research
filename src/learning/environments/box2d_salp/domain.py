@@ -46,7 +46,7 @@ class TargetArea:
     def calculate_reward(self, agents, union_find):
         """Calculate reward based on proximity to center if coupling requirement is met"""
 
-        reward_map = dict.fromkeys(list(range(0, len(agents))), 0)
+        reward_map = [0 for _ in range(0, len(agents))]
 
         # Find agents within this target area
         agents_in_area = []
@@ -83,7 +83,7 @@ class TargetArea:
                 (agents[i].position.x - self.x) ** 2
                 + (agents[i].position.y - self.y) ** 2
             )
-            # Reward decreases with distance (1.0 at center, 0.0 at radius)
+            # Reward decreases with distance (10.0 at center, 0.0 at radius)
             reward_map[i] = 1 / (dist**2 + 0.1)
 
         return reward_map
@@ -164,7 +164,7 @@ class SalpChainEnv(gym.Env):
         self.max_joints_per_agent = 2
 
         # Add sector sensing threshold
-        self.sector_sensor_radius = 40.0
+        self.sector_sensor_radius = 20.0
 
         # Add parameters for nearest neighbor detection
         self.neighbor_detection_range = 3.0  # Maximum range to detect neighbors
@@ -183,7 +183,7 @@ class SalpChainEnv(gym.Env):
         )  # Default to 0 (no desire to detach)
 
         # Step tracking for truncation
-        self.max_steps = 400
+        self.max_steps = 800
         self.current_step = 0
 
     def _update_union_find(self):
@@ -924,7 +924,8 @@ class SalpChainEnv(gym.Env):
 
                     individual_rewards[i] = reward_map[i]
 
-                shared_reward += min(reward_map.values())
+                non_zero_rewards = [x for x in reward_map if x != 0]
+                shared_reward += min(non_zero_rewards) if non_zero_rewards else 0
 
         # Set terminated based on whether all couplings are met
         terminated = all_couplings_met

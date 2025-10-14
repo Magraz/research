@@ -242,7 +242,7 @@ def check_keyboard_input():
 env = SalpChainEnv(render_mode="human", n_agents=2)
 
 # Action mode control
-action_mode = "target"  # Start with nearest-agent behavior
+action_mode = "nearest"  # Start with nearest-agent behavior
 
 print("=" * 50)
 print("CONTROLS:")
@@ -258,11 +258,13 @@ print(f"Starting with '{action_mode.upper()}' action mode")
 info_record = []
 episode_record = {"observation": [], "reward": [], "info": []}
 
+steps = 512
+episodes = 1
 try:
-    for episode in range(3):
+    for episode in range(episodes):
         obs, _ = env.reset()
 
-        for step in range(500):
+        for step in range(steps):
             # Check for keyboard input to switch modes
             key_input = check_keyboard_input()
 
