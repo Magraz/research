@@ -17,6 +17,7 @@ from learning.environments.box2d_salp.utils import (
     AGENT_CATEGORY,
     BOUNDARY_CATEGORY,
     UnionFind,
+    TargetArea,
     BoundaryContactListener,
     get_scatter_positions,
     get_linear_positions,
@@ -26,73 +27,12 @@ from learning.environments.box2d_salp.utils import (
 )
 
 
-class TargetArea:
-    def __init__(
-        self,
-        x,
-        y,
-        radius,
-        coupling_requirement,
-        reward_scale=1.0,
-        color=(100, 200, 100, 128),
-    ):
-        self.x = x  # Center x-coordinate
-        self.y = y  # Center y-coordinate
-        self.radius = radius  # Area of influence
-        self.coupling_requirement = coupling_requirement
-        self.reward_scale = reward_scale  # Reward scaling factor
-        self.color = color  # Semi-transparent green by default
-
-    def calculate_reward(self, agents, union_find):
-        """Calculate reward based on proximity to center if coupling requirement is met"""
-
-        reward_map = [0 for _ in range(0, len(agents))]
-
-        # Find agents within this target area
-        agents_in_area = []
-        for i, agent in enumerate(agents):
-            dist = np.sqrt(
-                (agent.position.x - self.x) ** 2 + (agent.position.y - self.y) ** 2
-            )
-            if dist <= self.radius:
-                agents_in_area.append(i)
-
-        if len(agents_in_area) < self.coupling_requirement:
-            return reward_map  # Not enough agents to meet requirement
-
-        # Group agents by their connected component using union_find
-        component_map = {}
-        for idx in agents_in_area:
-            root = union_find.find(idx)
-            if root not in component_map:
-                component_map[root] = []
-            component_map[root].append(idx)
-
-        # Check if any chain meets the coupling requirement
-        qualifying_agents = []
-        for component in component_map.values():
-            if len(component) >= self.coupling_requirement:
-                qualifying_agents.extend(component)
-
-        if not qualifying_agents:
-            return reward_map  # No component meets requirement
-
-        # Calculate reward based on proximity
-        for i in qualifying_agents:
-            dist = np.sqrt(
-                (agents[i].position.x - self.x) ** 2
-                + (agents[i].position.y - self.y) ** 2
-            )
-            # Reward decreases with distance (10.0 at center, 0.0 at radius)
-            reward_map[i] = 1 / (dist**2 + 0.1)
-
-        return reward_map
-
-
 class SalpChainEnv(gym.Env):
-    metadata = {"render_modes": ["human"], "render_fps": 30}
+    metadata = {"render_fps": 30}
 
-    def __init__(self, render_mode=None, n_agents=2, n_target_areas=1):
+    def __init__(
+        self, render_mode=None, n_agents=2, n_target_areas=1, sensing_radius=20
+    ):
         super().__init__()
 
         self.n_agents = n_agents
@@ -164,7 +104,7 @@ class SalpChainEnv(gym.Env):
         self.max_joints_per_agent = 2
 
         # Add sector sensing threshold
-        self.sector_sensor_radius = 20.0
+        self.sector_sensor_radius = sensing_radius
 
         # Add parameters for nearest neighbor detection
         self.neighbor_detection_range = 3.0  # Maximum range to detect neighbors
@@ -752,7 +692,9 @@ class SalpChainEnv(gym.Env):
             # Draw the actual text
             self.screen.blit(text_surface, text_rect)
 
-    def _get_nearest_non_connected_agent_relative(self, agent_idx, all_states):
+    def _get_nearest_non_connected_agent_relative(
+        self, agent_idx, all_states, neighbor_detection_range
+    ):
         """
         Find the nearest non-connected agent and return relative state information
 
@@ -789,7 +731,7 @@ class SalpChainEnv(gym.Env):
             distance = np.linalg.norm(relative_position)
 
             # Check if within range and closer than previous candidates
-            if distance <= self.neighbor_detection_range and distance < min_distance:
+            if distance <= neighbor_detection_range and distance < min_distance:
                 min_distance = distance
                 nearest_relative_state = np.concatenate(
                     [relative_position, relative_velocity, [distance]]
