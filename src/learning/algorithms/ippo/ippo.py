@@ -64,19 +64,11 @@ class PPOAgent:
         action, log_prob, value = self.policy_old.act(state_tensor, deterministic)
 
         # For environment interaction, convert to numpy
-        if isinstance(action, dict):
-            # Handle dictionary actions
-            numpy_action = {}
-            for key, tensor in action.items():
-                numpy_action[key] = tensor.cpu().numpy()
-            return numpy_action, log_prob.cpu().item(), value.cpu().item()
-        else:
-            # Handle regular actions
-            return (
-                action.cpu().numpy(),
-                log_prob.cpu().item(),
-                value.cpu().item(),
-            )
+        return (
+            action.cpu().numpy(),
+            log_prob.cpu().item(),
+            value.cpu().item(),
+        )
 
     def store_transition(self, state, action, reward, log_prob, value, done):
         """Store transition in buffer, converting to tensors if needed"""
@@ -85,14 +77,6 @@ class PPOAgent:
             self.states.append(torch.FloatTensor(state).to(self.device))
         else:
             self.states.append(state.to(self.device))
-
-        # Handle action based on type (first determine action type if not yet set)
-        if self.is_dict_action is None:
-            self.is_dict_action = isinstance(action, dict)
-
-        if self.is_dict_action:
-            # Convert dict action components to tensors
-            action = np.concatenate(list(action.values()), axis=0)
 
         self.actions.append(torch.FloatTensor(action).to(self.device))
 

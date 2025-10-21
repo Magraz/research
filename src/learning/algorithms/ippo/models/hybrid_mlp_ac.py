@@ -59,7 +59,7 @@ class Hybrid_MLP_AC(nn.Module):
         x = F.tanh(self.actor_layer2(x))
 
         # Movement action distribution
-        movement_mean = F.tanh(self.movement_mean(x))
+        movement_mean = self.movement_mean(x)
         movement_log_std = self.movement_log_std.expand_as(movement_mean)
 
         # Link openness logits
@@ -101,16 +101,18 @@ class Hybrid_MLP_AC(nn.Module):
             attach_action = torch.bernoulli(attach_probs).int()
             detach_action = torch.bernoulli(detach_probs).int()
 
-        action = {
+        action_dict = {
             "movement": movement,
             "attach": attach_action,
             "detach": detach_action,
         }
 
         # Calculate log probability
-        log_prob = self._get_log_prob(action, action_params)
+        log_prob = self._get_log_prob(action_dict, action_params)
 
-        return action, log_prob, value
+        action_tensor = torch.cat(list(action_dict.values()), dim=-1)
+
+        return action_tensor, log_prob, value
 
     def evaluate(self, state, action):
         action_params, value = self.forward(state)

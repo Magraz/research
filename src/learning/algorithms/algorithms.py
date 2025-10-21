@@ -14,6 +14,9 @@ from learning.algorithms.td3.train import TD3_Trainer
 from learning.algorithms.ippo.run import IPPO_Runner
 from learning.algorithms.ippo.types import Experiment as IPPO_Experiment
 
+from learning.algorithms.mappo.run import MAPPO_Runner
+from learning.algorithms.mappo.types import Experiment as MAPPO_Experiment
+
 # from learning.algorithms.manual.control import ManualControl
 
 from learning.algorithms.types import AlgorithmEnum
@@ -85,6 +88,18 @@ def run_algorithm(
         case AlgorithmEnum.IPPO:
             exp_config = IPPO_Experiment(**exp_dict)
             runner = IPPO_Runner(
+                exp_config.device,
+                batch_dir,
+                (Path(batch_dir).parents[1] / "results" / batch_name / experiment_name),
+                trial_id,
+                checkpoint,
+                exp_config,
+                env_config,
+            )
+
+        case AlgorithmEnum.MAPPO:
+            exp_config = MAPPO_Experiment(**exp_dict)
+            runner = MAPPO_Runner(
                 exp_config.device,
                 batch_dir,
                 (Path(batch_dir).parents[1] / "results" / batch_name / experiment_name),

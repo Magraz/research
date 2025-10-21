@@ -65,20 +65,13 @@ class IPPOTrainer:
 
                 with torch.no_grad():
                     action, log_prob, value = agent.get_action(obs[i])
+                    action = np.clip(action, -1, 1)
 
                 actions.append(action)
                 log_probs.append(log_prob)
                 values.append(value)
 
-            # Format actions correctly for environment step
-            if self.using_dict_actions:
-                # Convert list of dict actions to dict of batched actions
-                env_actions = {}
-                for key in actions[0].keys():
-                    env_actions[key] = np.array([a[key] for a in actions])
-            else:
-                # Original format for Box actions
-                env_actions = np.array(actions)
+            env_actions = np.array(actions)
 
             # Step environment
             next_obs, reward, terminated, truncated, info = self.env.step(env_actions)
