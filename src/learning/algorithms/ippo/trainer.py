@@ -6,17 +6,19 @@ from learning.environments.box2d_salp.domain import SalpChainEnv
 from learning.algorithms.ippo.ippo import PPOAgent
 import pickle  # Add this import at the top of the file
 
+from learning.environments.types import EnvironmentEnum
+
 
 class IPPOTrainer:
     def __init__(
         self,
         env,
+        env_name,
         n_agents,
         state_dim,
         action_dim=None,
         ppo_config=None,
         dirs=None,
-        use_dict_actions=False,
         device="cpu",
     ):
         self.device = device
@@ -26,17 +28,22 @@ class IPPOTrainer:
 
         # Create environment
         self.env = env
+        self.env_name = env_name
 
-        self.using_dict_actions = use_dict_actions
+        if self.env_name == EnvironmentEnum.MPE:
+            self.action_low = 0
+            self.action_high = 1
+        else:
+            self.action_low = -1
+            self.action_high = 1
+
         self.agents = []
 
         for _ in range(self.n_agents):
             agent = PPOAgent(
+                env_name,
                 state_dim=state_dim,
-                action_space=(
-                    self.env.action_space if self.using_dict_actions else None
-                ),
-                action_dim=(action_dim if not self.using_dict_actions else None),
+                action_dim=action_dim,
                 device=device,
                 **ppo_config,
             )
@@ -48,7 +55,14 @@ class IPPOTrainer:
         self.training_stats = defaultdict(list)
 
     def collect_trajectory(self, max_steps):
-        obs, _ = self.env.reset()
+
+        if self.env_name == EnvironmentEnum.MPE:
+            obs, _ = self.env.reset()
+            obs = np.stack(list(obs.values()))
+
+        else:
+            obs, _ = self.env.reset()
+
         total_reward = 0
         total_step_count = 0
         current_episode_steps = 0
@@ -65,7 +79,7 @@ class IPPOTrainer:
 
                 with torch.no_grad():
                     action, log_prob, value = agent.get_action(obs[i])
-                    action = np.clip(action, -1, 1)
+                    action = np.clip(action, self.action_low, self.action_high)
 
                 actions.append(action)
                 log_probs.append(log_prob)
@@ -74,28 +88,52 @@ class IPPOTrainer:
             env_actions = np.array(actions)
 
             # Step environment
-            next_obs, reward, terminated, truncated, info = self.env.step(env_actions)
+            if self.env_name == EnvironmentEnum.MPE:
+                action_dict = {}
+
+                for i, agent_id in enumerate(self.env.agents):
+                    action_dict[agent_id] = env_actions[i]
+
+                next_obs, rewards, terminated, truncated, _ = self.env.step(action_dict)
+
+                next_obs = np.stack(list(next_obs.values()))
+                rewards = np.stack(list(rewards.values()))
+                terminated = np.stack(list(terminated.values()))
+                truncated = np.stack(list(truncated.values()))
+
+            else:
+
+                next_obs, shared_reward, terminated, truncated, info = self.env.step(
+                    env_actions
+                )
+                rewards = np.array(info["individual_rewards"])
 
             # Store transitions for all agents
             for i, agent in enumerate(self.agents):
                 agent.store_transition(
                     state=obs[i],
-                    action=actions[i],
-                    reward=info["individual_rewards"][i],
+                    action=env_actions[i],
+                    reward=rewards[i],
                     log_prob=log_probs[i],
                     value=values[i],
-                    done=terminated or truncated,
+                    done=terminated[i] or truncated[i],
                 )
 
             obs = next_obs
-            total_reward += reward
+            total_reward += rewards[i]
             total_step_count += 1
             current_episode_steps += 1
 
             # If environment terminated or truncated, reset it and continue collecting
-            if terminated or truncated:
+            if terminated.all() or truncated.all():
                 # Get new observations from reset
-                obs, _ = self.env.reset()
+                if self.env_name == EnvironmentEnum.MPE:
+                    obs, _ = self.env.reset()
+                    obs = np.stack(list(obs.values()))
+                else:
+                    obs, _ = self.env.reset()
+
+                # Keep track of episode count
                 steps_per_episode.append(current_episode_steps)
                 current_episode_steps = 0
                 episode_count += 1
@@ -117,82 +155,6 @@ class IPPOTrainer:
             steps_per_episode,
             final_values,
         )
-
-    def collect_trajectory_mpe(self, max_steps):
-
-        self.env.reset()
-
-        total_reward = 0
-        step_count = 0
-        old_step_count = 0
-        current_episode_steps = 0
-        steps_per_episode = []
-        episode_count = 0
-
-        obs = []
-
-        for agent in self.env.agent_iter():
-            observation, _, _, _, _ = self.env.last()
-            obs.append(observation)
-
-        for step in range(max_steps):
-            # Get actions from all agents
-            actions = []
-            log_probs = []
-            values = []
-
-            for i, agent in enumerate(self.agents):
-                with torch.no_grad():
-                    action, log_prob, value = agent.get_action(obs[i])
-                actions.append(action)
-                log_probs.append(log_prob)
-                values.append(value)
-
-            # Format actions correctly for environment step
-            env_actions = np.array(actions)
-
-            next_obs = []
-            reward = 0
-            terminated = False
-            truncated = False
-            for action in env_actions:
-                next_observation, reward, terminated, truncated, info = self.env.step(
-                    action
-                )
-                next_obs.append(next_observation)
-
-            step_count += 1
-
-            # Store transitions for all agents
-            for i, agent in enumerate(self.agents):
-                agent.store_transition(
-                    state=obs[i],
-                    action=actions[i],
-                    reward=reward,
-                    log_prob=log_probs[i],
-                    value=values[i],
-                    done=terminated or truncated,
-                )
-
-            obs = next_obs.copy()
-            total_reward += reward
-
-            # If environment terminated or truncated, reset it and continue collecting
-            if terminated or truncated:
-                # Get new observations from reset
-                obs, _ = self.env.reset()
-                episode_count += 1
-                steps_per_episode.append(current_episode_steps)
-                current_episode_steps = 0
-
-        # Get final values for advantage computation
-        final_values = []
-        for i, agent in enumerate(self.agents):
-            with torch.no_grad():
-                _, _, final_value = agent.get_action(obs[i])
-            final_values.append(final_value)
-
-        return total_reward, step_count, episode_count, steps_per_episode, final_values
 
     def train(self, total_steps, batch_size, minibatches, log_every=1000):
         """
@@ -278,7 +240,12 @@ class IPPOTrainer:
         )
 
     def render_episode(self, max_steps):
-        obs, _ = self.env.reset()
+
+        if self.env_name == EnvironmentEnum.MPE:
+            obs, _ = self.env.reset(seed=42)
+            obs = np.stack(list(obs.values()))
+        else:
+            obs, _ = self.env.reset()
 
         cumulative_reward = 0
 
@@ -289,74 +256,45 @@ class IPPOTrainer:
                 with torch.no_grad():
                     agent.policy_old.eval()
                     action, _, _ = agent.get_action(obs[i], deterministic=True)
+                    action = np.clip(action, self.action_low, self.action_high)
                 actions.append(action)
 
             # Format actions correctly for environment step
-            if self.using_dict_actions:
-                # Convert list of dict actions to dict of batched actions
-                env_actions = {}
-                for key in actions[0].keys():
-                    env_actions[key] = np.array([a[key] for a in actions])
-            else:
-                # Original format for Box actions
-                env_actions = np.array(actions)
+            env_actions = np.array(actions)
 
             # Step environment
-            obs, reward, terminated, truncated, info = self.env.step(env_actions)
+            if self.env_name == EnvironmentEnum.MPE:
+                next_obs = []
+                rewards = []
+                action_dict = {}
+
+                for i, agent_id in enumerate(self.env.agents):
+                    action_dict[agent_id] = env_actions[i]
+
+                next_obs, rewards, terminated, truncated, _ = self.env.step(action_dict)
+
+                next_obs = np.stack(list(next_obs.values()))
+                rewards = np.stack(list(rewards.values()))
+                terminated = np.stack(list(terminated.values()))
+                truncated = np.stack(list(truncated.values()))
+
+            else:
+                next_obs, shared_reward, terminated, truncated, info = self.env.step(
+                    env_actions
+                )
+                rewards = np.array(info["individual_rewards"])
+
             self.env.render()
 
-            cumulative_reward += reward
+            cumulative_reward += rewards[0]
 
             if (step + 1) >= max_steps:
                 print(f"TIMEOUT REWARD: {cumulative_reward}")
                 break
 
-            if terminated or truncated:
+            if terminated.all() or truncated.all():
                 print(f"REWARD: {cumulative_reward}")
                 break
-
-    def train_normalizer(self, min_timesteps=10000, max_traj_len=1000, noise=0.5):
-
-        global_t = 0
-
-        while global_t < min_timesteps:
-
-            obs, _ = self.env.reset()
-            timesteps = 0
-            terminated = False
-            truncated = False
-
-            while not (terminated or truncated) and timesteps < max_traj_len:
-
-                # Get actions from all agents (deterministic)
-                actions = []
-                for i, agent in enumerate(self.agents):
-                    with torch.no_grad():
-                        action, _, _ = agent.get_action(obs[i], update_norm=True)
-                    actions.append(action)
-
-                # Format actions correctly for environment step
-                if self.using_dict_actions:
-                    env_actions = {}
-                    for key in actions[0].keys():
-                        # Move tensors to CPU before converting to numpy
-                        env_actions[key] = np.array(
-                            [
-                                (
-                                    a[key].cpu().numpy()
-                                    if torch.is_tensor(a[key])
-                                    else a[key]
-                                )
-                                for a in actions
-                            ]
-                        )
-                else:
-                    env_actions = np.array(actions)
-
-                # Step environment
-                obs, _, terminated, truncated, _ = self.env.step(env_actions)
-                timesteps += 1
-                global_t += 1
 
     def save_agents(self, filepath):
         torch.save(

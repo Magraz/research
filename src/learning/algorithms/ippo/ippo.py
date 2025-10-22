@@ -7,13 +7,15 @@ import numpy as np
 from learning.algorithms.ippo.models.hybrid_mlp_ac import Hybrid_MLP_AC
 from learning.algorithms.ippo.models.mlp_ac import MLP_AC
 
+from learning.environments.types import EnvironmentEnum
+
 
 class PPOAgent:
     def __init__(
         self,
+        env_name,
         state_dim,
         action_dim=None,
-        action_space=None,
         lr=3e-4,
         gamma=0.99,
         gae_lambda=0.95,
@@ -29,9 +31,9 @@ class PPOAgent:
         self.device = device
 
         # Initialize network
-        if action_space is not None:
-            self.policy = Hybrid_MLP_AC(state_dim, action_space).to(device)
-            self.policy_old = Hybrid_MLP_AC(state_dim, action_space).to(device)
+        if env_name == EnvironmentEnum.BOX2D_SALP:
+            self.policy = Hybrid_MLP_AC(state_dim, action_dim).to(device)
+            self.policy_old = Hybrid_MLP_AC(state_dim, action_dim).to(device)
 
         else:
             self.policy = MLP_AC(state_dim, action_dim).to(device)

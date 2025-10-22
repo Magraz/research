@@ -157,7 +157,7 @@ class SalpChainEnv(gym.Env):
 
             # Random coupling requirement between 2 and min(5, n_agents)
             # coupling_req = np.random.randint(2, self.n_agents - 1)
-            coupling_req = 2
+            coupling_req = 1
 
             # Set reward scale based on coupling requirement
             reward_scale = 1.0  # * coupling_req
@@ -1103,23 +1103,25 @@ class SalpChainEnv(gym.Env):
         return obs, {}
 
     def step(self, actions):
-        # Unpack movement, attach, and detach actions
-        movement_actions = actions["movement"]
-        attach_actions = actions["attach"]
-        detach_actions = actions["detach"]
+        # Transform actions into dictionary
+        action_dict = {
+            "movement": actions[:, :2],  # shape (n_agent, 2)
+            "attach": actions[:, 2],  # shape (n_agent,)
+            "detach": actions[:, -1],  # shape (n_agent,)
+        }
 
         # Update attach and detach states - ensure we get scalar values
         # Convert to flat numpy array if needed
-        self.attach_values = np.array(attach_actions).flatten()
-        self.detach_values = np.array(detach_actions).flatten()
+        self.attach_values = np.array(action_dict["attach"]).flatten()
+        self.detach_values = np.array(action_dict["detach"]).flatten()
 
         # Check for detachments before applying forces
         self._process_detachments()
 
         # Apply movement forces
         for idx, agent in enumerate(self.agents):
-            force_x = float(movement_actions[idx][0])  # X component
-            force_y = float(movement_actions[idx][1])  # Y component
+            force_x = float(action_dict["movement"][idx][0])  # X component
+            force_y = float(action_dict["movement"][idx][1])  # Y component
 
             # Store the 2D force vector for visualization
             self.applied_forces[idx] = [force_x, force_y]

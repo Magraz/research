@@ -19,20 +19,18 @@ class Hybrid_MLP_AC(nn.Module):
 
     def __init__(
         self,
-        observation_space: int,
-        action_space: int,
+        state_dim: int,
+        action_dim: int,
         hidden_dim: int = 128,
     ):
         super(Hybrid_MLP_AC, self).__init__()
 
-        self.action_space = action_space
-
         # Shared feature extraction
-        self.actor_layer1 = layer_init(nn.Linear(observation_space, hidden_dim))
+        self.actor_layer1 = layer_init(nn.Linear(state_dim, hidden_dim))
         self.actor_layer2 = layer_init(nn.Linear(hidden_dim, hidden_dim))
 
         # Movement action (continuous 2D)
-        movement_dim = action_space["movement"].shape[-1]
+        movement_dim = 2
         self.movement_mean = layer_init(nn.Linear(hidden_dim, movement_dim), std=0.01)
         self.movement_log_std = nn.Parameter(
             torch.full((movement_dim,), -0.5, requires_grad=True)
@@ -46,7 +44,7 @@ class Hybrid_MLP_AC(nn.Module):
 
         # Critic
         self.critic = nn.Sequential(
-            layer_init(nn.Linear(observation_space, hidden_dim)),
+            layer_init(nn.Linear(state_dim, hidden_dim)),
             nn.Tanh(),
             layer_init(nn.Linear(hidden_dim, hidden_dim)),
             nn.Tanh(),
@@ -108,7 +106,7 @@ class Hybrid_MLP_AC(nn.Module):
         }
 
         # Calculate log probability
-        log_prob = self._get_log_prob(action_dict, action_params)
+        log_prob, _ = self._get_log_prob_and_entropy(action_dict, action_params)
 
         action_tensor = torch.cat(list(action_dict.values()), dim=-1)
 
@@ -119,50 +117,34 @@ class Hybrid_MLP_AC(nn.Module):
         action_dict = self._split_by_indices(
             action, list(action_params.keys()), [2, 3], dim=1
         )
-        log_prob = self._get_log_prob(action_dict, action_params)
-        entropy = self._get_entropy(action_params)
+        log_prob, entropy = self._get_log_prob_and_entropy(action_dict, action_params)
         return log_prob, value, entropy
 
-    def _get_log_prob(self, action, action_params):
+    def _get_log_prob_and_entropy(self, action, action_params):
         """Calculate combined log probability for all action components"""
         # Movement log prob
         movement_mean, movement_log_std = action_params["movement"]
         movement_std = torch.exp(movement_log_std.clamp(LOG_STD_MIN, LOG_STD_MAX))
         movement_dist = torch.distributions.Normal(movement_mean, movement_std)
         movement_log_prob = movement_dist.log_prob(action["movement"]).sum(-1)
+        movement_entropy = movement_dist.entropy().sum(-1)
 
         # Link openness log prob (binary)
         attach_logits = action_params["attach"]
         attach_dist = torch.distributions.Bernoulli(logits=attach_logits.squeeze(-1))
         attach_log_prob = attach_dist.log_prob(action["attach"].float().squeeze(-1))
+        attach_entropy = attach_dist.entropy()
 
         # Detach log prob
         detach_logits = action_params["detach"]
         detach_dist = torch.distributions.Bernoulli(logits=detach_logits.squeeze(-1))
         detach_log_prob = detach_dist.log_prob(action["detach"].float().squeeze(-1))
-
-        # Combined log probability
-        return movement_log_prob + attach_log_prob + detach_log_prob
-
-    def _get_entropy(self, action_params):
-        """Calculate combined entropy for all action components"""
-        # Movement entropy
-        movement_mean, movement_log_std = action_params["movement"]
-        movement_std = torch.exp(movement_log_std.clamp(LOG_STD_MIN, LOG_STD_MAX))
-        movement_dist = torch.distributions.Normal(movement_mean, movement_std)
-        movement_entropy = movement_dist.entropy().sum(-1)
-
-        # Link openness entropy
-        attach_logits = action_params["attach"]
-        attach_dist = torch.distributions.Bernoulli(logits=attach_logits.squeeze(-1))
-        attach_entropy = attach_dist.entropy()
-
-        # Detach entropy
-        detach_logits = action_params["detach"]
-        detach_dist = torch.distributions.Bernoulli(logits=detach_logits.squeeze(-1))
         detach_entropy = detach_dist.entropy()
 
-        return movement_entropy + attach_entropy + detach_entropy
+        # Combined log probability
+        return (movement_log_prob + attach_log_prob + detach_log_prob), (
+            movement_entropy + attach_entropy + detach_entropy
+        )
 
     def _split_by_indices(self, t, keys, indices, dim=0):
         # indices = cumulative cut points (exclude endpoints), e.g., [2, 7]
