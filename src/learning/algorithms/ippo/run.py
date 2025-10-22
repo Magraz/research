@@ -52,28 +52,15 @@ class IPPO_Runner(Runner):
         # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print(f"Using device: {self.exp_config.device}")
 
-        # PPO configuration
-        self.ppo_config = {
-            "lr": self.params.lr,
-            "gamma": self.params.gamma,
-            "gae_lambda": self.params.lmbda,
-            "clip_epsilon": self.params.eps_clip,
-            "entropy_coef": self.params.ent_coef,
-        }
-
         # Create environment
         n_agents = 0
-        self.config = {
-            "render_mode": None,  # Set to "human" for visual training
-            "n_agents": env_config.n_agents,
-        }
 
         match (self.env_config.environment):
             case EnvironmentEnum.BOX2D_SALP:
                 from learning.environments.box2d_salp.domain import SalpChainEnv
 
                 # Environment configuration
-                self.env = SalpChainEnv(**self.config)
+                self.env = SalpChainEnv(n_agents=env_config.n_agents)
                 state_dim = self.env.observation_space.shape[1]
                 action_dim = 4
                 n_agents = self.env.n_agents
@@ -84,9 +71,9 @@ class IPPO_Runner(Runner):
                 self.env = simple_spread_v3.parallel_env(
                     N=3,
                     local_ratio=0.5,
-                    max_cycles=25,
+                    max_cycles=100,
                     continuous_actions=True,
-                    dynamic_rescaling=False,
+                    dynamic_rescaling=True,
                 )
                 state_dim = self.env.observation_space("agent_0").shape[0]
                 action_dim = self.env.action_space("agent_0").shape[0]
@@ -99,7 +86,7 @@ class IPPO_Runner(Runner):
             n_agents,
             state_dim,
             action_dim,
-            self.ppo_config,
+            self.params,
             self.dirs,
             self.device,
         )
@@ -127,9 +114,9 @@ class IPPO_Runner(Runner):
             self.env = simple_spread_v3.parallel_env(
                 N=3,
                 local_ratio=0.5,
-                max_cycles=25,
+                max_cycles=100,
                 continuous_actions=True,
-                dynamic_rescaling=False,
+                dynamic_rescaling=True,
                 render_mode="human",
             )
             self.trainer.env = self.env

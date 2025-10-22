@@ -7,7 +7,6 @@ class Params:
     n_epochs: int
     n_total_steps: int
     n_total_episodes: int
-    n_max_steps_per_episode: int
     n_minibatches: int
     batch_size: int
 
@@ -18,6 +17,7 @@ class Params:
     random_seeds: list
     grad_clip: float
     ent_coef: float
+    val_coef: float
     std_coef: float
     lmbda: float
 

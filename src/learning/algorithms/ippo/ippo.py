@@ -8,6 +8,7 @@ from learning.algorithms.ippo.models.hybrid_mlp_ac import Hybrid_MLP_AC
 from learning.algorithms.ippo.models.mlp_ac import MLP_AC
 
 from learning.environments.types import EnvironmentEnum
+from learning.algorithms.ippo.types import Params
 
 
 class PPOAgent:
@@ -15,19 +16,17 @@ class PPOAgent:
         self,
         env_name,
         state_dim,
-        action_dim=None,
-        lr=3e-4,
-        gamma=0.99,
-        gae_lambda=0.95,
-        clip_epsilon=0.2,
-        entropy_coef=0.01,
+        action_dim,
+        params: Params,
         device="cpu",
     ):
         self.state_dim = state_dim
-        self.gamma = gamma
-        self.gae_lambda = gae_lambda
-        self.clip_epsilon = clip_epsilon
-        self.entropy_coef = entropy_coef
+        self.gamma = params.gamma
+        self.gae_lambda = params.lmbda
+        self.clip_epsilon = params.eps_clip
+        self.grad_clip = params.grad_clip
+        self.entropy_coef = params.ent_coef
+        self.value_coef = params.val_coef
         self.device = device
 
         # Initialize network
@@ -41,7 +40,7 @@ class PPOAgent:
 
         self.policy_old.load_state_dict(self.policy.state_dict())
 
-        self.optimizer = optim.Adam(self.policy.parameters(), lr=lr)
+        self.optimizer = optim.Adam(self.policy.parameters(), lr=params.lr)
 
         # Initialize buffer with empty tensors lists
         self.reset_buffer()
@@ -54,8 +53,6 @@ class PPOAgent:
         self.log_probs = []
         self.values = []
         self.dones = []
-        # This will be determined when the first action is stored
-        self.is_dict_action = None
 
     def get_action(self, state, deterministic=False):
         """Get action from policy while minimizing tensor conversions"""
@@ -75,10 +72,7 @@ class PPOAgent:
     def store_transition(self, state, action, reward, log_prob, value, done):
         """Store transition in buffer, converting to tensors if needed"""
         # Convert state to tensor and store
-        if not torch.is_tensor(state):
-            self.states.append(torch.FloatTensor(state).to(self.device))
-        else:
-            self.states.append(state.to(self.device))
+        self.states.append(torch.FloatTensor(state).to(self.device))
 
         self.actions.append(torch.FloatTensor(action).to(self.device))
 
@@ -121,7 +115,12 @@ class PPOAgent:
 
         return returns, advantages
 
-    def update(self, next_value=0, minibatch_size=128, epochs=10):
+    def update(
+        self,
+        next_value=0,
+        minibatch_size=128,
+        epochs=10,
+    ):
         """Update policy with minimal tensor-numpy conversions"""
 
         # Compute returns and advantages using tensor operations
@@ -172,12 +171,12 @@ class PPOAgent:
                 entropy_loss = -self.entropy_coef * entropy.mean()
 
                 # Total loss
-                loss = policy_loss + value_loss + entropy_loss
+                loss = policy_loss + self.value_coef * value_loss + entropy_loss
 
                 # Optimize
                 self.optimizer.zero_grad()
                 loss.backward()
-                torch.nn.utils.clip_grad_norm_(self.policy.parameters(), 0.5)
+                torch.nn.utils.clip_grad_norm_(self.policy.parameters(), self.grad_clip)
                 self.optimizer.step()
 
                 # Update statistics

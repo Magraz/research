@@ -45,11 +45,6 @@ class MLP_AC(nn.Module):
             layer_init(nn.Linear(hidden_dim, 1), std=1.0),
         )
 
-        # Observation normalization using welford's method
-        self.welford_state_mean = torch.zeros(1)
-        self.welford_state_mean_diff = torch.ones(1)
-        self.welford_state_n = 1
-
     def forward(self, state):
         action_mean = self.actor(state)
         value = self.critic(state)

@@ -2,11 +2,11 @@ import torch
 import numpy as np
 import matplotlib.pyplot as plt
 from collections import defaultdict
-from learning.environments.box2d_salp.domain import SalpChainEnv
 from learning.algorithms.ippo.ippo import PPOAgent
 import pickle  # Add this import at the top of the file
 
 from learning.environments.types import EnvironmentEnum
+from learning.algorithms.ippo.types import Params
 
 
 class IPPOTrainer:
@@ -16,14 +16,13 @@ class IPPOTrainer:
         env_name,
         n_agents,
         state_dim,
-        action_dim=None,
-        ppo_config=None,
+        action_dim,
+        params: Params,
         dirs=None,
         device="cpu",
     ):
         self.device = device
         self.dirs = dirs
-        self.ppo_config = ppo_config
         self.n_agents = n_agents
 
         # Create environment
@@ -39,14 +38,31 @@ class IPPOTrainer:
 
         self.agents = []
 
+        self.parameter_sharing = True
+
+        if self.parameter_sharing:
+            shared_agent = PPOAgent(
+                env_name,
+                state_dim,
+                action_dim,
+                params,
+                device,
+            )
+
         for _ in range(self.n_agents):
+
             agent = PPOAgent(
                 env_name,
-                state_dim=state_dim,
-                action_dim=action_dim,
-                device=device,
-                **ppo_config,
+                state_dim,
+                action_dim,
+                params,
+                device,
             )
+
+            if self.parameter_sharing:
+                agent.policy = shared_agent.policy
+                agent.policy_old = shared_agent.policy_old
+
             self.agents.append(agent)
 
         # Training statistics
@@ -191,9 +207,11 @@ class IPPOTrainer:
             # Update all agents
             update_stats = {}
             for i, (agent, final_value) in enumerate(zip(self.agents, final_values)):
+
                 stats = agent.update(
                     next_value=final_value, minibatch_size=batch_size // minibatches
                 )
+
                 for key, value in stats.items():
                     if f"agent_{i}_{key}" not in update_stats:
                         update_stats[f"agent_{i}_{key}"] = []
@@ -214,14 +232,6 @@ class IPPOTrainer:
 
             # Log progress
             if steps_completed % log_every < step_count:
-                # Average over recent batch updates
-                # average_window = 100
-                # recent_rewards = (
-                #     self.training_stats["reward"][-average_window:]
-                #     if len(self.training_stats["reward"]) > average_window
-                #     else self.training_stats["reward"]
-                # )
-                # avg_reward = sum(recent_rewards) / len(recent_rewards)
 
                 print(
                     f"Steps: {steps_completed}/{total_steps} ({steps_completed/total_steps*100:.1f}%) | "
