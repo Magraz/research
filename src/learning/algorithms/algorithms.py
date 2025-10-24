@@ -58,7 +58,11 @@ def run_algorithm(
         case EnvironmentEnum.VMAS_BALANCE | EnvironmentEnum.VMAS_BUZZ_WIRE:
             env_config = EnvironmentParams(**env_dict)
 
-        case EnvironmentEnum.BOX2D_SALP | EnvironmentEnum.MPE:
+        case (
+            EnvironmentEnum.BOX2D_SALP
+            | EnvironmentEnum.MPE_SPREAD
+            | EnvironmentEnum.MPE_SIMPLE
+        ):
             env_config = EnvironmentParams(**env_dict)
 
     env_config.environment = environment

@@ -16,8 +16,8 @@ def set_seeds(seed):
     np.random.seed(seed)  # NumPy
     torch.manual_seed(seed)  # PyTorch
     torch.cuda.manual_seed_all(seed)  # PyTorch CUDA
-    torch.backends.cudnn.deterministic = True  # Make CUDA deterministic
-    torch.backends.cudnn.benchmark = False  # Disable CUDA benchmarking
+    # torch.backends.cudnn.deterministic = True  # Make CUDA deterministic
+    # torch.backends.cudnn.benchmark = False  # Disable CUDA benchmarking
 
 
 class IPPO_Runner(Runner):
@@ -65,18 +65,29 @@ class IPPO_Runner(Runner):
                 action_dim = 4
                 n_agents = self.env.n_agents
 
-            case EnvironmentEnum.MPE:
+            case EnvironmentEnum.MPE_SPREAD:
                 from mpe2 import simple_spread_v3
 
                 self.env = simple_spread_v3.parallel_env(
                     N=3,
                     local_ratio=0.5,
-                    max_cycles=100,
-                    continuous_actions=True,
+                    max_cycles=25,
+                    continuous_actions=False,
                     dynamic_rescaling=True,
                 )
                 state_dim = self.env.observation_space("agent_0").shape[0]
-                action_dim = self.env.action_space("agent_0").shape[0]
+                action_dim = self.env.action_space("agent_0").n
+                n_agents = self.env.max_num_agents
+
+            case EnvironmentEnum.MPE_SIMPLE:
+                from mpe2 import simple_v3
+
+                self.env = simple_v3.parallel_env(
+                    max_cycles=25,
+                    continuous_actions=False,
+                )
+                state_dim = self.env.observation_space("agent_0").shape[0]
+                action_dim = self.env.action_space("agent_0").n
                 n_agents = self.env.max_num_agents
 
         # Create trainer
@@ -97,6 +108,7 @@ class IPPO_Runner(Runner):
             total_steps=self.params.n_total_steps,
             batch_size=self.params.batch_size,
             minibatches=self.params.n_minibatches,
+            epochs=self.params.n_epochs,
         )
         self.trainer.save_training_stats(
             self.dirs["logs"] / "training_stats_finished.pkl"
@@ -108,15 +120,24 @@ class IPPO_Runner(Runner):
         self.trainer.env.close()
 
     def view(self):
-        if self.env_config.environment == EnvironmentEnum.MPE:
+        if self.env_config.environment == EnvironmentEnum.MPE_SPREAD:
             from mpe2 import simple_spread_v3
 
             self.env = simple_spread_v3.parallel_env(
                 N=3,
                 local_ratio=0.5,
-                max_cycles=100,
-                continuous_actions=True,
+                max_cycles=25,
+                continuous_actions=False,
                 dynamic_rescaling=True,
+                render_mode="human",
+            )
+            self.trainer.env = self.env
+
+        elif self.env_config.environment == EnvironmentEnum.MPE_SIMPLE:
+            from mpe2 import simple_v3
+
+            self.env = simple_v3.parallel_env(
+                max_cycles=25,
                 render_mode="human",
             )
             self.trainer.env = self.env

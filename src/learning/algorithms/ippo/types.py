@@ -4,17 +4,18 @@ from dataclasses import dataclass
 @dataclass
 class Params:
 
+    # Training Params
     n_epochs: int
     n_total_steps: int
-    n_total_episodes: int
     n_minibatches: int
     batch_size: int
+    parameter_sharing: bool
+    random_seeds: list
 
+    # PPO Params
     eps_clip: float
     gamma: float
-
     lr: float
-    random_seeds: list
     grad_clip: float
     ent_coef: float
     val_coef: float

@@ -20,6 +20,7 @@ class PPOAgent:
         params: Params,
         device="cpu",
     ):
+        self.device = device
         self.state_dim = state_dim
         self.gamma = params.gamma
         self.gae_lambda = params.lmbda
@@ -27,16 +28,18 @@ class PPOAgent:
         self.grad_clip = params.grad_clip
         self.entropy_coef = params.ent_coef
         self.value_coef = params.val_coef
-        self.device = device
 
         # Initialize network
         if env_name == EnvironmentEnum.BOX2D_SALP:
             self.policy = Hybrid_MLP_AC(state_dim, action_dim).to(device)
             self.policy_old = Hybrid_MLP_AC(state_dim, action_dim).to(device)
 
-        else:
-            self.policy = MLP_AC(state_dim, action_dim).to(device)
-            self.policy_old = MLP_AC(state_dim, action_dim).to(device)
+        elif (
+            env_name == EnvironmentEnum.MPE_SPREAD
+            or env_name == EnvironmentEnum.MPE_SIMPLE
+        ):
+            self.policy = MLP_AC(state_dim, action_dim, discrete=True).to(device)
+            self.policy_old = MLP_AC(state_dim, action_dim, discrete=True).to(device)
 
         self.policy_old.load_state_dict(self.policy.state_dict())
 
@@ -57,10 +60,10 @@ class PPOAgent:
     def get_action(self, state, deterministic=False):
         """Get action from policy while minimizing tensor conversions"""
 
-        state_tensor = torch.FloatTensor(state).to(self.device)
-
         # Get action, log_prob and value from network
-        action, log_prob, value = self.policy_old.act(state_tensor, deterministic)
+        with torch.no_grad():
+            state_tensor = torch.FloatTensor(state).to(self.device)
+            action, log_prob, value = self.policy_old.act(state_tensor, deterministic)
 
         # For environment interaction, convert to numpy
         return (
@@ -90,7 +93,7 @@ class PPOAgent:
 
         # Process all data as tensors
         rewards = torch.stack(self.rewards)
-        values = torch.cat([torch.stack(self.values), next_value.unsqueeze(0)])
+        values = torch.cat([torch.stack(self.values).detach(), next_value.unsqueeze(0)])
         dones = torch.cat([torch.stack(self.dones), torch.zeros(1, device=self.device)])
 
         # Initialize advantages tensor
@@ -125,14 +128,14 @@ class PPOAgent:
 
         # Compute returns and advantages using tensor operations
         returns, advantages = self.compute_returns_and_advantages(next_value)
-        returns = returns.unsqueeze(-1)
-        advantages = advantages.unsqueeze(-1)
+        returns = returns.unsqueeze(-1).detach()
+        advantages = advantages.unsqueeze(-1).detach()
 
         # Stack states
-        states = torch.stack(self.states)
-        old_log_probs = torch.stack(self.log_probs).unsqueeze(-1)
+        states = torch.stack(self.states).detach()
+        old_log_probs = torch.stack(self.log_probs).unsqueeze(-1).detach()
 
-        actions = torch.stack(self.actions)
+        actions = torch.stack(self.actions).detach()
         dataset = TensorDataset(states, actions, old_log_probs, returns, advantages)
 
         dataloader = DataLoader(dataset, batch_size=minibatch_size, shuffle=True)
