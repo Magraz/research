@@ -4,32 +4,34 @@ from learning.environments.types import EnvironmentEnum
 from dataclasses import asdict
 
 # EXPERIMENT SETTINGS
-ENVIRONMENT = EnvironmentEnum.BOX2D_SALP
+ENVIRONMENT = EnvironmentEnum.MPE_SIMPLE
 BATCH_NAME = f"{ENVIRONMENT}_test"
-EXPERIMENTS_LIST = ["default"]
+EXPERIMENTS_LIST = ["mlp", "gru"]
+# EXPERIMENTS_LIST = ["mlp_shared", "gru_shared"]
 DEVICE = "cpu"
+MODELS = ["mlp", "gru"]
 
 # EXPERIMENTS
 experiments = []
-for experiment_name in EXPERIMENTS_LIST:
+for i, experiment_name in enumerate(EXPERIMENTS_LIST):
     experiment = Experiment(
         device=DEVICE,
-        model=experiment_name,
+        model=MODELS[i],
         params=Params(
-            n_epochs=10,
-            n_total_steps=1e7,
-            n_total_episodes=6e4,
-            n_max_steps_per_episode=512,
+            n_epochs=4,
+            n_total_steps=2e7,
             n_minibatches=4,
-            batch_size=5120,
+            batch_size=250,
+            parameter_sharing=True,
+            random_seeds=[118, 1234, 8764, 3486, 2487, 5439, 6584, 7894, 523, 69],
             eps_clip=0.2,
             grad_clip=0.5,
             gamma=0.99,
             lmbda=0.95,
-            ent_coef=1e-3,
+            ent_coef=1e-2,
+            val_coef=0.5,
             std_coef=0.0,
-            lr=1e-4,
-            random_seeds=[118, 1234, 8764, 3486, 2487, 5439, 6584, 7894, 523, 69],
+            lr=3e-4,
         ),
     )
     experiments.append(experiment)
@@ -37,8 +39,8 @@ for experiment_name in EXPERIMENTS_LIST:
 EXP_DICTS = [
     {
         "batch": BATCH_NAME,
-        "name": experiment.model,
+        "name": EXPERIMENTS_LIST[i],
         "config": asdict(experiment),
     }
-    for experiment in experiments
+    for i, experiment in enumerate(experiments)
 ]

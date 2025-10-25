@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import os
 from pathlib import Path
+import argparse
 
 
 def plot_pickle_data(filepath, save_dir=None):
@@ -104,14 +105,48 @@ def print_pickle_file(filepath):
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument(
+        "--batch",
+        default="",
+        help="Experiment batch",
+        type=str,
+    )
+    parser.add_argument(
+        "--name",
+        default="",
+        help="Experiment name",
+        type=str,
+    )
+
+    parser.add_argument("--trial_id", default="debug", help="Sets trial ID", type=str)
+
+    args, unknown = parser.parse_known_args()
+
+    args = vars(args)
+
+    # Set base_config path
+    dir_path = Path(__file__).parent.parent.parent
+
+    # Set configuration folder
+    results_dir = dir_path / "experiments" / "results" / args["batch"]
+
     # File path
-    file_path = "/home/magraz/research/src/learning/experiments/results/mpe_spread_test/mlp_shared/debug/logs/training_stats_checkpoint.pkl"
+    file_path = (
+        results_dir
+        / args["name"]
+        / args["trial_id"]
+        / "logs"
+        / "training_stats_checkpoint.pkl"
+    )
 
     # Print file keys
     print_pickle_file(file_path)
 
     # Plot all data
-    plots_dir = "/home/magraz/research/src/learning/experiments/results/mpe_spread_test/mlp_shared/debug/plots"
+    plots_dir = results_dir / args["name"] / args["trial_id"] / "plots"
+
     plot_pickle_data(file_path, save_dir=plots_dir)
 
     print(f"\nPlots saved to: {plots_dir}")

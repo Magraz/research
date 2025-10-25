@@ -29,19 +29,11 @@ class IPPOTrainer:
         self.env = env
         self.env_name = env_name
 
-        if (
-            self.env_name == EnvironmentEnum.MPE_SPREAD
-            or self.env_name == EnvironmentEnum.MPE_SIMPLE
-        ):
-            self.action_low = 0
-            self.action_high = 1
-        else:
-            self.action_low = -1
-            self.action_high = 1
+        self.param_sharing = params.parameter_sharing
 
         self.agents = []
 
-        if params.parameter_sharing:
+        if self.param_sharing:
             shared_agent = PPOAgent(
                 env_name,
                 state_dim,
@@ -60,9 +52,10 @@ class IPPOTrainer:
                 device,
             )
 
-            if params.parameter_sharing:
+            if self.param_sharing:
                 agent.policy = shared_agent.policy
                 agent.policy_old = shared_agent.policy_old
+                agent.optimizer = shared_agent.optimizer
 
             self.agents.append(agent)
 
@@ -71,17 +64,69 @@ class IPPOTrainer:
         self.episode_lengths = []
         self.training_stats = defaultdict(list)
 
-    def collect_trajectory(self, max_steps):
-
+    def reset(self, env):
         if (
             self.env_name == EnvironmentEnum.MPE_SPREAD
             or self.env_name == EnvironmentEnum.MPE_SIMPLE
         ):
-            obs, _ = self.env.reset()
+            obs, _ = env.reset()
             obs = np.stack(list(obs.values()))
 
         else:
-            obs, _ = self.env.reset()
+            obs, _ = env.reset()
+
+        return obs
+
+    def step(self, actions):
+        global_reward = 0
+        if (
+            self.env_name == EnvironmentEnum.MPE_SPREAD
+            or self.env_name == EnvironmentEnum.MPE_SIMPLE
+        ):
+            next_obs = []
+            local_rewards = []
+            action_dict = {}
+
+            for i, agent_id in enumerate(self.env.agents):
+                action_dict[agent_id] = actions[i][0]
+
+            next_obs, local_rewards, terminated, truncated, info = self.env.step(
+                action_dict
+            )
+
+            next_obs = np.stack(list(next_obs.values()))
+            local_rewards = np.stack(list(local_rewards.values()))
+            terminated = np.stack(list(terminated.values()))
+            truncated = np.stack(list(truncated.values()))
+
+        else:
+            next_obs, global_reward, terminated, truncated, info = self.env.step(
+                actions
+            )
+            local_rewards = np.array(info["individual_rewards"])
+
+        return next_obs, global_reward, local_rewards, terminated, truncated, info
+
+    def take_actions(self, obs, deterministic=False):
+        # Get actions from all agents
+        actions = []
+        log_probs = []
+        values = []
+
+        for i, agent in enumerate(self.agents):
+
+            with torch.no_grad():
+                action, log_prob, value = agent.get_action(obs[i], deterministic)
+
+            actions.append(action)
+            log_probs.append(log_prob)
+            values.append(value)
+
+        return np.array(actions), log_probs, values
+
+    def collect_trajectory(self, max_steps):
+
+        obs = self.reset(self.env)
 
         total_step_count = 0
         current_episode_steps = 0
@@ -89,53 +134,20 @@ class IPPOTrainer:
         episode_count = 0
 
         for step in range(max_steps):
-            # Get actions from all agents
-            actions = []
-            log_probs = []
-            values = []
 
-            for i, agent in enumerate(self.agents):
-
-                with torch.no_grad():
-                    action, log_prob, value = agent.get_action(obs[i])
-                    # action = np.clip(action, self.action_low, self.action_high)
-
-                actions.append(action)
-                log_probs.append(log_prob)
-                values.append(value)
-
-            env_actions = np.array(actions)
+            actions, log_probs, values = self.take_actions(obs)
 
             # Step environment
-            if (
-                self.env_name == EnvironmentEnum.MPE_SPREAD
-                or self.env_name == EnvironmentEnum.MPE_SIMPLE
-            ):
-                action_dict = {}
-
-                for i, agent_id in enumerate(self.env.agents):
-                    action_dict[agent_id] = env_actions[i][0]
-
-                next_obs, rewards, terminated, truncated, _ = self.env.step(action_dict)
-
-                next_obs = np.stack(list(next_obs.values()))
-                rewards = np.stack(list(rewards.values()))
-                terminated = np.stack(list(terminated.values()))
-                truncated = np.stack(list(truncated.values()))
-
-            else:
-
-                next_obs, shared_reward, terminated, truncated, info = self.env.step(
-                    env_actions
-                )
-                rewards = np.array(info["individual_rewards"])
+            next_obs, global_reward, local_rewards, terminated, truncated, info = (
+                self.step(actions)
+            )
 
             # Store transitions for all agents
             for i, agent in enumerate(self.agents):
                 agent.store_transition(
                     state=obs[i],
-                    action=env_actions[i],
-                    reward=rewards[i],
+                    action=actions[i],
+                    reward=local_rewards[i],
                     log_prob=log_probs[i],
                     value=values[i],
                     done=terminated[i] or truncated[i],
@@ -147,23 +159,12 @@ class IPPOTrainer:
 
             # If environment terminated or truncated, reset it and continue collecting
             if terminated.all() or truncated.all():
-                # Get new observations from reset
-                if (
-                    self.env_name == EnvironmentEnum.MPE_SPREAD
-                    or self.env_name == EnvironmentEnum.MPE_SIMPLE
-                ):
-                    obs, _ = self.env.reset()
-                    obs = np.stack(list(obs.values()))
-                else:
-                    obs, _ = self.env.reset()
+                obs = self.reset(self.env)
 
                 # Keep track of episode count
                 steps_per_episode.append(current_episode_steps)
                 current_episode_steps = 0
                 episode_count += 1
-
-                # Note: We've already stored the transition with done=True
-                # So the agents will know where episodes end for return calculation
 
         # Get final values for advantage computation
         final_values = []
@@ -179,7 +180,7 @@ class IPPOTrainer:
             final_values,
         )
 
-    def train(self, total_steps, batch_size, minibatches, epochs, log_every=1000):
+    def train(self, total_steps, batch_size, minibatches, epochs, log_every=10000):
         """
         Train agents for a specific number of environment steps.
 
@@ -212,18 +213,53 @@ class IPPOTrainer:
 
             # Update all agents
             update_stats = {}
-            for i, (agent, final_value) in enumerate(zip(self.agents, final_values)):
 
-                stats = agent.update(
-                    next_value=final_value,
+            if self.param_sharing:
+                # First agent in the list will be our shared agent
+                # Build a singular buffer from all agents experiences
+                for i in range(1, self.n_agents):
+                    # Append other agents' data to the shared agent
+                    self.agents[0].states.extend(self.agents[i].states)
+                    self.agents[0].actions.extend(self.agents[i].actions)
+                    self.agents[0].rewards.extend(self.agents[i].rewards)
+                    self.agents[0].log_probs.extend(self.agents[i].log_probs)
+                    self.agents[0].values.extend(self.agents[i].values)
+                    self.agents[0].dones.extend(self.agents[i].dones)
+
+                    # Clear the other agents' buffers
+                    self.agents[i].reset_buffer()
+
+                # Do a single update with combined data
+                stats = self.agents[0].update(
+                    next_value=final_values[
+                        0
+                    ],  # Use any final value (they should be similar)
                     minibatch_size=batch_size // minibatches,
                     epochs=epochs,
                 )
 
                 for key, value in stats.items():
-                    if f"agent_{i}_{key}" not in update_stats:
-                        update_stats[f"agent_{i}_{key}"] = []
-                    update_stats[f"agent_{i}_{key}"].append(value)
+                    if f"agent_0_{key}" not in update_stats:
+                        update_stats[f"agent_0_{key}"] = []
+                    update_stats[f"agent_0_{key}"].append(value)
+
+            else:
+                # Update each agent separately with their own buffer
+                for i, (agent, final_value) in enumerate(
+                    zip(self.agents, final_values)
+                ):
+
+                    stats = agent.update(
+                        next_value=final_value,
+                        minibatch_size=batch_size // minibatches,
+                        epochs=epochs,
+                    )
+
+                    # Store stats from each agent into their own key
+                    for key, value in stats.items():
+                        if f"agent_{i}_{key}" not in update_stats:
+                            update_stats[f"agent_{i}_{key}"] = []
+                        update_stats[f"agent_{i}_{key}"].append(value)
 
             # Update tracking variables
             steps_completed += step_count
@@ -234,7 +270,12 @@ class IPPOTrainer:
                 self.training_stats[key].extend(values)
 
             # Evaluate policies
-            eval_rewards = self.evaluate()
+            rew_per_episode = []
+            eval_episodes = 20
+            while len(rew_per_episode) < eval_episodes:
+                rew = self.evaluate()
+                rew_per_episode.append(rew)
+            eval_rewards = np.array(rew_per_episode).mean()
 
             self.training_stats["total_steps"].append(steps_completed)
             self.training_stats["reward"].append(eval_rewards)
@@ -260,144 +301,38 @@ class IPPOTrainer:
             f"Training completed! Total steps: {steps_completed}, Episodes: {episodes_completed}"
         )
 
-    def evaluate(self, eval_episodes=20):
-        if (
-            self.env_name == EnvironmentEnum.MPE_SPREAD
-            or self.env_name == EnvironmentEnum.MPE_SIMPLE
-        ):
-            obs, _ = self.env.reset()
-            obs = np.stack(list(obs.values()))
+    def evaluate(self, render=False):
 
-        else:
-            obs, _ = self.env.reset()
+        # Set policies to eval
+        for agent in self.agents:
+            agent.policy_old.eval()
 
-        rew_per_episode = []
-        episode_rew = 0
-        episode_count = 0
+        with torch.no_grad():
 
-        while episode_count < eval_episodes:
-            # Get actions from all agents
-            actions = []
-            log_probs = []
-            values = []
+            obs = self.reset(self.env)
+            episode_rew = 0
 
-            for i, agent in enumerate(self.agents):
+            while True:
 
-                with torch.no_grad():
-                    action, log_prob, value = agent.get_action(obs[i])
-                    # action = np.clip(action, self.action_low, self.action_high)
+                actions, _, _ = self.take_actions(obs, deterministic=True)
 
-                actions.append(action)
-                log_probs.append(log_prob)
-                values.append(value)
-
-            env_actions = np.array(actions)
-
-            # Step environment
-            if (
-                self.env_name == EnvironmentEnum.MPE_SPREAD
-                or self.env_name == EnvironmentEnum.MPE_SIMPLE
-            ):
-                action_dict = {}
-
-                for i, agent_id in enumerate(self.env.agents):
-                    action_dict[agent_id] = env_actions[i][0]
-
-                next_obs, rewards, terminated, truncated, _ = self.env.step(action_dict)
-
-                next_obs = np.stack(list(next_obs.values()))
-                rewards = np.stack(list(rewards.values()))
-                terminated = np.stack(list(terminated.values()))
-                truncated = np.stack(list(truncated.values()))
-
-            else:
-
-                next_obs, shared_reward, terminated, truncated, info = self.env.step(
-                    env_actions
+                obs, global_reward, local_rewards, terminated, truncated, info = (
+                    self.step(actions)
                 )
-                rewards = np.array(info["individual_rewards"])
 
-            obs = next_obs
-            episode_rew += rewards[i]
+                episode_rew += local_rewards[0]
 
-            if terminated.all() or truncated.all():
-                # Get new observations from reset
-                if (
-                    self.env_name == EnvironmentEnum.MPE_SPREAD
-                    or self.env_name == EnvironmentEnum.MPE_SIMPLE
-                ):
-                    obs, _ = self.env.reset()
-                    obs = np.stack(list(obs.values()))
-                else:
-                    obs, _ = self.env.reset()
+                if render:
+                    self.env.render()
 
-                # Keep track of episode count
-                rew_per_episode.append(episode_rew)
-                episode_rew = 0
-                episode_count += 1
+                if terminated.all() or truncated.all():
+                    break
 
-        return np.array(rew_per_episode).mean()
+        # Set policies to train
+        for agent in self.agents:
+            agent.policy_old.train()
 
-    def render_episode(self, max_steps):
-
-        if (
-            self.env_name == EnvironmentEnum.MPE_SPREAD
-            or self.env_name == EnvironmentEnum.MPE_SIMPLE
-        ):
-            obs, _ = self.env.reset(seed=42)
-            obs = np.stack(list(obs.values()))
-        else:
-            obs, _ = self.env.reset()
-
-        cumulative_reward = 0
-
-        for step in range(max_steps):
-            # Get actions from all agents (deterministic)
-            actions = []
-            for i, agent in enumerate(self.agents):
-                with torch.no_grad():
-                    agent.policy_old.eval()
-                    action, _, _ = agent.get_action(obs[i], deterministic=True)
-                    # action = np.clip(action, self.action_low, self.action_high)
-                actions.append(action)
-
-            # Format actions correctly for environment step
-            env_actions = np.array(actions)
-
-            # Step environment
-            if (
-                self.env_name == EnvironmentEnum.MPE_SPREAD
-                or self.env_name == EnvironmentEnum.MPE_SIMPLE
-            ):
-                next_obs = []
-                rewards = []
-                action_dict = {}
-
-                for i, agent_id in enumerate(self.env.agents):
-                    action_dict[agent_id] = env_actions[i][0]
-
-                next_obs, rewards, terminated, truncated, _ = self.env.step(action_dict)
-
-                next_obs = np.stack(list(next_obs.values()))
-                rewards = np.stack(list(rewards.values()))
-                terminated = np.stack(list(terminated.values()))
-                truncated = np.stack(list(truncated.values()))
-
-            else:
-                next_obs, shared_reward, terminated, truncated, info = self.env.step(
-                    env_actions
-                )
-                rewards = np.array(info["individual_rewards"])
-
-            self.env.render()
-
-            cumulative_reward += rewards[0]
-
-            obs = next_obs
-
-            if terminated.all() or truncated.all():
-                print(f"REWARD: {cumulative_reward}")
-                break
+        return episode_rew
 
     def save_agents(self, filepath):
         torch.save(
