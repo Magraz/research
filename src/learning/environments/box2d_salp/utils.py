@@ -126,14 +126,18 @@ class TargetArea:
         if not qualifying_agents:
             return reward_map  # No component meets requirement
 
-        # Calculate reward based on proximity
+        # # Calculate reward based on proximity
+        # for i in qualifying_agents:
+        #     dist = np.sqrt(
+        #         (agents[i].position.x - self.x) ** 2
+        #         + (agents[i].position.y - self.y) ** 2
+        #     )
+        #     # Reward decreases with distance (10.0 at center, 0.0 at radius)
+        #     reward_map[i] = 1 / (dist**2 + 0.1)
+
+        # Give flat positive reward for being at the target
         for i in qualifying_agents:
-            dist = np.sqrt(
-                (agents[i].position.x - self.x) ** 2
-                + (agents[i].position.y - self.y) ** 2
-            )
-            # Reward decreases with distance (10.0 at center, 0.0 at radius)
-            reward_map[i] = 1 / (dist**2 + 0.1)
+            reward_map[i] = 2
 
         return reward_map
 
@@ -260,7 +264,7 @@ def fixed_position_target_area(
     center_y = height / 2
 
     x_offset = 15
-    y_offset = 15
+    y_offset = 8
 
     # positions = [
     #     (center_x + x_offset, center_y + y_offset),

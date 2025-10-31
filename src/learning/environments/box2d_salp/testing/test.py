@@ -5,6 +5,65 @@ import os
 import pygame
 
 
+def dict_to_agent_actions(action_dict):
+    """
+    Convert dictionary of action components to agent-wise action array.
+
+    Args:
+        action_dict: Dictionary with action component names as keys and numpy arrays as values.
+                    Each array has shape (n_agents,) or (n_agents, component_dim).
+                    Example: {
+                        'movement': np.array([[0.5, 0.3], [0.1, 0.2], [0.8, 0.4]]),  # (n_agents, 2)
+                        'attach': np.array([1, 0, 1]),  # (n_agents,)
+                        'detach': np.array([0, 1, 0])   # (n_agents,)
+                    }
+
+    Returns:
+        np.ndarray: Array of shape (n_agents, total_action_dim) where each row is an agent's
+                   complete action vector with movement first.
+                   Example output shape: (3, 4) for the example above
+                   Format: [movement_x, movement_y, attach, detach]
+    """
+    if not action_dict:
+        raise ValueError("Action dictionary is empty")
+
+    # Get number of agents from first component
+    first_component = next(iter(action_dict.values()))
+    n_agents = len(first_component)
+
+    # Define the correct component order: movement should come first
+    component_order = ["movement", "attach", "detach"]
+
+    # Verify all expected components are present
+    for key in component_order:
+        if key not in action_dict:
+            raise KeyError(
+                f"Required action component '{key}' not found in action dictionary"
+            )
+
+    # Build action vectors for each agent
+    agent_actions = []
+
+    for agent_idx in range(n_agents):
+        agent_action = []
+
+        # Iterate through action components in the specified order
+        for key in component_order:
+            component = action_dict[key]
+
+            # Handle both 1D and 2D components
+            if component.ndim == 1:
+                # Scalar component (e.g., attach, detach)
+                agent_action.append(component[agent_idx])
+            else:
+                # Vector component (e.g., movement)
+                agent_action.extend(component[agent_idx])
+
+        agent_actions.append(agent_action)
+
+    return np.array(agent_actions)
+
+
 def get_target_seeking_action(env):
     """Generate actions that move each agent towards the nearest target"""
 
@@ -294,7 +353,9 @@ try:
             else:  # random mode
                 action = biased_sample(env, zero_prob=0.7)
 
-            obs, reward, terminated, truncated, info = env.step(action)
+            act_array = dict_to_agent_actions(action)
+
+            obs, reward, terminated, truncated, info = env.step(act_array)
 
             episode_record["observation"].append(obs)
             episode_record["reward"].append(reward)
@@ -306,7 +367,7 @@ try:
             if step % 25 == 0:
                 mode_display = f"[{action_mode.upper()}]"
                 print(
-                    f"Step={step:3d} {mode_display:10s} Reward={reward:6.2f} Reward Map={info["individual_rewards"]} Observation={obs}"
+                    f"Step={step:3d} {mode_display:10s} Reward={reward} Reward Map={info["individual_rewards"]} Observation={obs}"
                 )
 
             if terminated:

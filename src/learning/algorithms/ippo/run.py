@@ -75,7 +75,7 @@ class IPPO_Runner(Runner):
 
                 # Environment configuration
                 env = SalpChainEnv(n_agents=self.env_config.n_agents)
-                state_dim = self.env.observation_space.shape[1]
+                state_dim = env.observation_space.shape[1]
                 action_dim = 4
 
             case EnvironmentEnum.MPE_SPREAD:

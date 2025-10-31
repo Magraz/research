@@ -104,6 +104,8 @@ class IPPOTrainer:
                 actions
             )
             local_rewards = np.array(info["individual_rewards"])
+            terminated = np.array([terminated for _ in range(self.n_agents)])
+            truncated = np.array([truncated for _ in range(self.n_agents)])
 
         return next_obs, global_reward, local_rewards, terminated, truncated, info
 
