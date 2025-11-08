@@ -70,6 +70,11 @@ class SalpChainEnv(gym.Env):
         self.agents = []
         self.joints = []
 
+        self.prev_agent_closest_distances = [float("inf") for _ in range(self.n_agents)]
+        self.prev_target_closest_distances = [
+            float("inf") for _ in range(self.n_agents)
+        ]
+
         # Add contact listener
         self.contact_listener = BoundaryContactListener()
         self.world.contactListener = self.contact_listener
@@ -211,6 +216,23 @@ class SalpChainEnv(gym.Env):
 
             previous_body = body
 
+    def _create_joint(self, bodyA, bodyB):
+        anchor = (bodyA.position + bodyB.position) / 2
+        joint_def = b2RevoluteJointDef(
+            bodyA=bodyA, bodyB=bodyB, anchor=anchor, collideConnected=True
+        )
+        joint = self.world.CreateJoint(joint_def)
+        self.joints.append(joint)
+        return joint
+
+    def _break_joint(self, joint):
+        """Modified to update Union-Find when joints are broken"""
+        self.world.DestroyJoint(joint)
+        self.joints.remove(joint)
+
+        # Update Union-Find after breaking a joint
+        self._update_union_find()
+
     def _create_chain(self):
         self.agents.clear()
         self.joints.clear()
@@ -267,23 +289,6 @@ class SalpChainEnv(gym.Env):
                 vertices = [(v[0], self.screen_size[1] - v[1]) for v in vertices]
 
                 pygame.draw.polygon(self.screen, COLORS_LIST[idx], vertices)
-
-    def _create_joint(self, bodyA, bodyB):
-        anchor = (bodyA.position + bodyB.position) / 2
-        joint_def = b2RevoluteJointDef(
-            bodyA=bodyA, bodyB=bodyB, anchor=anchor, collideConnected=True
-        )
-        joint = self.world.CreateJoint(joint_def)
-        self.joints.append(joint)
-        return joint
-
-    def _break_joint(self, joint):
-        """Modified to update Union-Find when joints are broken"""
-        self.world.DestroyJoint(joint)
-        self.joints.remove(joint)
-
-        # Update Union-Find after breaking a joint
-        self._update_union_find()
 
     def _join_on_proximity(self, min_distance: float = 1.5):
         """Efficient version using Union-Find that respects linking preferences"""
@@ -859,6 +864,7 @@ class SalpChainEnv(gym.Env):
 
             # Calculate agent proximity reward
             for j in range(self.n_agents):
+
                 # Skip self
                 if i == j:
                     continue
@@ -874,12 +880,17 @@ class SalpChainEnv(gym.Env):
                 distance = np.linalg.norm(agent_i_pos - agent_j_pos)
 
                 # Update closest agent
+                if self.prev_agent_closest_distances[i] == float("inf"):
+                    self.prev_agent_closest_distances[i] = distance
+
                 if distance < closest_agent_dist:
                     closest_agent_dist = distance
                     # Calculate reward based on distance
                     agent_proximity_reward[i] = (
-                        -closest_agent_dist / self.world_diagonal
+                        self.prev_agent_closest_distances[i] - closest_agent_dist
                     )
+
+                    self.prev_agent_closest_distances[i] = closest_agent_dist
 
             # Calculate target proximity reward
             for t_area in self.target_areas:
@@ -890,12 +901,16 @@ class SalpChainEnv(gym.Env):
                 distance = np.linalg.norm(agent_i_pos - target_pos)
 
                 # Update closest agent
+                if self.prev_target_closest_distances[i] == float("inf"):
+                    self.prev_target_closest_distances[i] = distance
+
                 if distance < closest_target_dist:
                     closest_target_dist = distance
                     # Calculate reward based on distance
                     target_proximity_reward[i] = (
-                        -closest_target_dist / self.world_diagonal
+                        self.prev_target_closest_distances[i] - closest_target_dist
                     )
+                    self.prev_target_closest_distances[i] = closest_target_dist
 
         return np.array(target_proximity_reward) + np.array(agent_proximity_reward)
 
@@ -1145,25 +1160,28 @@ class SalpChainEnv(gym.Env):
         return obs, {}
 
     def step(self, actions):
+
+        # PREPROCESS ENVIRONMENT ACTION
+
         # Transform actions into dictionary
-        action_dict = {
-            "movement": actions[:, :2],  # shape (n_agent, 2)
-            "attach": actions[:, 2],  # shape (n_agent,)
-            "detach": actions[:, -1],  # shape (n_agent,)
-        }
+        movement_action = actions[:, :2]
+        attach_action = actions[:, 2]
+        detach_action = actions[:, -1]
 
         # Update attach and detach states - ensure we get scalar values
         # Convert to flat numpy array if needed
-        self.attach_values = np.array(action_dict["attach"]).flatten()
-        self.detach_values = np.array(action_dict["detach"]).flatten()
+        self.attach_values = np.array(attach_action).flatten()
+        self.detach_values = np.array(detach_action).flatten()
+
+        # PROCESS ENVIRONMENT ACTION
 
         # Check for detachments before applying forces
         self._process_detachments()
 
         # Apply movement forces
         for idx, agent in enumerate(self.agents):
-            force_x = np.clip(action_dict["movement"][idx][0], -1, 1)  # X component
-            force_y = np.clip(action_dict["movement"][idx][1], -1, 1)  # Y component
+            force_x = np.clip(movement_action[idx][0], -1, 1)  # X component
+            force_y = np.clip(movement_action[idx][1], -1, 1)  # Y component
 
             # Store the 2D force vector for visualization
             self.applied_forces[idx] = [force_x, force_y]
@@ -1176,6 +1194,8 @@ class SalpChainEnv(gym.Env):
 
         self._join_on_proximity()
 
+        # CALCULATE REWARDS
+
         # Check for boundary collisions
         task_reward = 0.0
         individual_rewards = np.array([0.0 for _ in range(self.n_agents)])
@@ -1187,9 +1207,6 @@ class SalpChainEnv(gym.Env):
         else:
             # The normal reward calculation
             task_reward, individual_rewards = self._get_rewards()
-
-        # Determine the reward
-        reward = task_reward + individual_rewards
 
         # Reset collision flag for next step
         self.contact_listener.reset()
@@ -1208,7 +1225,7 @@ class SalpChainEnv(gym.Env):
             "agent_positions": [
                 {"x": agent.position.x, "y": agent.position.y} for agent in self.agents
             ],
-            "individual_rewards": individual_rewards,
+            "local_rewards": individual_rewards,
             "task_reward": task_reward,
         }
 
@@ -1217,7 +1234,7 @@ class SalpChainEnv(gym.Env):
         truncated = self.current_step >= self.max_steps
 
         # The observation
-        return self._get_observation(), reward, terminated, truncated, info
+        return self._get_observation(), task_reward, terminated, truncated, info
 
     def render(self):
         if self.render_mode != "human":

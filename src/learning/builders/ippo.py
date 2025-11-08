@@ -4,12 +4,12 @@ from learning.environments.types import EnvironmentEnum
 from dataclasses import asdict
 
 # EXPERIMENT SETTINGS
-ENVIRONMENT = EnvironmentEnum.MPE_SIMPLE
+ENVIRONMENT = EnvironmentEnum.BOX2D_SALP
 BATCH_NAME = f"{ENVIRONMENT}_test"
-EXPERIMENTS_LIST = ["mlp", "gru"]
-# EXPERIMENTS_LIST = ["mlp_shared", "gru_shared"]
+# EXPERIMENTS_LIST = ["mlp", "gru"]
+EXPERIMENTS_LIST = ["mlp"]
 DEVICE = "cpu"
-MODELS = ["mlp", "gru"]
+MODELS = ["mlp"]
 
 # EXPERIMENTS
 experiments = []
@@ -18,10 +18,10 @@ for i, experiment_name in enumerate(EXPERIMENTS_LIST):
         device=DEVICE,
         model=MODELS[i],
         params=Params(
-            n_epochs=4,
-            n_total_steps=2e7,
+            n_epochs=10,
+            n_total_steps=2e8,
             n_minibatches=4,
-            batch_size=250,
+            batch_size=5120,
             parameter_sharing=True,
             random_seeds=[118, 1234, 8764, 3486, 2487, 5439, 6584, 7894, 523, 69],
             eps_clip=0.2,

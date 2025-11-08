@@ -120,6 +120,8 @@ class Hybrid_MLP_AC(nn.Module):
         log_prob, entropy = self._get_log_prob_and_entropy(action_dict, action_params)
         return log_prob, value, entropy
 
+    # TODO check how log prob is being calculated and simplify distribution calculation no need to sample from two different distributions for every action
+
     def _get_log_prob_and_entropy(self, action, action_params):
         """Calculate combined log probability for all action components"""
         # Movement log prob

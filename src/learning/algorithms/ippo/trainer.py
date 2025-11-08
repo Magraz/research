@@ -7,6 +7,7 @@ import pickle  # Add this import at the top of the file
 
 from learning.environments.types import EnvironmentEnum
 from learning.algorithms.ippo.types import Params
+from learning.algorithms.env_wrapper import EnvWrapper
 
 
 class IPPOTrainer:
@@ -26,8 +27,7 @@ class IPPOTrainer:
         self.n_agents = n_agents
 
         # Create environment
-        self.env = env
-        self.env_name = env_name
+        self.wrapped_env = EnvWrapper(env=env, env_name=env_name, n_agents=n_agents)
 
         self.param_sharing = params.parameter_sharing
 
@@ -64,51 +64,6 @@ class IPPOTrainer:
         self.episode_lengths = []
         self.training_stats = defaultdict(list)
 
-    def reset(self, env):
-        if (
-            self.env_name == EnvironmentEnum.MPE_SPREAD
-            or self.env_name == EnvironmentEnum.MPE_SIMPLE
-        ):
-            obs, _ = env.reset()
-            obs = np.stack(list(obs.values()))
-
-        else:
-            obs, _ = env.reset()
-
-        return obs
-
-    def step(self, actions):
-        global_reward = 0
-        if (
-            self.env_name == EnvironmentEnum.MPE_SPREAD
-            or self.env_name == EnvironmentEnum.MPE_SIMPLE
-        ):
-            next_obs = []
-            local_rewards = []
-            action_dict = {}
-
-            for i, agent_id in enumerate(self.env.agents):
-                action_dict[agent_id] = actions[i][0]
-
-            next_obs, local_rewards, terminated, truncated, info = self.env.step(
-                action_dict
-            )
-
-            next_obs = np.stack(list(next_obs.values()))
-            local_rewards = np.stack(list(local_rewards.values()))
-            terminated = np.stack(list(terminated.values()))
-            truncated = np.stack(list(truncated.values()))
-
-        else:
-            next_obs, global_reward, terminated, truncated, info = self.env.step(
-                actions
-            )
-            local_rewards = np.array(info["individual_rewards"])
-            terminated = np.array([terminated for _ in range(self.n_agents)])
-            truncated = np.array([truncated for _ in range(self.n_agents)])
-
-        return next_obs, global_reward, local_rewards, terminated, truncated, info
-
     def take_actions(self, obs, deterministic=False):
         # Get actions from all agents
         actions = []
@@ -128,7 +83,7 @@ class IPPOTrainer:
 
     def collect_trajectory(self, max_steps):
 
-        obs = self.reset(self.env)
+        obs = self.wrapped_env.reset()
 
         total_step_count = 0
         current_episode_steps = 0
@@ -141,7 +96,7 @@ class IPPOTrainer:
 
             # Step environment
             next_obs, global_reward, local_rewards, terminated, truncated, info = (
-                self.step(actions)
+                self.wrapped_env.step(actions)
             )
 
             # Store transitions for all agents
@@ -149,7 +104,7 @@ class IPPOTrainer:
                 agent.store_transition(
                     state=obs[i],
                     action=actions[i],
-                    reward=local_rewards[i],
+                    reward=local_rewards[i] + global_reward,
                     log_prob=log_probs[i],
                     value=values[i],
                     done=terminated[i] or truncated[i],
@@ -161,7 +116,7 @@ class IPPOTrainer:
 
             # If environment terminated or truncated, reset it and continue collecting
             if terminated.all() or truncated.all():
-                obs = self.reset(self.env)
+                obs = self.wrapped_env.reset()
 
                 # Keep track of episode count
                 steps_per_episode.append(current_episode_steps)
@@ -273,7 +228,7 @@ class IPPOTrainer:
 
             # Evaluate policies
             rew_per_episode = []
-            eval_episodes = 20
+            eval_episodes = 10
             while len(rew_per_episode) < eval_episodes:
                 rew = self.evaluate()
                 rew_per_episode.append(rew)
@@ -311,7 +266,8 @@ class IPPOTrainer:
 
         with torch.no_grad():
 
-            obs = self.reset(self.env)
+            obs = self.wrapped_env.reset()
+
             episode_rew = 0
 
             while True:
@@ -319,13 +275,13 @@ class IPPOTrainer:
                 actions, _, _ = self.take_actions(obs, deterministic=True)
 
                 obs, global_reward, local_rewards, terminated, truncated, info = (
-                    self.step(actions)
+                    self.wrapped_env.step(actions)
                 )
 
-                episode_rew += local_rewards[0]
+                episode_rew += local_rewards[0] + global_reward
 
                 if render:
-                    self.env.render()
+                    self.wrapped_env.env.render()
 
                 if terminated.all() or truncated.all():
                     break

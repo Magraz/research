@@ -142,6 +142,12 @@ class TargetArea:
         return reward_map
 
 
+class Agent:
+    def __init__(self, body, previous_position=(0, 0)):
+        self.body = body
+        self.prev_position = previous_position
+
+
 class BoundaryContactListener(b2ContactListener):
     """Contact listener to detect collisions between agents and boundaries"""
 

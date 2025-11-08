@@ -1,10 +1,10 @@
-from learning.environments.types import EnvironmentParams, EnvironmentEnum
-from learning.algorithms.ippo.types import Experiment, Params
+from learning.environments.types import EnvironmentParams
+from learning.algorithms.mappo.types import Experiment, Params
 from learning.algorithms.runner import Runner
 from learning.algorithms.create_env import create_env
 from pathlib import Path
 
-from learning.algorithms.ippo.trainer import IPPOTrainer
+from learning.algorithms.mappo.trainer import MAPPOTrainer
 
 import torch
 import numpy as np
@@ -21,7 +21,7 @@ def set_seeds(seed):
     # torch.backends.cudnn.benchmark = False  # Disable CUDA benchmarking
 
 
-class IPPO_Runner(Runner):
+class MAPPO_Runner(Runner):
     def __init__(
         self,
         device: str,
@@ -57,11 +57,12 @@ class IPPO_Runner(Runner):
         self.env, state_dim, action_dim = create_env(env_config)
 
         # Create trainer
-        self.trainer = IPPOTrainer(
+        self.trainer = MAPPOTrainer(
             self.env,
             self.env_config.environment,
             self.env_config.n_agents,
             state_dim,
+            state_dim * self.env_config.n_agents,
             action_dim,
             self.params,
             self.dirs,

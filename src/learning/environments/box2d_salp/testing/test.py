@@ -317,7 +317,7 @@ print(f"Starting with '{action_mode.upper()}' action mode")
 info_record = []
 episode_record = {"observation": [], "reward": [], "info": []}
 
-steps = 512
+steps = 2000
 episodes = 1
 try:
     for episode in range(episodes):
