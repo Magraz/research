@@ -69,12 +69,15 @@ class MAPPOActor(nn.Module):
                 action = action_params.argmax(dim=-1, keepdim=True)
             else:
                 action = dist.sample().unsqueeze(-1)
+
             logprob = dist.log_prob(action.squeeze(-1)).unsqueeze(-1)
+
         else:
             if deterministic:
                 action = action_params
             else:
                 action = dist.sample()
+
             logprob = torch.sum(dist.log_prob(action), dim=-1, keepdim=True)
 
         return action, logprob

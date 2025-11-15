@@ -193,62 +193,147 @@ class MAPPOAgent:
 
         return all_returns, all_advantages
 
-    def update(self, next_value=0, minibatch_size=128, epochs=10):
-        """Update all agents using shared critic"""
-
-        # Compute returns and advantages
-        all_returns, all_advantages = self.compute_returns_and_advantages(next_value)
+    def update_shared(
+        self,
+        all_advantages,
+        all_returns,
+        minibatch_size,
+        epochs,
+    ):
 
         # Training statistics
         stats = {"total_loss": 0, "policy_loss": 0, "value_loss": 0, "entropy_loss": 0}
-
         num_updates = 0
 
-        # Update each agent (or all at once if sharing actor)
-        if self.share_actor:
-            # Combine all agent data for shared actor update
-            all_obs = []
-            all_global_states = []
-            all_actions = []
-            all_old_log_probs = []
-            all_returns_combined = []
-            all_advantages_combined = []
+        # Combine all agent data for shared actor update
+        all_obs = []
+        all_global_states = []
+        all_actions = []
+        all_old_log_probs = []
+        all_returns_combined = []
+        all_advantages_combined = []
 
-            for agent_idx in range(self.n_agents):
-                # Normalize advantages for this agent
-                advantages = all_advantages[agent_idx]
-                advantages = (advantages - advantages.mean()) / (
-                    advantages.std() + 1e-8
+        for agent_idx in range(self.n_agents):
+            # Normalize advantages for this agent
+            advantages = all_advantages[agent_idx]
+            advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+
+            # Stack data
+            all_obs.append(torch.stack(self.observations[agent_idx]))
+            all_actions.append(torch.stack(self.actions[agent_idx]))
+            all_old_log_probs.append(torch.stack(self.log_probs[agent_idx]))
+            all_returns_combined.append(all_returns[agent_idx])
+            all_advantages_combined.append(advantages)
+
+        # Repeat global states for each agent
+        global_states_stacked = torch.stack(self.global_states)
+        all_global_states = global_states_stacked.repeat(self.n_agents, 1)
+
+        # Concatenate all agent data
+        combined_obs = torch.cat(all_obs, dim=0).detach()
+        combined_actions = torch.cat(all_actions, dim=0).detach()
+        combined_old_log_probs = torch.cat(all_old_log_probs, dim=0).detach()
+        combined_returns = torch.cat(all_returns_combined, dim=0)
+        combined_advantages = torch.cat(all_advantages_combined, dim=0)
+
+        # Create dataset
+        dataset = TensorDataset(
+            combined_obs,
+            all_global_states,
+            combined_actions,
+            combined_old_log_probs,
+            combined_returns,
+            combined_advantages,
+        )
+
+        dataloader = DataLoader(dataset, batch_size=minibatch_size, shuffle=True)
+
+        # Train for multiple epochs
+        for epoch in range(epochs):
+            for batch in dataloader:
+                (
+                    batch_obs,
+                    batch_global_states,
+                    batch_actions,
+                    batch_old_log_probs,
+                    batch_returns,
+                    batch_advantages,
+                ) = batch
+
+                # We need to know which agent each sample belongs to
+                # For shared actor, we can use agent_idx = 0 (same for all)
+                log_probs, values, entropy = self.network.evaluate_actions(
+                    batch_obs, batch_global_states, batch_actions, agent_idx=0
                 )
 
-                # Stack data
-                all_obs.append(torch.stack(self.observations[agent_idx]))
-                all_actions.append(torch.stack(self.actions[agent_idx]))
-                all_old_log_probs.append(torch.stack(self.log_probs[agent_idx]))
-                all_returns_combined.append(all_returns[agent_idx])
-                all_advantages_combined.append(advantages)
+                # PPO objective
+                ratio = torch.exp(log_probs.squeeze(-1) - batch_old_log_probs)
+                surr1 = ratio * batch_advantages
+                surr2 = (
+                    torch.clamp(ratio, 1 - self.clip_epsilon, 1 + self.clip_epsilon)
+                    * batch_advantages
+                )
+                policy_loss = -torch.min(surr1, surr2).mean()
 
-            # Repeat global states for each agent
-            global_states_stacked = torch.stack(self.global_states)
-            all_global_states = global_states_stacked.repeat(self.n_agents, 1)
+                # Value loss
+                value_loss = F.mse_loss(values, batch_returns)
 
-            # Concatenate all agent data
-            combined_obs = torch.cat(all_obs, dim=0).detach()
-            combined_actions = torch.cat(all_actions, dim=0).detach()
-            combined_old_log_probs = torch.cat(all_old_log_probs, dim=0).detach()
-            combined_returns = torch.cat(all_returns_combined, dim=0)
-            combined_advantages = torch.cat(all_advantages_combined, dim=0)
+                # Entropy loss
+                entropy_loss = -entropy.mean()
 
-            # Create dataset
+                # Total loss
+                loss = (
+                    policy_loss
+                    + self.value_coef * value_loss
+                    + self.entropy_coef * entropy_loss
+                )
+
+                # Optimize
+                self.optimizer.zero_grad()
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(
+                    self.network.parameters(), self.grad_clip
+                )
+                self.optimizer.step()
+
+                # Update statistics
+                stats["total_loss"] += loss.item()
+                stats["policy_loss"] += policy_loss.item()
+                stats["value_loss"] += value_loss.item()
+                stats["entropy_loss"] += entropy_loss.item()
+                num_updates += 1
+
+        return stats, num_updates
+
+    def update_independent_actors(
+        self,
+        all_advantages,
+        all_returns,
+        minibatch_size,
+        epochs,
+    ):
+
+        # Training statistics
+        stats = {"total_loss": 0, "policy_loss": 0, "value_loss": 0, "entropy_loss": 0}
+        num_updates = 0
+
+        # Update each agent separately (independent actors)
+        for agent_idx in range(self.n_agents):
+            # Normalize advantages
+            advantages = all_advantages[agent_idx]
+            advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+
+            returns = all_returns[agent_idx]
+
+            # Stack data
+            obs = torch.stack(self.observations[agent_idx]).detach()
+            global_states = torch.stack(self.global_states).detach()
+            actions = torch.stack(self.actions[agent_idx]).detach()
+            old_log_probs = torch.stack(self.log_probs[agent_idx]).detach()
+
             dataset = TensorDataset(
-                combined_obs,
-                all_global_states,
-                combined_actions,
-                combined_old_log_probs,
-                combined_returns,
-                combined_advantages,
+                obs, global_states, actions, old_log_probs, returns, advantages
             )
-
             dataloader = DataLoader(dataset, batch_size=minibatch_size, shuffle=True)
 
             # Train for multiple epochs
@@ -263,10 +348,9 @@ class MAPPOAgent:
                         batch_advantages,
                     ) = batch
 
-                    # We need to know which agent each sample belongs to
-                    # For shared actor, we can use agent_idx = 0 (same for all)
+                    # Forward pass
                     log_probs, values, entropy = self.network.evaluate_actions(
-                        batch_obs, batch_global_states, batch_actions, agent_idx=0
+                        batch_obs, batch_global_states, batch_actions, agent_idx
                     )
 
                     # PPO objective
@@ -306,85 +390,24 @@ class MAPPOAgent:
                     stats["entropy_loss"] += entropy_loss.item()
                     num_updates += 1
 
+        return stats, num_updates
+
+    def update(self, next_value=0, minibatch_size=128, epochs=10):
+        """Update all agents using shared critic"""
+
+        # Compute returns and advantages
+        all_returns, all_advantages = self.compute_returns_and_advantages(next_value)
+
+        # Update each agent (or all at once if sharing actor)
+        if self.share_actor:
+            stats, num_updates = self.update_shared(
+                all_advantages, all_returns, minibatch_size, epochs
+            )
+
         else:
-            # Update each agent separately (independent actors)
-            for agent_idx in range(self.n_agents):
-                # Normalize advantages
-                advantages = all_advantages[agent_idx]
-                advantages = (advantages - advantages.mean()) / (
-                    advantages.std() + 1e-8
-                )
-
-                returns = all_returns[agent_idx]
-
-                # Stack data
-                obs = torch.stack(self.observations[agent_idx]).detach()
-                global_states = torch.stack(self.global_states).detach()
-                actions = torch.stack(self.actions[agent_idx]).detach()
-                old_log_probs = torch.stack(self.log_probs[agent_idx]).detach()
-
-                dataset = TensorDataset(
-                    obs, global_states, actions, old_log_probs, returns, advantages
-                )
-                dataloader = DataLoader(
-                    dataset, batch_size=minibatch_size, shuffle=True
-                )
-
-                # Train for multiple epochs
-                for epoch in range(epochs):
-                    for batch in dataloader:
-                        (
-                            batch_obs,
-                            batch_global_states,
-                            batch_actions,
-                            batch_old_log_probs,
-                            batch_returns,
-                            batch_advantages,
-                        ) = batch
-
-                        # Forward pass
-                        log_probs, values, entropy = self.network.evaluate_actions(
-                            batch_obs, batch_global_states, batch_actions, agent_idx
-                        )
-
-                        # PPO objective
-                        ratio = torch.exp(log_probs.squeeze(-1) - batch_old_log_probs)
-                        surr1 = ratio * batch_advantages
-                        surr2 = (
-                            torch.clamp(
-                                ratio, 1 - self.clip_epsilon, 1 + self.clip_epsilon
-                            )
-                            * batch_advantages
-                        )
-                        policy_loss = -torch.min(surr1, surr2).mean()
-
-                        # Value loss
-                        value_loss = F.mse_loss(values, batch_returns)
-
-                        # Entropy loss
-                        entropy_loss = -entropy.mean()
-
-                        # Total loss
-                        loss = (
-                            policy_loss
-                            + self.value_coef * value_loss
-                            + self.entropy_coef * entropy_loss
-                        )
-
-                        # Optimize
-                        self.optimizer.zero_grad()
-                        loss.backward()
-                        torch.nn.utils.clip_grad_norm_(
-                            self.network.parameters(), self.grad_clip
-                        )
-                        self.optimizer.step()
-
-                        # Update statistics
-                        stats["total_loss"] += loss.item()
-                        stats["policy_loss"] += policy_loss.item()
-                        stats["value_loss"] += value_loss.item()
-                        stats["entropy_loss"] += entropy_loss.item()
-                        num_updates += 1
+            stats, num_updates = self.update_independent_actors(
+                all_advantages, all_returns, minibatch_size, epochs
+            )
 
         # Update old network
         self.network_old.load_state_dict(self.network.state_dict())

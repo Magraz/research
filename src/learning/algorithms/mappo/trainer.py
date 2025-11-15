@@ -33,12 +33,8 @@ class MAPPOTrainer:
 
         # Set action bounds based on environment
         if env_name in [EnvironmentEnum.MPE_SPREAD, EnvironmentEnum.MPE_SIMPLE]:
-            self.action_low = 0
-            self.action_high = 1
             self.discrete = True
         else:
-            self.action_low = -1
-            self.action_high = 1
             self.discrete = False
 
         # Create MAPPO agent
@@ -156,7 +152,11 @@ class MAPPOTrainer:
                 self.training_stats[key].append(value)
 
             # Evaluate
-            eval_rewards = self.evaluate()
+            rew_per_episode = []
+            eval_episodes = 10
+            while len(rew_per_episode) < eval_episodes:
+                rew_per_episode.append(self.evaluate())
+            eval_rewards = np.array(rew_per_episode).mean()
 
             self.training_stats["total_steps"].append(steps_completed)
             self.training_stats["reward"].append(eval_rewards)
@@ -220,15 +220,21 @@ class MAPPOTrainer:
 
     def save_agent(self, path):
         """Save MAPPO agent"""
-        import torch
-
         torch.save(
             {
-                "network": self.agent.network.state_dict(),
+                "network": self.agent.network_old.state_dict(),
                 "optimizer": self.agent.optimizer.state_dict(),
             },
             path,
         )
+
+    def load_agent(self, filepath):
+        checkpoint = torch.load(filepath, map_location=self.device)
+
+        self.agent.network_old.load_state_dict(checkpoint["network"])
+        self.agent.optimizer.load_state_dict(checkpoint["optimizer"])
+
+        print(f"Agents loaded from {filepath}")
 
     def save_training_stats(self, path):
         """Save training statistics"""

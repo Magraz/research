@@ -83,9 +83,9 @@ class MAPPO_Runner(Runner):
         )
 
         # Save trained agents
-        self.trainer.save_agents(self.dirs["models"] / "models_finished.pth")
+        self.trainer.save_agent(self.dirs["models"] / "models_finished.pth")
 
-        self.trainer.env.close()
+        self.env.close()
 
     def view(self):
         self.env, _, _ = create_env(self.env_config, render_mode="human")
@@ -94,7 +94,7 @@ class MAPPO_Runner(Runner):
         self.trainer.wrapped_env.env = self.env
 
         # Save trained agents
-        self.trainer.load_agents(self.dirs["models"] / "models_checkpoint.pth")
+        self.trainer.load_agent(self.dirs["models"] / "models_finished.pth")
 
         # Test trained agents with rendering
         print("\nTesting trained agents...")

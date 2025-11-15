@@ -230,8 +230,7 @@ class IPPOTrainer:
             rew_per_episode = []
             eval_episodes = 10
             while len(rew_per_episode) < eval_episodes:
-                rew = self.evaluate()
-                rew_per_episode.append(rew)
+                rew_per_episode.append(self.evaluate())
             eval_rewards = np.array(rew_per_episode).mean()
 
             self.training_stats["total_steps"].append(steps_completed)
