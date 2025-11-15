@@ -1,7 +1,6 @@
 import os
 import torch
 from torch.utils.data import Dataset, DataLoader
-from torch.utils.tensorboard import SummaryWriter
 import torch.nn.functional as F
 from learning.algorithms.ppo.types import Params
 
@@ -92,11 +91,9 @@ class PPO:
         n_envs: int,
         d_state: int,
         d_action: int,
-        writer: SummaryWriter = None,
         checkpoint: bool = False,
     ):
         self.device = device
-        self.writer = writer
         self.checkpoint = checkpoint
         self.n_envs = n_envs
         self.n_agents = n_agents_train
@@ -107,7 +104,7 @@ class PPO:
 
         # Algorithm parameters
         self.n_epochs = params.n_epochs
-        self.minibatch_size = params.minibatch_size
+        self.minibatch_size = params.batch_size // params.n_minibatches
         self.gamma = params.gamma
         self.lmbda = params.lmbda
         self.eps_clip = params.eps_clip
@@ -180,13 +177,6 @@ class PPO:
 
         # Logging params
         self.total_epochs = 0
-
-        if self.checkpoint and self.writer is not None:
-            # Load epoch count
-            path = self.writer.log_dir / "tensorboard.dat"
-            if path.is_file():
-                with open(path, "rb") as file:
-                    self.total_epochs = dill.load(file)["total_epochs"]
 
     def calc_value_loss(self, values, value_preds_batch, return_batch):
         """
@@ -354,34 +344,7 @@ class PPO:
                 self.optimizer.step()
 
                 # Store data
-                if self.writer is not None:
-                    self.writer.add_scalar(
-                        "Agent/actor_loss", actor_loss.item(), self.total_epochs
-                    )
-                    self.writer.add_scalar(
-                        "Agent/critic_loss", value_loss.item(), self.total_epochs
-                    )
-                    self.writer.add_scalar(
-                        "Agent/entropy", dist_entropy.mean().item(), self.total_epochs
-                    )
-                    self.writer.add_scalar(
-                        "Agent/log_prob", logprobs.mean().item(), self.total_epochs
-                    )
-                    self.writer.add_scalar(
-                        "Agent/log_action_std",
-                        self.policy.log_action_std[: self.n_agents * self.d_action]
-                        .mean()
-                        .item(),
-                        self.total_epochs,
-                    )
-
-                    self.total_epochs += 1
-
-        # Store epoch count
-        if self.writer is not None:
-            with open(self.writer.log_dir / "tensorboard.dat", "wb") as f:
-                log_data_dict = {"total_epochs": self.total_epochs}
-                dill.dump(log_data_dict, f)
+                self.total_epochs += 1
 
         # Load model back to cpu to collect rollouts
         self.policy.to(self.device)

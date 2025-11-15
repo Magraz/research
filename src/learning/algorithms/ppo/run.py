@@ -1,7 +1,7 @@
 from learning.environments.types import EnvironmentParams
 from learning.algorithms.runner import Runner
 from learning.algorithms.ppo.types import Experiment
-from learning.algorithms.ppo.train import train
+from learning.algorithms.ppo.trainer import PPOTrainer
 from learning.algorithms.ppo.view import view
 from learning.algorithms.ppo.evaluate import evaluate
 
@@ -25,8 +25,7 @@ class PPO_Runner(Runner):
         self.exp_config = exp_config
         self.env_config = env_config
 
-    def train(self):
-        train(
+        self.trainer = PPOTrainer(
             self.exp_config,
             self.env_config,
             self.device,
@@ -34,6 +33,9 @@ class PPO_Runner(Runner):
             self.dirs,
             self.checkpoint,
         )
+
+    def train(self):
+        self.trainer.train()
 
     def view(self):
         view(self.exp_config, self.env_config, self.device, self.dirs)

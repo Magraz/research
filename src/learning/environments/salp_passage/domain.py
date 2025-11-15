@@ -73,27 +73,29 @@ class SalpPassageDomain(BaseScenario):
         )
 
         self.viewer_zoom = kwargs.pop("viewer_zoom", 1.45)
+
         # Agents
         self.n_agents = kwargs.pop("n_agents", self.min_n_agents)
         self.state_representation = kwargs.pop("state_representation", "local")
         self.agent_chains = [None for _ in range(batch_dim)]
         self.rotating_salps = kwargs.pop("rotating_salps", False)
 
-        # Set a smaller world size for training like a fence
-        world_x_dim = self.n_agents / 4
-        world_y_dim = self.n_agents / 4
-
         # Environment
-        self.passage_width = self.agent_joint_length * self.n_agents
-        self.passage_length = 1.1 * self.agent_joint_length * self.n_agents
-        self.n_passages = math.ceil(2 * world_x_dim / self.passage_length)
+        self.passage_width = self.agent_joint_length * self.n_agents * 1.2
+        self.passage_length = self.agent_joint_length * self.n_agents
+
+        # Set a smaller world size for training like a fence
+        world_x_dim = self.passage_width * 3
+        world_y_dim = self.passage_length * 3
+
+        self.n_passages = math.ceil(2 * world_x_dim / self.passage_width)
 
         self.passage_x_coordinate_list = [
-            (i * self.passage_length) + (-world_x_dim + self.passage_length / 2)
+            (i * self.passage_width) + (-world_x_dim + self.passage_width / 2)
             for i in range(0, self.n_passages)
         ]
 
-        self.free_y_dim = world_y_dim - self.passage_width / 2
+        self.free_y_dim = world_y_dim - self.passage_length / 2
 
         self.agent_starting_y = -world_y_dim + (self.free_y_dim / 2)
 
@@ -196,7 +198,7 @@ class SalpPassageDomain(BaseScenario):
                 name=f"passage_{i}",
                 collide=True,
                 movable=False,
-                shape=Box(length=self.passage_length, width=self.passage_width),
+                shape=Box(length=self.passage_width, width=self.passage_length),
                 color=COLOR_MAP["RED"],
             )
             world.add_landmark(passage)
@@ -224,6 +226,10 @@ class SalpPassageDomain(BaseScenario):
 
         world.zero_grad()
 
+        # Step counter
+        self.max_steps = 512
+        self.steps = torch.zeros((batch_dim), device=device, dtype=torch.float32)
+
         return world
 
     def reset_world_at(self, env_index: int = None):
@@ -232,9 +238,11 @@ class SalpPassageDomain(BaseScenario):
         agent_rotation_angles = [
             random.uniform(0, 2 * math.pi) for _ in range(self.world.batch_dim)
         ]
+
         agent_rotation_tensor = torch.tensor(
             agent_rotation_angles, device=self.device
         ).unsqueeze(-1)
+
         target_rotation_angle = random.uniform(0, 2 * math.pi)
 
         # Set passages
@@ -254,6 +262,11 @@ class SalpPassageDomain(BaseScenario):
         )
 
         if env_index is None:
+            # Reset steps for all envs
+            self.steps = torch.zeros(
+                (self.world.batch_dim), device=self.device, dtype=torch.float32
+            )
+
             # Reset checkpoints
             self.pass_entrance_checkpoint = torch.zeros(
                 (self.world.batch_dim), device=self.device, dtype=torch.bool
@@ -380,6 +393,9 @@ class SalpPassageDomain(BaseScenario):
             self.distance_shaping = dist_rew * self.distance_shaping_factor
 
         else:
+            # Reset steps
+            self.steps[env_index] = 0
+
             # Reset checkpoints
             self.pass_entrance_checkpoint[env_index] = 0
             self.pass_exit_checkpoint[env_index] = 0
@@ -522,7 +538,7 @@ class SalpPassageDomain(BaseScenario):
             0.0,
             self.agent_starting_y,
             self.world.x_semidim - self.passage_width * 2,
-            self.free_y_dim - self.passage_width * 3,
+            self.free_y_dim - self.passage_length * 3,
         )
 
         chain = rotate_points(
@@ -546,7 +562,7 @@ class SalpPassageDomain(BaseScenario):
             0.0,
             self.target_starting_y,
             self.world.x_semidim - self.passage_width * 2,
-            self.free_y_dim - self.passage_width * 3,
+            self.free_y_dim - self.passage_length * 3,
         )
 
         n_bends = random.choice([0, 1])
@@ -664,6 +680,7 @@ class SalpPassageDomain(BaseScenario):
                     * overlap_mask
                     * neighbor_check
                 )
+
         return collision_tensor
 
     def reward(self, agent: Agent):
@@ -700,7 +717,7 @@ class SalpPassageDomain(BaseScenario):
             self.passage_entrance_shaping = passage_entrance_shaping
 
             # Check if the agent has passed the entrance checkpoint
-            pass_entrance_mask = self.pen_dist > -0.4
+            pass_entrance_mask = self.pen_dist > -0.2
             self.pass_entrance_checkpoint = (
                 self.pass_entrance_checkpoint | pass_entrance_mask
             )
@@ -715,7 +732,7 @@ class SalpPassageDomain(BaseScenario):
             self.passage_exit_shaping = passage_exit_shaping
 
             # Check if the agent has passed the exit checkpoint
-            pass_exit_mask = self.pex_dist > -0.4
+            pass_exit_mask = self.pex_dist > -0.2
             self.pass_exit_checkpoint = self.pass_exit_checkpoint | pass_exit_mask
             self.pass_exit_rew *= ~self.pass_exit_checkpoint
 
@@ -799,34 +816,6 @@ class SalpPassageDomain(BaseScenario):
         )
 
         # Get distance to open passage
-        corner_1 = self.global_state.passage_pos + torch.tensor(
-            (-self.passage_width / 2, self.passage_length / 2)
-        )
-        corner_2 = self.global_state.passage_pos + torch.tensor(
-            (self.passage_width / 2, self.passage_length / 2)
-        )
-        corner_3 = self.global_state.passage_pos + torch.tensor(
-            (-self.passage_width / 2, -self.passage_length / 2)
-        )
-        corner_4 = self.global_state.passage_pos + torch.tensor(
-            (self.passage_width / 2, -self.passage_length / 2)
-        )
-        a_pos_2_passage_pos_err_1 = (
-            corner_1 - self.global_state.a_chain_all_pos[:, idx, :]
-        )
-
-        a_pos_2_passage_pos_err_2 = (
-            corner_2 - self.global_state.a_chain_all_pos[:, idx, :]
-        )
-
-        a_pos_2_passage_pos_err_3 = (
-            corner_3 - self.global_state.a_chain_all_pos[:, idx, :]
-        )
-
-        a_pos_2_passage_pos_err_4 = (
-            corner_4 - self.global_state.a_chain_all_pos[:, idx, :]
-        )
-
         a_pos_2_passage_pos_err = (
             self.global_state.passage_pos - self.global_state.a_chain_all_pos[:, idx, :]
         )
@@ -838,24 +827,43 @@ class SalpPassageDomain(BaseScenario):
             self.passage_exit_pos - self.global_state.a_chain_all_pos[:, idx, :]
         )
 
+        # observation = torch.cat(
+        #     [
+        #         # Agent id
+        #         encoded_idx,
+        #         # Neighbor data
+        #         torch.sin(self.global_state.a_chain_relative_angles[:, idx, :]),
+        #         torch.cos(self.global_state.a_chain_relative_angles[:, idx, :]),
+        #         self.global_state.a_chain_relative_angles_speed[:, idx, :],
+        #         neighbor_forces,
+        #         # Local data
+        #         a_pos_rel_2_centroid,
+        #         agent.state.pos,
+        #         agent.state.vel,
+        #         wrap_to_pi(agent.state.rot),
+        #         agent.state.ang_vel,
+        #         # Target data
+        #         a_pos_rel_2_t_centroid,
+        #         a_vel_rel_2_centroid,
+        #         a_pos_2_t_pos_err,
+        #         # Passage data,
+        #         a_pos_2_pen_pos_err,
+        #         a_pos_2_pex_pos_err,
+        #         a_pos_2_passage_pos_err,
+        #         # Lidar data,
+        #         agent.sensors[0].measure(),
+        #     ],
+        #     dim=-1,
+        # ).float()
+
         observation = torch.cat(
             [
-                # Agent id
-                encoded_idx,
-                # Neighbor data
-                torch.sin(self.global_state.a_chain_relative_angles[:, idx, :]),
-                torch.cos(self.global_state.a_chain_relative_angles[:, idx, :]),
-                self.global_state.a_chain_relative_angles_speed[:, idx, :],
-                neighbor_forces,
                 # Local data
                 a_pos_rel_2_centroid,
                 agent.state.pos,
-                agent.state.vel,
                 wrap_to_pi(agent.state.rot),
-                agent.state.ang_vel,
                 # Target data
                 a_pos_rel_2_t_centroid,
-                a_vel_rel_2_centroid,
                 a_pos_2_t_pos_err,
                 # Passage data,
                 a_pos_2_pen_pos_err,
@@ -977,12 +985,18 @@ class SalpPassageDomain(BaseScenario):
         return self.agent_representation(agent, self.state_representation)
 
     def done(self):
+        # Update step count
+        self.steps += 1
+
+        # Check termination conditions
         target_reached = self.total_rew > self.frechet_thresh
         out_of_bounds = self.is_out_of_bounds(
             self.world.x_semidim, self.world.y_semidim
         )
         has_collided = self.check_collisions()
-        return target_reached | out_of_bounds | has_collided
+        timeout = self.steps >= self.max_steps
+
+        return target_reached | out_of_bounds | has_collided | timeout
 
     def info(self, agent: Agent) -> Dict[str, Tensor]:
         chain_pos = self.get_agent_chain_position()
@@ -1024,6 +1038,13 @@ class SalpPassageDomain(BaseScenario):
         range_circle = rendering.make_circle(self.target_radius, filled=False)
         xform = rendering.Transform()
         xform.set_translation(*t_pos[env_index].mean(dim=0))
+        range_circle.add_attr(xform)
+        range_circle.set_color(*COLOR_MAP["BLACK"].value)
+        geoms.append(range_circle)
+
+        range_circle = rendering.make_circle(self.target_radius, filled=False)
+        xform = rendering.Transform()
+        xform.set_translation(*self.passage_entrance_pos[env_index])
         range_circle.add_attr(xform)
         range_circle.set_color(*COLOR_MAP["BLACK"].value)
         geoms.append(range_circle)
