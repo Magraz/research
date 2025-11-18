@@ -127,17 +127,17 @@ class TargetArea:
             return reward_map  # No component meets requirement
 
         # # Calculate reward based on proximity
-        # for i in qualifying_agents:
-        #     dist = np.sqrt(
-        #         (agents[i].position.x - self.x) ** 2
-        #         + (agents[i].position.y - self.y) ** 2
-        #     )
-        #     # Reward decreases with distance (10.0 at center, 0.0 at radius)
-        #     reward_map[i] = 1 / (dist**2 + 0.1)
+        for i in qualifying_agents:
+            dist = np.sqrt(
+                (agents[i].position.x - self.x) ** 2
+                + (agents[i].position.y - self.y) ** 2
+            )
+            # Reward decreases with distance (10.0 at center, 0.0 at radius)
+            reward_map[i] = 1 / (dist**2 + 1)
 
         # Give flat positive reward for being at the target
-        for i in qualifying_agents:
-            reward_map[i] = 2
+        # for i in qualifying_agents:
+        #     reward_map[i] = 1
 
         return reward_map
 
@@ -207,7 +207,7 @@ def get_linear_positions(world_width, world_height, n_agents, spacing=2):
     return positions
 
 
-def get_scatter_positions(world_width, world_height, n_agents, min_distance=1):
+def get_scatter_positions(world_width, world_height, n_agents, min_distance=10):
     """
     Generate random starting positions for all agents
 
@@ -220,7 +220,7 @@ def get_scatter_positions(world_width, world_height, n_agents, min_distance=1):
     positions = []
 
     # Define safe boundaries (away from walls)
-    margin = 15.0  # Distance from walls
+    margin = 10.0  # Distance from walls
     safe_x_min = margin
     safe_x_max = world_width - margin
     safe_y_min = margin
@@ -229,7 +229,7 @@ def get_scatter_positions(world_width, world_height, n_agents, min_distance=1):
     # Completely random positions with minimum distance constraint
     for i in range(n_agents):
         attempts = 0
-        max_attempts = 100
+        max_attempts = 200
 
         while attempts < max_attempts:
             pos_x = np.random.uniform(safe_x_min, safe_x_max)

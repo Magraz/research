@@ -81,13 +81,13 @@ class MAPPOTrainer:
 
             # Store transition
             self.agent.store_transition(
-                obs,
-                global_state,
+                torch.FloatTensor(obs).to(self.device),
+                torch.FloatTensor(global_state).to(self.device),
                 actions,
-                local_rewards + global_reward,
+                torch.FloatTensor(local_rewards + global_reward).to(self.device),
                 log_probs,
                 value,
-                np.logical_or(terminated, truncated),
+                torch.FloatTensor(np.logical_or(terminated, truncated)).to(self.device),
             )
 
             obs = next_obs
@@ -175,7 +175,7 @@ class MAPPOTrainer:
                 self.save_training_stats(
                     self.dirs["logs"] / "training_stats_checkpoint.pkl"
                 )
-                self.save_agent(self.dirs["models"] / "mappo_checkpoint.pth")
+                self.save_agent(self.dirs["models"] / "models_checkpoint.pth")
 
         print(
             f"Training completed! Total steps: {steps_completed}, Episodes: {episodes_completed}"

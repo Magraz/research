@@ -94,7 +94,7 @@ class MAPPO_Runner(Runner):
         self.trainer.wrapped_env.env = self.env
 
         # Save trained agents
-        self.trainer.load_agent(self.dirs["models"] / "models_finished.pth")
+        self.trainer.load_agent(self.dirs["models"] / "models_checkpoint.pth")
 
         # Test trained agents with rendering
         print("\nTesting trained agents...")

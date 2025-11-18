@@ -21,9 +21,9 @@ def view(
     # View parameters
     n_envs=1,
     n_agents_eval=3,
-    n_rollouts=3,
+    n_rollouts=10,
     rollout_length=512,
-    seed=150,
+    seed=1025,
     render=True,
 ):
 
@@ -59,7 +59,7 @@ def view(
         d_state,
         d_action,
     )
-    learner.load(dirs["models"] / "best_model")
+    learner.load(dirs["models"] / "checkpoint")
     learner.policy.eval()
 
     frame_list = []

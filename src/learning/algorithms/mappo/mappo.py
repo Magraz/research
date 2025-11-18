@@ -91,14 +91,11 @@ class MAPPOAgent:
         with torch.no_grad():
             # Convert observations to tensors
             obs_tensors = [
-                torch.FloatTensor(obs).unsqueeze(0).to(self.device)
-                for obs in observations
+                torch.FloatTensor(obs).to(self.device) for obs in observations
             ]
 
             # Convert global state to tensor
-            global_state_tensor = (
-                torch.FloatTensor(global_state).unsqueeze(0).to(self.device)
-            )
+            global_state_tensor = torch.FloatTensor(global_state).to(self.device)
 
             # Get actions from each actor
             actions = []
@@ -108,50 +105,31 @@ class MAPPOAgent:
                 action, log_prob = self.network_old.act(
                     obs_tensor, agent_idx, deterministic
                 )
-                actions.append(action.squeeze(0).cpu().numpy())
-                log_probs.append(log_prob.squeeze(0).cpu().item())
+                actions.append(action)
+                log_probs.append(log_prob)
 
             # Get value from centralized critic
             value = self.network_old.get_value(global_state_tensor)
-            value = value.squeeze(0).cpu().item()
 
-        return actions, log_probs, value
+        return torch.stack(actions), torch.cat(log_probs), value
 
     def store_transition(
         self, observations, global_state, actions, rewards, log_probs, value, dones
     ):
         """Store transitions for all agents"""
         # Store global state (shared)
-        if not torch.is_tensor(global_state):
-            self.global_states.append(torch.FloatTensor(global_state).to(self.device))
-        else:
-            self.global_states.append(global_state.to(self.device))
+        self.global_states.append(global_state)
 
         # Store value (shared)
-        self.values.append(torch.tensor(value, dtype=torch.float32).to(self.device))
+        self.values.append(value)
 
         # Store per-agent data
         for agent_idx in range(self.n_agents):
-            # Observation
-            self.observations[agent_idx].append(
-                torch.FloatTensor(observations[agent_idx]).to(self.device)
-            )
-
-            # Action
-            self.actions[agent_idx].append(
-                torch.FloatTensor(actions[agent_idx]).to(self.device)
-            )
-
-            # Reward, log_prob, done
-            self.rewards[agent_idx].append(
-                torch.tensor(rewards[agent_idx], dtype=torch.float32).to(self.device)
-            )
-            self.log_probs[agent_idx].append(
-                torch.tensor(log_probs[agent_idx], dtype=torch.float32).to(self.device)
-            )
-            self.dones[agent_idx].append(
-                torch.tensor(dones[agent_idx], dtype=torch.float32).to(self.device)
-            )
+            self.observations[agent_idx].append(observations[agent_idx])
+            self.actions[agent_idx].append(actions[agent_idx])
+            self.rewards[agent_idx].append(rewards[agent_idx])
+            self.log_probs[agent_idx].append(log_probs[agent_idx])
+            self.dones[agent_idx].append(dones[agent_idx])
 
     def compute_returns_and_advantages(self, next_value=0):
         """Compute returns and advantages using shared values"""
@@ -159,7 +137,7 @@ class MAPPOAgent:
             next_value = torch.tensor(next_value, dtype=torch.float32).to(self.device)
 
         # Use shared values from centralized critic
-        values = torch.cat([torch.stack(self.values).detach(), next_value.unsqueeze(0)])
+        values = torch.cat([torch.cat(self.values).detach(), next_value.unsqueeze(0)])
 
         # Compute advantages for each agent separately
         all_returns = []
