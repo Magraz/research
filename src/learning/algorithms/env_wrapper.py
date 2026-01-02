@@ -17,27 +17,18 @@ class EnvWrapper:
         ):
             next_obs = []
             local_rewards = []
-            action_dict = {}
-
-            for i, agent_id in enumerate(self.env.agents):
-                action_dict[agent_id] = actions[i][0]
 
             next_obs, local_rewards, terminated, truncated, info = self.env.step(
-                action_dict
+                actions.squeeze(-1).numpy()
             )
 
-            next_obs = np.stack(list(next_obs.values()))
-            local_rewards = np.stack(list(local_rewards.values()))
-            terminated = np.stack(list(terminated.values()))
-            truncated = np.stack(list(truncated.values()))
+            local_rewards = [local_rewards]
 
         else:
             next_obs, global_reward, terminated, truncated, info = self.env.step(
                 actions
             )
             local_rewards = np.array(info["local_rewards"])
-            terminated = np.array([terminated for _ in range(self.n_agents)])
-            truncated = np.array([truncated for _ in range(self.n_agents)])
 
         return next_obs, global_reward, local_rewards, terminated, truncated, info
 
@@ -46,10 +37,6 @@ class EnvWrapper:
             self.env_name == EnvironmentEnum.MPE_SPREAD
             or self.env_name == EnvironmentEnum.MPE_SIMPLE
         ):
-            obs, _ = self.env.reset()
-            obs = np.stack(list(obs.values()))
-
-        else:
             obs, _ = self.env.reset()
 
         return obs

@@ -4,6 +4,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 import numpy as np
 
+from learning.algorithms.mappo.types import Params
 from learning.algorithms.mappo.network import MAPPONetwork
 
 
@@ -16,17 +17,18 @@ class MAPPOAgent:
         global_state_dim: int,
         action_dim: int,
         n_agents: int,
-        params,
-        device: str = "cpu",
-        discrete: bool = False,
-        share_actor: bool = True,
+        params: Params,
+        device: str,
+        discrete: bool,
+        n_parallel_envs: int,
     ):
         self.device = device
         self.n_agents = n_agents
         self.observation_dim = observation_dim
         self.global_state_dim = global_state_dim
         self.discrete = discrete
-        self.share_actor = share_actor
+        self.share_actor = params.parameter_sharing
+        self.n_parallel_envs = n_parallel_envs
 
         # PPO hyperparameters
         self.gamma = params.gamma
@@ -43,7 +45,7 @@ class MAPPOAgent:
             action_dim=action_dim,
             n_agents=n_agents,
             discrete=discrete,
-            share_actor=share_actor,
+            share_actor=self.share_actor,
         ).to(device)
 
         # Create old network for PPO
@@ -53,7 +55,7 @@ class MAPPOAgent:
             action_dim=action_dim,
             n_agents=n_agents,
             discrete=discrete,
-            share_actor=share_actor,
+            share_actor=self.share_actor,
         ).to(device)
 
         self.network_old.load_state_dict(self.network.state_dict())
@@ -65,14 +67,25 @@ class MAPPOAgent:
         self.reset_buffers()
 
     def reset_buffers(self):
-        """Reset experience buffers for all agents"""
-        self.observations = [[] for _ in range(self.n_agents)]
-        self.global_states = []
-        self.actions = [[] for _ in range(self.n_agents)]
-        self.rewards = [[] for _ in range(self.n_agents)]
-        self.log_probs = [[] for _ in range(self.n_agents)]
-        self.values = []  # Shared values from centralized critic
-        self.dones = [[] for _ in range(self.n_agents)]
+        """Reset experience buffers - separate for each parallel environment"""
+        # Buffers indexed by [env_idx][agent_idx]
+        self.observations = [
+            [[] for _ in range(self.n_agents)] for _ in range(self.n_parallel_envs)
+        ]
+        self.global_states = [[] for _ in range(self.n_parallel_envs)]
+        self.actions = [
+            [[] for _ in range(self.n_agents)] for _ in range(self.n_parallel_envs)
+        ]
+        self.rewards = [
+            [[] for _ in range(self.n_agents)] for _ in range(self.n_parallel_envs)
+        ]
+        self.log_probs = [
+            [[] for _ in range(self.n_agents)] for _ in range(self.n_parallel_envs)
+        ]
+        self.values = [[] for _ in range(self.n_parallel_envs)]
+        self.dones = [
+            [[] for _ in range(self.n_agents)] for _ in range(self.n_parallel_envs)
+        ]
 
     def get_actions(self, observations, global_state, deterministic=False):
         """
@@ -114,60 +127,108 @@ class MAPPOAgent:
         return torch.stack(actions), torch.cat(log_probs), value
 
     def store_transition(
-        self, observations, global_state, actions, rewards, log_probs, value, dones
+        self,
+        env_idx,
+        observations,
+        global_state,
+        actions,
+        rewards,
+        log_probs,
+        value,
+        dones,
     ):
-        """Store transitions for all agents"""
+        """Store transition for a specific environment"""
         # Store global state (shared)
-        self.global_states.append(global_state)
+        self.global_states[env_idx].append(
+            torch.FloatTensor(global_state).to(self.device)
+        )
 
         # Store value (shared)
-        self.values.append(value)
+        self.values[env_idx].append(
+            torch.tensor(value, dtype=torch.float32).to(self.device)
+        )
 
         # Store per-agent data
         for agent_idx in range(self.n_agents):
-            self.observations[agent_idx].append(observations[agent_idx])
-            self.actions[agent_idx].append(actions[agent_idx])
-            self.rewards[agent_idx].append(rewards[agent_idx])
-            self.log_probs[agent_idx].append(log_probs[agent_idx])
-            self.dones[agent_idx].append(dones[agent_idx])
+            # Observation
+            self.observations[env_idx][agent_idx].append(
+                torch.FloatTensor(observations[agent_idx]).to(self.device)
+            )
 
-    def compute_returns_and_advantages(self, next_value=0):
-        """Compute returns and advantages using shared values"""
-        if not torch.is_tensor(next_value):
-            next_value = torch.tensor(next_value, dtype=torch.float32).to(self.device)
+            # Action
+            self.actions[env_idx][agent_idx].append(
+                torch.FloatTensor(actions[agent_idx]).to(self.device)
+            )
 
-        # Use shared values from centralized critic
-        values = torch.cat([torch.cat(self.values).detach(), next_value.unsqueeze(0)])
+            # Reward, log_prob, done
+            self.rewards[env_idx][agent_idx].append(
+                torch.tensor(rewards[agent_idx], dtype=torch.float32).to(self.device)
+            )
+            self.log_probs[env_idx][agent_idx].append(
+                torch.tensor(log_probs[agent_idx], dtype=torch.float32).to(self.device)
+            )
+            self.dones[env_idx][agent_idx].append(
+                torch.tensor(dones[agent_idx], dtype=torch.float32).to(self.device)
+            )
 
-        # Compute advantages for each agent separately
+    def compute_returns_and_advantages(self, next_values):
+        """
+        Compute returns and advantages using per-environment final values
+
+        Args:
+            next_values: List or array of final values, one per environment
+        """
         all_returns = []
         all_advantages = []
 
-        for agent_idx in range(self.n_agents):
-            rewards = torch.stack(self.rewards[agent_idx])
-            dones = torch.cat(
-                [torch.stack(self.dones[agent_idx]), torch.zeros(1, device=self.device)]
-            )
+        # Process each environment separately
+        for env_idx in range(self.n_parallel_envs):
+            if len(self.values[env_idx]) == 0:
+                continue  # Skip if no data for this env
 
-            # Initialize advantages
-            advantages = torch.zeros_like(rewards)
-
-            # Compute GAE
-            gae = torch.tensor(0.0, device=self.device)
-            for step in reversed(range(len(rewards))):
-                delta = (
-                    rewards[step]
-                    + self.gamma * values[step + 1] * (1 - dones[step])
-                    - values[step]
+            next_value = next_values[env_idx]
+            if not torch.is_tensor(next_value):
+                next_value = torch.tensor(next_value, dtype=torch.float32).to(
+                    self.device
                 )
-                gae = delta + self.gamma * self.gae_lambda * (1 - dones[step]) * gae
-                advantages[step] = gae
 
-            # Compute returns
-            returns = (advantages + values[:-1]).detach()
+            # Use values from this environment's trajectory
+            env_values = self.values[env_idx][:]
+            env_values.append(next_value.unsqueeze(0))
+            env_values = torch.cat(env_values)
 
-            all_returns.append(returns)
-            all_advantages.append(advantages.detach())
+            # Compute advantages for each agent in this environment
+            for agent_idx in range(self.n_agents):
+                if len(self.rewards[env_idx][agent_idx]) == 0:
+                    continue
+
+                rewards = torch.stack(self.rewards[env_idx][agent_idx])
+                dones = torch.cat(
+                    [
+                        torch.stack(self.dones[env_idx][agent_idx]),
+                        torch.zeros(1, device=self.device),
+                    ]
+                )
+
+                # Initialize advantages
+                advantages = torch.zeros_like(rewards)
+
+                # Compute GAE
+                gae = torch.tensor(0.0, device=self.device)
+                for step in reversed(range(len(rewards))):
+                    delta = (
+                        rewards[step]
+                        + self.gamma * env_values[step + 1] * (1 - dones[step])
+                        - env_values[step]
+                    )
+                    gae = delta + self.gamma * self.gae_lambda * (1 - dones[step]) * gae
+                    advantages[step] = gae
+
+                # Compute returns
+                returns = advantages + env_values[:-1]
+
+                all_returns.append(returns.detach())
+                all_advantages.append(advantages.detach())
 
         return all_returns, all_advantages
 
@@ -191,24 +252,49 @@ class MAPPOAgent:
         all_returns_combined = []
         all_advantages_combined = []
 
-        for agent_idx in range(self.n_agents):
-            # Normalize advantages for this agent
-            advantages = all_advantages[agent_idx]
-            advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+        # Iterate through each environment
+        for env_idx in range(self.n_parallel_envs):
+            if len(self.values[env_idx]) == 0:
+                continue  # Skip empty environments
 
-            # Stack data
-            all_obs.append(torch.stack(self.observations[agent_idx]))
-            all_actions.append(torch.stack(self.actions[agent_idx]))
-            all_old_log_probs.append(torch.stack(self.log_probs[agent_idx]))
-            all_returns_combined.append(all_returns[agent_idx])
-            all_advantages_combined.append(advantages)
+            # For this environment, iterate through each agent
+            for agent_idx in range(self.n_agents):
+                if len(self.observations[env_idx][agent_idx]) == 0:
+                    continue  # Skip if no data for this agent
 
-        # Repeat global states for each agent
-        global_states_stacked = torch.stack(self.global_states)
-        all_global_states = global_states_stacked.repeat(self.n_agents, 1)
+                # Get the index in the flattened advantages/returns list
+                # The compute_returns_and_advantages returns a flat list combining all envs and agents
+                data_idx = env_idx * self.n_agents + agent_idx
 
-        # Concatenate all agent data
+                if data_idx >= len(all_advantages):
+                    continue
+
+                # Normalize advantages for this agent in this environment
+                advantages = all_advantages[data_idx]
+                advantages = (advantages - advantages.mean()) / (
+                    advantages.std() + 1e-8
+                )
+
+                # Stack data for this agent in this environment
+                obs = torch.stack(self.observations[env_idx][agent_idx])
+                actions = torch.stack(self.actions[env_idx][agent_idx])
+                old_log_probs = torch.stack(self.log_probs[env_idx][agent_idx])
+                returns = all_returns[data_idx]
+
+                # Get corresponding global states (repeated for each agent's timestep)
+                global_states = torch.stack(self.global_states[env_idx])
+
+                # Append to combined lists
+                all_obs.append(obs)
+                all_global_states.append(global_states)
+                all_actions.append(actions)
+                all_old_log_probs.append(old_log_probs)
+                all_returns_combined.append(returns)
+                all_advantages_combined.append(advantages)
+
+        # Concatenate all data
         combined_obs = torch.cat(all_obs, dim=0).detach()
+        combined_global_states = torch.cat(all_global_states, dim=0).detach()
         combined_actions = torch.cat(all_actions, dim=0).detach()
         combined_old_log_probs = torch.cat(all_old_log_probs, dim=0).detach()
         combined_returns = torch.cat(all_returns_combined, dim=0)
@@ -217,7 +303,7 @@ class MAPPOAgent:
         # Create dataset
         dataset = TensorDataset(
             combined_obs,
-            all_global_states,
+            combined_global_states,
             combined_actions,
             combined_old_log_probs,
             combined_returns,
@@ -297,20 +383,64 @@ class MAPPOAgent:
 
         # Update each agent separately (independent actors)
         for agent_idx in range(self.n_agents):
-            # Normalize advantages
-            advantages = all_advantages[agent_idx]
-            advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+            # Collect data for this agent across all environments
+            agent_obs = []
+            agent_global_states = []
+            agent_actions = []
+            agent_old_log_probs = []
+            agent_returns = []
+            agent_advantages = []
 
-            returns = all_returns[agent_idx]
+            for env_idx in range(self.n_parallel_envs):
+                if len(self.observations[env_idx][agent_idx]) == 0:
+                    continue  # Skip if no data for this agent in this environment
 
-            # Stack data
-            obs = torch.stack(self.observations[agent_idx]).detach()
-            global_states = torch.stack(self.global_states).detach()
-            actions = torch.stack(self.actions[agent_idx]).detach()
-            old_log_probs = torch.stack(self.log_probs[agent_idx]).detach()
+                # Get the index in the flattened advantages/returns list
+                data_idx = env_idx * self.n_agents + agent_idx
 
+                if data_idx >= len(all_advantages):
+                    continue
+
+                # Normalize advantages for this agent in this environment
+                advantages = all_advantages[data_idx]
+                advantages = (advantages - advantages.mean()) / (
+                    advantages.std() + 1e-8
+                )
+
+                # Stack data
+                obs = torch.stack(self.observations[env_idx][agent_idx])
+                actions = torch.stack(self.actions[env_idx][agent_idx])
+                old_log_probs = torch.stack(self.log_probs[env_idx][agent_idx])
+                returns = all_returns[data_idx]
+                global_states = torch.stack(self.global_states[env_idx])
+
+                # Append to agent-specific lists
+                agent_obs.append(obs)
+                agent_global_states.append(global_states)
+                agent_actions.append(actions)
+                agent_old_log_probs.append(old_log_probs)
+                agent_returns.append(returns)
+                agent_advantages.append(advantages)
+
+            if len(agent_obs) == 0:
+                continue  # No data for this agent
+
+            # Concatenate data for this agent from all environments
+            obs_combined = torch.cat(agent_obs, dim=0).detach()
+            global_states_combined = torch.cat(agent_global_states, dim=0).detach()
+            actions_combined = torch.cat(agent_actions, dim=0).detach()
+            old_log_probs_combined = torch.cat(agent_old_log_probs, dim=0).detach()
+            returns_combined = torch.cat(agent_returns, dim=0)
+            advantages_combined = torch.cat(agent_advantages, dim=0)
+
+            # Create dataset for this agent
             dataset = TensorDataset(
-                obs, global_states, actions, old_log_probs, returns, advantages
+                obs_combined,
+                global_states_combined,
+                actions_combined,
+                old_log_probs_combined,
+                returns_combined,
+                advantages_combined,
             )
             dataloader = DataLoader(dataset, batch_size=minibatch_size, shuffle=True)
 

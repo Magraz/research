@@ -2,6 +2,7 @@ import numpy as np
 from pathlib import Path
 from collections import defaultdict
 import pickle
+import time
 
 from learning.algorithms.mappo.mappo import MAPPOAgent
 from learning.environments.types import EnvironmentEnum
@@ -14,17 +15,15 @@ import torch
 class VecMAPPOTrainer:
     def __init__(
         self,
-        env,
         env_name,
         n_agents,
         observation_dim,
         global_state_dim,
         action_dim,
         params,
-        dirs=None,
-        device="cpu",
-        share_actor=True,
-        n_parallel_envs=4,
+        dirs,
+        device: str,
+        n_parallel_envs: int,
     ):
         self.device = device
         self.dirs = dirs
@@ -34,8 +33,11 @@ class VecMAPPOTrainer:
         self.n_parallel_envs = n_parallel_envs
 
         # Create environment for evaluation
-        self.wrapped_env = EnvWrapper(
-            env=env, env_name=env_name, n_agents=self.n_agents
+        self.eval_env = make_vec_env(
+            self.env_name,
+            self.n_agents,
+            1,
+            use_async=False,
         )
 
         # Create vectorized environment using Gymnasium's API
@@ -61,7 +63,6 @@ class VecMAPPOTrainer:
             self.params,
             self.device,
             self.discrete,
-            share_actor,
             self.n_parallel_envs,
         )
 
@@ -69,6 +70,10 @@ class VecMAPPOTrainer:
         self.episode_rewards = []
         self.episode_lengths = []
         self.training_stats = defaultdict(list)
+
+        # Timing statistics
+        self.training_start_time = None
+        self.total_training_time = 0.0
 
     def collect_trajectory(self, max_steps):
         """
@@ -84,14 +89,13 @@ class VecMAPPOTrainer:
 
         # Reset environment
         obs, infos = self.vec_env.reset()
+        batch_size = obs.shape[0]
 
         total_step_count = 0
         episode_count = 0
-        steps_per_episode = []
         current_episode_steps = np.zeros(self.n_parallel_envs, dtype=np.int32)
 
-        for step in range(max_steps):
-            batch_size = obs.shape[0]
+        while total_step_count <= max_steps:
 
             # Construct global states for each environment
             # Shape: (n_envs, n_agents * obs_dim)
@@ -180,7 +184,6 @@ class VecMAPPOTrainer:
             # Check for episode terminations
             for env_idx in range(batch_size):
                 if dones[env_idx]:
-                    steps_per_episode.append(current_episode_steps[env_idx])
                     current_episode_steps[env_idx] = 0
                     episode_count += 1
 
@@ -203,11 +206,14 @@ class VecMAPPOTrainer:
                 )
                 final_values.append(value)
 
-        return total_step_count, episode_count, steps_per_episode, final_values
+        return total_step_count, episode_count, final_values
 
     def train(self, total_steps, batch_size, minibatches, epochs, log_every=10000):
         """Train MAPPO agent"""
         print(f"Starting MAPPO training for {total_steps} total environment steps...")
+
+        # Start timing
+        self.training_start_time = time.time()
 
         steps_completed = 0
         episodes_completed = 0
@@ -215,22 +221,29 @@ class VecMAPPOTrainer:
         self.training_stats["total_steps"] = []
         self.training_stats["reward"] = []
         self.training_stats["episodes"] = []
-        self.training_stats["steps_per_episode"] = []
+        self.training_stats["training_time"] = []
+        self.training_stats["collection_time"] = []
+        self.training_stats["update_time"] = []
+        self.training_stats["eval_time"] = []
 
         while steps_completed < total_steps:
             steps_to_collect = min(batch_size, total_steps - steps_completed)
 
-            # Collect trajectory
-            step_count, episode_count, steps_per_episode, final_values = (
-                self.collect_trajectory(max_steps=int(steps_to_collect))
+            # Time trajectory collection
+            collection_start = time.time()
+            step_count, episode_count, final_values = self.collect_trajectory(
+                max_steps=int(steps_to_collect)
             )
+            collection_time = time.time() - collection_start
 
-            # Update agent
+            # Time agent update
+            update_start = time.time()
             stats = self.agent.update(
                 next_value=final_values,
                 minibatch_size=batch_size // minibatches,
                 epochs=epochs,
             )
+            update_time = time.time() - update_start
 
             # Update tracking
             steps_completed += step_count
@@ -240,25 +253,42 @@ class VecMAPPOTrainer:
             for key, value in stats.items():
                 self.training_stats[key].append(value)
 
-            # Evaluate
+            # Time evaluation
+            eval_start = time.time()
             rew_per_episode = []
             eval_episodes = 10
             while len(rew_per_episode) < eval_episodes:
                 rew_per_episode.append(self.evaluate())
             eval_rewards = np.array(rew_per_episode).mean()
+            eval_time = time.time() - eval_start
 
+            # Calculate elapsed time
+            elapsed_time = time.time() - self.training_start_time
+            self.total_training_time = elapsed_time
+
+            # Store timing statistics
             self.training_stats["total_steps"].append(steps_completed)
             self.training_stats["reward"].append(eval_rewards)
             self.training_stats["episodes"].append(episodes_completed)
-            self.training_stats["steps_per_episode"].extend(steps_per_episode)
+            self.training_stats["training_time"].append(elapsed_time)
+            self.training_stats["collection_time"].append(collection_time)
+            self.training_stats["update_time"].append(update_time)
+            self.training_stats["eval_time"].append(eval_time)
+
+            # Calculate throughput
+            steps_per_second = steps_completed / elapsed_time if elapsed_time > 0 else 0
 
             # Log progress
             if steps_completed % log_every < step_count:
                 print(
                     f"Steps: {steps_completed}/{total_steps} ({steps_completed/total_steps*100:.1f}%) | "
                     f"Episodes: {episodes_completed} | "
-                    f"Recent Avg Reward: {self.training_stats['reward'][-1]:.2f} | "
-                    f"Last Batch Steps: {step_count}"
+                    f"Reward: {self.training_stats['reward'][-1]:.2f} | "
+                    f"Time: {elapsed_time:.1f}s | "
+                    f"FPS: {steps_per_second:.1f} | "
+                    f"Collection: {collection_time:.2f}s | "
+                    f"Update: {update_time:.2f}s | "
+                    f"Eval: {eval_time:.2f}s"
                 )
 
                 self.save_training_stats(
@@ -266,9 +296,28 @@ class VecMAPPOTrainer:
                 )
                 self.save_agent(self.dirs["models"] / "models_checkpoint.pth")
 
-        print(
-            f"Training completed! Total steps: {steps_completed}, Episodes: {episodes_completed}"
-        )
+        # Close envs
+        self.close_environments()
+
+        # Final timing summary
+        total_time = time.time() - self.training_start_time
+        avg_collection_time = np.mean(self.training_stats["collection_time"])
+        avg_update_time = np.mean(self.training_stats["update_time"])
+        avg_eval_time = np.mean(self.training_stats["eval_time"])
+        final_fps = steps_completed / total_time
+
+        print(f"\n{'='*60}")
+        print(f"Training completed!")
+        print(f"{'='*60}")
+        print(f"Total steps:          {steps_completed}")
+        print(f"Total episodes:       {episodes_completed}")
+        print(f"Total time:           {total_time:.2f}s ({total_time/60:.2f}m)")
+        print(f"Final FPS:            {final_fps:.1f} steps/second")
+        print(f"\nTime breakdown:")
+        print(f"  Avg collection:     {avg_collection_time:.3f}s")
+        print(f"  Avg update:         {avg_update_time:.3f}s")
+        print(f"  Avg evaluation:     {avg_eval_time:.3f}s")
+        print(f"{'='*60}\n")
 
     def evaluate(self, render=False):
         """Evaluate current policy"""
@@ -278,26 +327,35 @@ class VecMAPPOTrainer:
 
         with torch.no_grad():
 
-            obs = self.wrapped_env.reset()
+            obs, _ = self.eval_env.reset()
 
             episode_rew = 0
 
             while True:
 
-                global_state = np.concatenate(obs)
+                global_state = np.concatenate(obs.squeeze(0))
 
                 actions, _, _ = self.agent.get_actions(
                     obs, global_state, deterministic=True
                 )
 
-                obs, global_reward, local_rewards, terminated, truncated, info = (
-                    self.wrapped_env.step(actions)
-                )
+                actions = actions.cpu().detach().numpy()
 
-                episode_rew += local_rewards[0] + global_reward
+                if self.discrete:
+                    # For discrete actions, squeeze the last dimension
+                    # Shape: (n_envs, n_agents, 1) -> (n_envs, n_agents)
+                    if actions.ndim == 3 and actions.shape[-1] == 1:
+                        actions = actions.squeeze(-1)
+
+                    # Ensure integer type
+                    actions = actions.astype(np.int32)
+
+                obs, rewards, terminated, truncated, info = self.eval_env.step(actions)
+
+                episode_rew += rewards
 
                 if render:
-                    self.wrapped_env.env.render()
+                    self.eval_env.env.render()
 
                 if terminated or truncated:
                     break
@@ -306,6 +364,15 @@ class VecMAPPOTrainer:
         self.agent.network_old.train()
 
         return episode_rew
+
+    def close_environments(self):
+        """Properly close all vectorized environments"""
+        self.vec_env.close()
+        self.eval_env.close()
+
+    def __del__(self):
+        """Destructor to ensure environments are closed"""
+        self.close_environments()
 
     def save_agent(self, path):
         """Save MAPPO agent"""

@@ -371,17 +371,29 @@ class MAPPONetwork(nn.Module):
 
         if share_actor:
             # Single shared actor for all agents
-            self.actor = MAPPO_Hybrid_Actor(observation_dim, action_dim, hidden_dim)
+            if self.discrete:
+                self.actor = MAPPOActor(
+                    observation_dim, action_dim, hidden_dim, self.discrete
+                )
+            else:
+                self.actor = MAPPO_Hybrid_Actor(observation_dim, action_dim, hidden_dim)
+
         else:
             # Separate actor for each agent
-            self.actors = nn.ModuleList(
-                [
-                    MAPPO_Hybrid_Actor(
-                        observation_dim, action_dim, hidden_dim, discrete
-                    )
-                    for _ in range(n_agents)
-                ]
-            )
+            if self.discrete:
+                self.actors = nn.ModuleList(
+                    [
+                        MAPPOActor(observation_dim, action_dim, hidden_dim, discrete)
+                        for _ in range(n_agents)
+                    ]
+                )
+            else:
+                self.actors = nn.ModuleList(
+                    [
+                        MAPPO_Hybrid_Actor(observation_dim, action_dim, hidden_dim)
+                        for _ in range(n_agents)
+                    ]
+                )
 
         # Centralized critic (always shared)
         self.critic = MAPPOCritic(global_state_dim, hidden_dim * 2)

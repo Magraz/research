@@ -5,6 +5,8 @@ from learning.algorithms.create_env import create_env
 from pathlib import Path
 
 from learning.algorithms.mappo.trainer import MAPPOTrainer
+from learning.algorithms.mappo.vec_trainer import VecMAPPOTrainer
+
 
 import torch
 import numpy as np
@@ -54,11 +56,24 @@ class MAPPO_Runner(Runner):
         print(f"Using device: {self.exp_config.device}")
 
         # Create environment
-        self.env, state_dim, action_dim = create_env(env_config)
+        self.env, state_dim, action_dim = create_env(
+            self.env_config.environment, self.env_config.n_agents
+        )
 
         # Create trainer
-        self.trainer = MAPPOTrainer(
-            self.env,
+        # self.trainer = MAPPOTrainer(
+        #     self.env,
+        #     self.env_config.environment,
+        #     self.env_config.n_agents,
+        #     state_dim,
+        #     state_dim * self.env_config.n_agents,
+        #     action_dim,
+        #     self.params,
+        #     self.dirs,
+        #     self.device,
+        # )
+
+        self.trainer = VecMAPPOTrainer(
             self.env_config.environment,
             self.env_config.n_agents,
             state_dim,
@@ -67,6 +82,7 @@ class MAPPO_Runner(Runner):
             self.params,
             self.dirs,
             self.device,
+            n_parallel_envs=self.env_config.n_envs,
         )
 
     def train(self):

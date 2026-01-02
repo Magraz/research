@@ -30,9 +30,7 @@ from learning.environments.box2d_salp.utils import (
 class SalpChainEnv(gym.Env):
     metadata = {"render_fps": 30}
 
-    def __init__(
-        self, render_mode=None, n_agents=2, n_target_areas=1, sensing_radius=20
-    ):
+    def __init__(self, render_mode=None, n_agents=2, n_target_areas=1):
         super().__init__()
 
         self.n_agents = n_agents
@@ -46,18 +44,11 @@ class SalpChainEnv(gym.Env):
         self.max_joints_per_agent = 2
 
         # Update action space to include detach action
-        self.action_space = spaces.Dict(
-            {
-                "movement": spaces.Box(
-                    low=-1, high=1, shape=(self.n_agents, 2), dtype=np.float32
-                ),
-                "attach": spaces.MultiDiscrete(
-                    [1] * self.n_agents
-                ),  # Each agent has a 0/1 choice
-                "detach": spaces.MultiDiscrete(
-                    [1] * self.n_agents
-                ),  # Each agent has a 0/1 choice
-            }
+        self.action_space = spaces.Box(
+            low=-1.0,
+            high=1.0,
+            shape=(self.n_agents, 4),  # (n_agents, action_dim)
+            dtype=np.float32,
         )
 
         self.observation_space = spaces.Box(
@@ -110,7 +101,7 @@ class SalpChainEnv(gym.Env):
         self.max_joints_per_agent = 2
 
         # Add sector sensing threshold
-        self.sector_sensor_radius = sensing_radius
+        self.sector_sensor_radius = 20
 
         # Add parameters for nearest neighbor detection
         self.neighbor_detection_range = 3.0  # Maximum range to detect neighbors

@@ -20,7 +20,6 @@ class Params:
     val_coef: float = 0.5
     std_coef: float = 0.0
     grad_clip: float = 0.5
-    share_actor: bool = True  # Whether to share actor parameters
 
 
 @dataclass

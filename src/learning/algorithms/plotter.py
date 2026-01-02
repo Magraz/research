@@ -127,7 +127,7 @@ if __name__ == "__main__":
     args = vars(args)
 
     # Set base_config path
-    dir_path = Path(__file__).parent.parent.parent
+    dir_path = Path(__file__).parent.parent
 
     # Set configuration folder
     results_dir = dir_path / "experiments" / "results" / args["batch"]
